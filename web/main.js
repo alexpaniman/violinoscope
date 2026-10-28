@@ -584,6 +584,8 @@
       [k('Esc'), 'Timeline: back to where it was before the last jump in'],
       [`${k('W')} ${k('S')} · ${k('A')} ${k('D')}`, 'Flame chart and flame graph: zoom · pan'],
       [k('F'), 'All of it again; or double-click empty space'], ['Double-click', 'A span: fit it'],
+      [`${k('Shift')}+click names`, 'Phases: pick violins to merge'], ['Drag a name', 'Phases: onto another violin, merge them'],
+      ['Double-click a name', 'Phases: rename it'],
       ['Paste', `A trace id or fingerprint: select its ${esc(X.UNIT)} span`], [k('Esc'), 'Close, then clear the selection'], [k('?'), 'This sheet'],
     ];
     const runs = X.RUNS.map((r, j) => `<tr><td>${X.fmtInt(r.units)}</td><td>${esc(X.runTitle(j))}</td></tr>`).join('');
@@ -612,7 +614,7 @@
     X.on('name', renderNameChip);
 
     const stage = $('stage');
-    const own = (e) => e.target.closest('#controls, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-merge, #v-hide');
+    const own = (e) => e.target.closest('#controls, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-merge, #v-hide, #layout-menu, .name-edit');
     const at = (e) => { const b = stage.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
     stage.addEventListener('pointermove', (e) => {
       if (own(e)) { if (S.view === 'violins') X.violins.leave(e); return; }
@@ -673,6 +675,7 @@
       if (S.card !== null && !e.target.closest('#card-pop') && !e.target.closest('[data-col]')) X.panel.closeCard();
       if (!e.target.closest('#v-factor-menu, [data-pill]')) X.violins.closeMenu();
       if (!e.target.closest('#v-add, [data-add]')) X.edit.closeAdd();
+      if (!e.target.closest('#layout-menu, #layout-btn')) X.share.close();
     });
     $('whatif-clear').addEventListener('click', () => { for (const id of [...S.factors.keys()]) S.factors.delete(id); X.setFactor('__none__', 1); });
     document.addEventListener('paste', (e) => {
@@ -685,6 +688,7 @@
         if (!$('keys').hidden) toggleKeys(false);
         else if (!$('rangecard').hidden) toggleRange(false);
         else if (X.edit.closeAdd()) { /* closed the + list */ }
+        else if (X.share.close()) { /* closed the layout menu */ }
         else if (X.violins.closeMenu()) { /* closed the factors */ }
         else if (S.card !== null) X.panel.closeCard();
         else if (X.edit.clearPicked()) { /* let the picked violins go */ }
@@ -736,6 +740,7 @@
     X.tokens();
     X.violins.init();
     X.edit.init();
+    X.share.init();
     X.flame.init();
     X.spans.init();
     X.panel.init();

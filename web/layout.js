@@ -102,17 +102,22 @@
   // ---------------------------------------------------------------------------------------------------------
   // Nodes: paths by their key, merged nodes as g1, g2, …, and the rest.
 
-  const L = { shown: new Set(), groups: new Map(), next: 1 };
+  // Names: what the viewer called a path or the rest, when not what its spans are called.
+  const L = { shown: new Set(), groups: new Map(), names: new Map(), next: 1 };
   let memberOf = new Map();
 
   const isPath = (id) => pathByKey.has(id);
   const exists = (id) => isPath(id) || L.groups.has(id) || id === REST;
   const rootKey = () => paths[rootPath].key;
-  function label(id) {
+  function spanName(id) {
     if (isPath(id)) return paths[pathByKey.get(id)].name;
-    if (L.groups.has(id)) return L.groups.get(id).label;
     if (id === REST) return 'Not under any span';
-    return id;
+    return null;
+  }
+  function label(id) {
+    if (L.names.has(id)) return L.names.get(id);
+    if (L.groups.has(id)) return L.groups.get(id).label;
+    return spanName(id) || id;
   }
 
   // The path a node hangs from: a path its own; a merged node the nearest path holding all its members; the rest
@@ -261,25 +266,43 @@
   function add(ids, under) {
     for (const id of ids) for (let k = id; k !== null && k !== under && k !== rootKey(); k = parentOf(k)) L.shown.add(k);
   }
+  // Whether two shown nodes can be one: neither the root, nor inside the other.
+  const canMerge = (x, y) => exists(x) && exists(y) && x !== y && x !== rootKey() && y !== rootKey() && !inside(x, y) && !inside(y, x);
   // Several nodes as one, under the nearest path holding them all; a node inside another one picked goes with it.
-  function merge(ids, name) {
+  // Members of one merged node stay in it, as the new one; else the new one takes the place of `at`, when given.
+  function merge(ids, name, at) {
     const pick = [...new Set(ids)].filter((id) => exists(id) && id !== rootKey());
     const members = pick.filter((x) => !pick.some((y) => y !== x && inside(x, y)));
     if (members.length < 2) { add(members, null); return members[0] || null; }
+    const from = new Set(members.map((m) => memberOf.get(m) || null));
+    const home = at ? memberOf.get(at) || null : from.size === 1 ? [...from][0] : null;
     for (const m of members) {
       const g = memberOf.get(m);
-      if (!g) continue;
-      const d = L.groups.get(g);
-      d.members = d.members.filter((x) => x !== m);
-      if (d.members.length < 2) ungroup(g);
+      if (g) L.groups.get(g).members = L.groups.get(g).members.filter((x) => x !== m);
     }
     const id = `g${L.next++}`;
     L.groups.set(id, { label: name || suggestName(members), members });
+    if (home) L.groups.get(home).members.push(id);
     relink();
+    for (const g of [...from, home]) if (g && L.groups.has(g) && L.groups.get(g).members.length < 2) ungroup(g);
     for (const m of members) hide(m);
     L.shown.add(id);
     for (let k = parentOf(id); k !== null && k !== rootKey(); k = parentOf(k)) L.shown.add(k);
     return id;
+  }
+  // A node into a merged one, which stays where it is, open or not as it was.
+  function join(id, into) {
+    if (!L.groups.has(into) || !canMerge(id, into)) return null;
+    const was = memberOf.get(id), d = L.groups.get(into);
+    if (was) L.groups.get(was).members = L.groups.get(was).members.filter((x) => x !== id);
+    const open = d.members.some((m) => L.shown.has(m));
+    d.members.push(id);
+    relink();
+    if (was && L.groups.has(was) && L.groups.get(was).members.length < 2) ungroup(was);
+    if (open) L.shown.add(id); else hide(id);
+    L.shown.add(into);
+    for (let k = parentOf(into); k !== null && k !== rootKey(); k = parentOf(k)) L.shown.add(k);
+    return into;
   }
   function ungroup(id) {
     const d = L.groups.get(id);
@@ -290,7 +313,13 @@
     relink();
     if (was) for (const m of d.members) L.shown.add(m);
   }
-  function rename(id, name) { if (L.groups.has(id) && name.trim()) L.groups.get(id).label = name.trim(); }
+  // Any node can be renamed; a path or the rest given back its spans' name, or none, is called that again.
+  function rename(id, name) {
+    const v = (name || '').trim();
+    if (L.groups.has(id)) { if (v) L.groups.get(id).label = v; return; }
+    if (!spanName(id)) return;
+    if (!v || v === spanName(id)) L.names.delete(id); else L.names.set(id, v);
+  }
   // What a merged node is called before it is named: what its members' names begin with, else the first's and more.
   function suggestName(members) {
     const names = members.map(label);
@@ -306,8 +335,8 @@
     const q = (query || '').trim().toLowerCase(), out = [];
     const walk = (id, trail) => {
       for (const k of kidsOfNode(id)) {
-        const shown = shownOf(k), name = label(k);
-        if (!shown && (!q || name.toLowerCase().includes(q))) out.push({ id: k, label: name, where: trail.join(' › '), group: L.groups.has(k) });
+        const shown = shownOf(k), name = label(k), found = (s) => s && s.toLowerCase().includes(q);
+        if (!shown && (!q || found(name) || found(spanName(k)))) out.push({ id: k, label: name, where: trail.join(' › '), group: L.groups.has(k) });
         if (q) walk(k, [...trail, name]);
       }
     };
@@ -414,35 +443,96 @@
   }
 
   // ---------------------------------------------------------------------------------------------------------
-  // Keeping it: in the browser, for each kind of unit, by path, so it survives building the data again.
+  // Keeping it. A layout is what is shown, merged and renamed, by path, so it survives building the data again. One
+  // saved into the page (data/layout.js) is where everyone starts; the viewer's own changes are kept in the browser,
+  // for each kind of unit, until one is saved into the page after them; a link can carry one too.
+
+  const saved = () => window.EXPLORER_LAYOUT || null;
+  const savedAt = () => (saved() ? saved().saved : null);
+  function state() {
+    return { shown: [...L.shown], next: L.next, groups: [...L.groups].map(([id, d]) => [id, d.label, d.members]), names: [...L.names] };
+  }
+  // A layout from anywhere: what no longer exists is left out, and a merged node left with one member goes.
+  function load(s) {
+    L.shown = new Set(); L.groups = new Map(); L.names = new Map(); L.next = 1;
+    if (!s) return false;
+    const groups = new Map((s.groups || []).map(([id, name, members]) => [id, { label: name, members }]));
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const [id, d] of groups) {
+        const ok = d.members.filter((m) => isPath(m) || m === REST || groups.has(m));
+        if (ok.length !== d.members.length) { d.members = ok; changed = true; }
+        if (ok.length < 2) { groups.delete(id); changed = true; }
+      }
+    }
+    L.groups = groups;
+    for (const id of groups.keys()) L.next = Math.max(L.next, Number(id.slice(1)) + 1 || 1);
+    L.next = Math.max(L.next, s.next || 1);
+    for (const [id, name] of s.names || []) if (spanName(id) && name) L.names.set(id, name);
+    relink();
+    for (const id of s.shown || []) if (exists(id)) L.shown.add(id);
+    return L.shown.size > 0;
+  }
+  function fresh() { load(null); relink(); expand(rootKey()); }
+  // Back to where everyone starts.
+  function reset() { if (!(saved() && load(saved().layout))) fresh(); }
 
   const storeKey = () => `violinoscope.layout.${paths[rootPath].name}`;
   function save() {
     try {
-      localStorage.setItem(storeKey(), JSON.stringify({ shown: [...L.shown], next: L.next,
-        groups: [...L.groups].map(([id, d]) => [id, d.label, d.members]) }));
+      localStorage.setItem(storeKey(), JSON.stringify({ base: savedAt(), layout: state() }));
     } catch (e) { /* storage off: the layout lasts as long as the page */ }
   }
   function restore() {
-    let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(storeKey()) || 'null'); } catch (e) { saved = null; }
-    if (!saved) return false;
-    L.next = saved.next || 1;
-    for (const [id, name, members] of saved.groups || []) {
-      const ok = members.filter((m) => isPath(m) || m === REST || L.groups.has(m));
-      if (ok.length >= 2) L.groups.set(id, { label: name, members: ok });
-    }
-    relink();
-    for (const id of saved.shown || []) if (exists(id)) L.shown.add(id);
-    return L.shown.size > 0;
+    let own = null;
+    try { own = JSON.parse(localStorage.getItem(storeKey()) || 'null'); } catch (e) { own = null; }
+    if (!own) return false;
+    // Kept before it was called a layout, or changed since the one saved into the page: still the viewer's.
+    if (!own.layout) own = { base: null, layout: own };
+    return (own.base || null) === savedAt() && load(own.layout);
   }
 
+  // In a link: after #layout=, deflated JSON in base64url, or plain JSON where the browser can't deflate.
+  const B64 = { '+': '-', '/': '_', '-': '+', _: '/' };
+  function toB64(bytes) {
+    let s = '';
+    for (let k = 0; k < bytes.length; k += 0x8000) s += String.fromCharCode(...bytes.subarray(k, k + 0x8000));
+    return btoa(s).replace(/[+/]/g, (c) => B64[c]).replace(/=+$/, '');
+  }
+  const fromB64 = (s) => Uint8Array.from(atob(s.replace(/[-_]/g, (c) => B64[c])), (c) => c.charCodeAt(0));
+  const pipe = (bytes, stream) => new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer();
+  async function encode(s) {
+    const json = new TextEncoder().encode(JSON.stringify(s));
+    if (typeof CompressionStream === 'undefined') return `j${toB64(json)}`;
+    return `z${toB64(new Uint8Array(await pipe(json, new CompressionStream('deflate-raw'))))}`;
+  }
+  async function decode(code) {
+    const bytes = fromB64(code.slice(1));
+    const json = code[0] === 'z' ? new Uint8Array(await pipe(bytes, new DecompressionStream('deflate-raw'))) : bytes;
+    return JSON.parse(new TextDecoder().decode(json));
+  }
+  async function link() {
+    const base = location.href.split('#')[0];
+    return `${base}#layout=${await encode(state())}`;
+  }
+  const linked = (async () => {
+    const m = /[#&]layout=([^&]+)/.exec(location.hash);
+    if (!m) return null;
+    try { return await decode(m[1]); } catch (e) { return null; }
+  })();
+
   function start() {
-    ready = true;
     if (!meta.unit) X.UNIT = paths[rootPath].name;
-    relink();
-    if (!restore()) { L.shown.clear(); expand(rootKey()); }
-    apply();
+    linked.then((fromLink) => {
+      ready = true;
+      relink();
+      if (fromLink && load(fromLink)) {
+        // Once opened, it is the viewer's own: a reload keeps their changes, not the link's.
+        try { history.replaceState(null, '', location.href.split('#')[0]); } catch (e) { /* the address stays */ }
+        setTimeout(() => X.toast('Opened with the violins from the link'), 0);
+      } else if (!restore()) reset();
+      apply();
+    });
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -454,7 +544,7 @@
     get version() { return version; },
     progress: () => [X.chunksLoaded(), X.chunkCount],
     rootKey: () => (ready ? rootKey() : null),
-    label, inside, parentOf,
+    label, spanName, inside, parentOf, canMerge,
     candidates: (under, query) => candidates(under === X.ROOT ? rootKey() : under, query),
     kids: (id) => kidsOfNode(id === X.ROOT ? rootKey() : id),
     shown: (id) => shownOf(id === X.ROOT ? rootKey() : id),
@@ -468,10 +558,15 @@
     hide: change(hide),
     add: change((ids, under) => add(ids, under === X.ROOT ? rootKey() : under)),
     merge: change(merge),
+    join: change(join),
     ungroup: change(ungroup),
     rename: change(rename),
     suggestName: (ids) => suggestName(ids),
-    reset: change(() => { L.shown.clear(); L.groups.clear(); L.next = 1; relink(); expand(rootKey()); }),
+    reset: change(reset),
+    // Sharing: what is shown as data, a link that opens it, and the layout saved into the page, once it is saved.
+    state, link,
+    get saved() { return saved(); },
+    savedAs(doc) { window.EXPLORER_LAYOUT = doc; save(); },
     // The column a span counts toward, by its unit and row.
     partOfRow: (i, r) => (ready && units[i] ? ownerOf[units[i].rowPath[r]] : -1),
     partOfPath: (p) => (ready ? ownerOf[p] : -1),

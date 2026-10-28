@@ -1,18 +1,24 @@
 // Changing which violins show. The + at the end of a column's children opens a list of what it has that is not
 // shown, largest first, with a filter that looks through everything inside it: tick some and add them each as a
 // violin, or as one merged violin under a name. Shift and a click on violins' names picks them; with two or more
-// picked, a bar merges them. A × by the name under the pointer hides that violin; its parent still counts the time.
+// picked, a bar merges them. A × where the line meets the name of the violin under the pointer hides that violin; its
+// parent still counts the time. A name carried onto another column shows what it will do; a double-click on a name
+// types over it.
 (function () {
   'use strict';
   const X = window.TX;
   const { $, esc, clamp } = X;
 
-  let menu, bar, hideBtn;
+  let menu, bar, hideBtn, ghost;
   let under = null, query = '', ticked = new Set(), naming = false, rows = [];
   X.picked = new Set();
 
   function init() {
     menu = $('v-add'); bar = $('v-merge'); hideBtn = $('v-hide');
+    ghost = document.createElement('div');
+    ghost.className = 'lift-ghost';
+    ghost.hidden = true;
+    $('violins').appendChild(ghost);
     menu.addEventListener('input', (e) => {
       if (!e.target.matches('[data-filter]')) return;
       query = e.target.value;
@@ -168,16 +174,55 @@
   }
 
   // ---------------------------------------------------------------------------------------------------------
-  // The × by the name under the pointer, at (x, y) on the stage: where the slanted name starts.
+  // The × of the violin under the pointer, centred where its line meets its name, at (x, y) on the stage.
 
   function showHide(at) {
     if (!at) { if (!hideBtn.matches(':hover')) hideBtn.hidden = true; return; }
     hideBtn.dataset.id = at.id;
     hideBtn.title = `Hide ${at.label}: its parent still counts its time`;
     hideBtn.setAttribute('aria-label', `Hide ${at.label}`);
-    hideBtn.style.transform = `translate(${Math.round(at.x + 4)}px, ${Math.round(at.y - 2)}px)`;
+    hideBtn.style.transform = `translate(${Math.round(at.x - 8)}px, ${Math.round(at.y - 17)}px)`;
     hideBtn.hidden = false;
   }
 
-  X.edit = { init, openAdd, closeAdd, pick, clearPicked, showHide, get open() { return !menu.hidden; } };
+  // A carried name by the pointer, and what dropping it does there.
+  function showLift(name, px, py, onto) {
+    if (name === null) { ghost.hidden = true; return; }
+    const what = onto === null ? 'Drop it on another violin to merge them'
+      : `${X.layout.isMerged(onto) ? 'Add to' : 'Merge with'} ${X.layout.label(onto)}`;
+    ghost.innerHTML = `<b>${esc(name)}</b><span>${esc(what)}</span>`;
+    ghost.classList.toggle('off', onto === null);
+    ghost.style.transform = `translate(${Math.round(px + 14)}px, ${Math.round(py + 12)}px)`;
+    ghost.hidden = false;
+  }
+
+  // Typing over a name, slanted as it is: Enter or a click away keeps it, Esc doesn't; a span's own name, or none,
+  // gives it back.
+  function rename(id) {
+    const at = X.violins.nameAt(id);
+    if (!at) return;
+    const input = document.createElement('input');
+    input.className = 'name-edit';
+    input.value = X.layout.label(id);
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', `New name for ${X.layout.label(id)}`);
+    input.style.fontSize = `${at.size * at.z}px`;
+    input.style.width = `${Math.round(Math.max(at.len + 48, 180) * at.z)}px`;
+    input.style.transform = `translate(${Math.round(at.x)}px, ${Math.round(at.y)}px) rotate(${at.deg}deg) translate(-100%, -5px)`;
+    let keep = true;
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); keep = false; input.blur(); }
+    });
+    input.addEventListener('blur', () => {
+      input.remove();
+      if (keep && input.value.trim() !== X.layout.label(id)) X.layout.rename(id, input.value);
+    });
+    $('violins').appendChild(input);
+    input.focus({ preventScroll: true });
+    input.select();
+  }
+
+  X.edit = { init, openAdd, closeAdd, pick, clearPicked, showHide, showLift, rename, get open() { return !menu.hidden; } };
 })();

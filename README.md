@@ -41,11 +41,22 @@ nothing from outside `out/`.
   - a triangle opens a violin into the spans it calls, its larger ones, or closes it;
   - a + at the end of a violin's children lists what is not shown, largest first, with a filter over everything
     inside it: add them each, or as one violin, their time together, under a name;
-  - Shift and a click on names picks violins to merge; a × by a name hides it, and its parent still counts the time;
+  - a name dragged onto another violin merges the two, or adds it to that one when it is merged already; Shift and a
+    click on names picks several to merge;
+  - a double-click on a name renames it, any violin, not only merged ones;
+  - hovering a violin shows a × where its line meets its name, which hides it; its parent still counts the time;
   - a click on a name opens its card, with its numbers, and hiding, renaming or splitting up a merged violin.
 
-  The left and right halves are two sets of groups; below, when in the unit each violin runs. A what-if factor on
-  any violin projects every view. What is shown is kept in the browser, for each kind of unit.
+  The left and right halves are two sets of groups. Below them, "When it runs": each unit stretched to the same
+  height, start at the top, and how often each violin is running at each point of it. A what-if factor on any violin
+  projects every view.
+- **Layout**, the violins shown, merged and renamed:
+  - on claude.ai, **Save for everyone** (for whoever can edit the page) saves them into the page, `data/layout.js`,
+    and everyone who opens it starts with them; claude.ai refuses it once the page is shared publicly;
+  - anywhere else, **Copy link** gives a link that opens them, the layout after `#layout=`, deflated;
+  - **Back to the saved violins**, or **Start over** when none are saved.
+
+  A viewer's own changes are kept in their browser until a newer layout is saved into the page.
 - **Timeline:** the units in view laid out in time, each run on its own clock, as a flame chart or as a waterfall
   with a row per span.
 - **Spans:** a table of span names or call paths with self and total time, the merged flame graph of the
@@ -63,7 +74,7 @@ the deepest violin shown that covers it.
 python3 -m unittest discover tests                  # the converter, on made-up traces
 python3 tests/synth.py /tmp/a.jsonl --group alpha   # made-up traces to try the page on
 python3 violinoscope.py a=/tmp/a.jsonl --unit "Handle request" -o out/
-tools/with-browser.sh tests/browser_check.py out/ --shots shots/   # build violins, every tab, no errors
+tools/with-browser.sh tests/browser_check.py out/ --shots shots/   # build and share violins, every tab, no errors
 ```
 
 `tests/browser_check.py` needs Playwright for Python with its Chromium; put machine-specific paths in
@@ -72,11 +83,12 @@ tools/with-browser.sh tests/browser_check.py out/ --shots shots/   # build violi
 ## Files
 
 - `violinoscope.py`: the converter. It reads spans, cuts them into units, and writes `out/data/` (a summary of the
-  units and their span trees in chunks) next to a copy of `web/`.
+  units and their span trees in chunks, and an empty `layout.js` unless one is there already) next to a copy of `web/`.
 - `web/`: the page, plain scripts sharing `window.TX`:
   - `core.js`: state, data access, columns, scales and the what-if;
   - `layout.js`: the violins from the span trees: call paths, what is shown and merged, each unit's time in them;
   - `violins.js`, `edit.js` and `gl.js`: the Phases tab, changing what it shows, and its dots on the GPU;
+  - `share.js`: the Layout menu: saving the violins into the page, a link that opens them;
   - `timeline.js`, `flame.js`, `nav.js`: the waterfall, flame chart, flame graph and the overview strip;
   - `spans.js`: the spans table and callers and callees;
   - `panel.js`: cards; `main.js`: controls, the time range card and keys;

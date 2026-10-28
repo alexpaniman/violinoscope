@@ -359,6 +359,9 @@ def write_bundle(args, unit, records, failures, runs):
         'failures': [{'ds': f['dataset'], 'g': f['group'], 'l': f['label'], 't': f['trace'], 'reason': f['reason']} for f in failures],
     }
     write_js(os.path.join(out, 'data', 'summary.js'), 'EXPLORER_SUMMARY', summary)
+    # The violins saved into the page, which the page itself writes on claude.ai: kept when building again.
+    if not os.path.exists(os.path.join(out, 'data', 'layout.js')):
+        write_js(os.path.join(out, 'data', 'layout.js'), 'EXPLORER_LAYOUT', None)
     for k in range(0, len(records), CHUNK):
         chunk_names, chunk_index = [], {}
         trees = []

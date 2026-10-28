@@ -43,6 +43,7 @@
           <button type="button" data-linear="false" aria-pressed="true" title="Square root: spreads out the small shares, and still shows 0% (L)">Square root</button>
           <button type="button" data-linear="true" aria-pressed="false" title="Linear (L)">Linear</button>
         </div>
+        <div class="seg" data-for="violins"><button type="button" id="layout-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="layout-menu" title="Save these violins for everyone, or copy a link that opens them">Layout</button></div>
         <div class="seg" id="tl-modes" role="group" aria-label="Timeline" data-for="timeline" hidden>
           <button type="button" data-tl="chart" aria-pressed="true" data-u title="Each {unit} span on one line, what it calls stacked below, asynchronous spans on a track per name">Flame chart</button>
           <button type="button" data-tl="waterfall" aria-pressed="false" title="A row per span, as in Jaeger">Waterfall</button>
@@ -71,6 +72,7 @@
 
     <div class="overview" id="overview" hidden><canvas id="overview-canvas" aria-label="Overview" title="Drag to pick what is shown, drag its edges to resize; double-click or F for all of it"></canvas><div class="ov-nav" id="ov-nav" hidden><button type="button" data-nav="back" title="Back to where you were (Esc)">← Back</button><button type="button" data-nav="all" title="All of it (F, or double-click the strip)">All</button></div></div>
     <div class="toast" id="toast" role="status" hidden></div>
+    <div class="layout-menu" id="layout-menu" role="dialog" aria-label="Layout" hidden></div>
 
     <section class="card" id="rangecard" role="dialog" data-u aria-label="{unit} time range" hidden>
       <div class="card-head">
@@ -99,11 +101,13 @@
 <script src="render.js"></script>
 <script src="model.js"></script>
 <script src="data/summary.js"></script>
+<script src="data/layout.js"></script>
 <script src="core.js"></script>
 <script src="layout.js"></script>
 <script src="gl.js"></script>
 <script src="violins.js"></script>
 <script src="edit.js"></script>
+<script src="share.js"></script>
 <script src="nav.js"></script>
 <script src="flame.js"></script>
 <script src="spans.js"></script>

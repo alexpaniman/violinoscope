@@ -4,7 +4,8 @@
 // through their view box, and the canvases drawn again for what shows, at the new scale, so everything stays sharp.
 // What-if: each part's factor in a pill at the top of its column, and the factors in a row when it is clicked.
 // The tree under the violins is what X.layout shows: a triangle opens or closes a column, a + at the end of a
-// column's children adds the ones not shown, and Shift and a click on names picks violins to merge.
+// column's children adds the ones not shown, Shift and a click on names picks violins to merge, a name dragged onto
+// another column merges the two, and a double-click on a name renames it.
 (function () {
   'use strict';
   const X = window.TX, S = X.S, R = X.R, data = X.data;
@@ -65,16 +66,19 @@
     const isParent = p.cols.map((col) => X.layout.kids(col.id).length > 0);
     const bare = (c) => p.cols[c].root && S.mode === 'share';
     const visKids = p.cols.map((col) => p.cols.map((_, j) => j).filter((j) => p.cols[j].parent === col.id));
+    // A name is bold while what it holds is shown under it.
+    const weight = p.cols.map((col, c) => (col.root || visKids[c].length ? 600 : 400));
     // A column with children not shown has a + at the end of those it shows.
     const more = p.cols.map((col, c) => visKids[c].length > 0 && X.layout.hidden(col.id) > 0);
     const maxD = Math.max(0, ...depth);
 
-    // Slanted labels all start on one line below the tree, so neighbours never cross. A deeper tree packs its levels
-    // closer and takes more room, so the names below it keep theirs.
-    const ROW = maxD > 3 ? 12 : 15, NODE0 = 8, labelY = NODE0 + maxD * ROW + 11;
+    // Slanted labels all start on one line below the tree, so neighbours never cross; above it, room for the × that
+    // hides a violin, clear of the last row of triangles. A deeper tree packs its levels closer and takes more room, so
+    // the names below it keep theirs.
+    const ROW = maxD > 3 ? 12 : 15, NODE0 = 8, labelY = NODE0 + maxD * ROW + 26;
     const cap = clamp(H * 0.19, 90, 180) + Math.max(0, maxD - 2) * ROW;
-    const labels = p.cols.map((col, c) => X.fitText(col.label, SIZE, isParent[c] ? 600 : 400, (cap - labelY - 8) / Math.sin(ANGLE)));
-    const lens = labels.map((s, c) => X.textWidth(s, SIZE, isParent[c] ? 600 : 400));
+    const labels = p.cols.map((col, c) => X.fitText(col.label, SIZE, weight[c], (cap - labelY - 8) / Math.sin(ANGLE)));
+    const lens = labels.map((s, c) => X.textWidth(s, SIZE, weight[c]));
     const treeH = labelY + Math.max(...lens) * Math.sin(ANGLE) + SIZE * Math.cos(ANGLE) + 8;
 
     const MED = 32, HEAD = 18, BOTTOM = 14;
@@ -212,7 +216,8 @@
       });
     }
     let lines = '';
-    const plusX = (c) => xOf(visKids[c][visKids[c].length - 1]) + colW / 2;
+    // The + comes after everything under the column, where what it adds usually goes.
+    const plusX = (c) => xOf(ends[c]) + colW / 2;
     p.cols.forEach((col, c) => {
       const y = nodeY(depth[c]), ch = visKids[c];
       if (ch.length) {
@@ -244,7 +249,7 @@
       // A merged violin's name in italics; picked to merge, on a tint.
       o.push(`<g class="hit" data-col="${c}" transform="translate(${n1(x + 3)} ${n1(TR.y0 + labelY)}) rotate(${deg})">`
         + `<rect x="${n1(-lens[c] - 4)}" y="-3" width="${n1(lens[c] + 8)}" height="${n1(SIZE + 6)}" rx="4" fill="${picked ? T.sel : 'transparent'}" fill-opacity="${picked ? 0.22 : 0}"${picked ? ` stroke="${T.sel}"` : ''}/>`
-        + `<text text-anchor="end" dominant-baseline="hanging" font-family="${X.SANS}" font-size="${SIZE}" font-weight="${isParent[c] ? 600 : 400}"${col.merged ? ' font-style="italic"' : ''} fill="${T.ink}">${esc(labels[c])}</text></g>`);
+        + `<text text-anchor="end" dominant-baseline="hanging" font-family="${X.SANS}" font-size="${SIZE}" font-weight="${weight[c]}"${col.merged ? ' font-style="italic"' : ''} fill="${T.ink}">${esc(labels[c])}</text></g>`);
     });
     // Its axis as the violins' is: named along it, ticked where its grid lines are, through each compilation's time.
     o.push(`<text transform="translate(16 ${n1((TL.y0 + TL.y1) / 2)}) rotate(-90)" text-anchor="middle" dominant-baseline="central" font-family="${X.SANS}" font-size="11.5" font-weight="500" fill="${T.muted}">When it runs</text>`);
@@ -257,7 +262,7 @@
     if (glide) for (const el of [under, over]) { el.classList.remove('fade'); void el.getBoundingClientRect(); el.classList.add('fade'); }
     points.resize(W, H, view(W, H));
     points.set(pos, rgba, size, { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 }, glide);
-    G = { W, H, n, colW, xOf, V, TR, TL, MD, yOfU, p, pts, where, half, labelY, END, deg, pad: { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 } };
+    G = { W, H, n, colW, xOf, V, TR, TL, MD, yOfU, p, pts, where, half, labelY, lens, END, deg, pad: { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 } };
     placeLayers();
     drawHeat();
     drawHover();
@@ -326,6 +331,11 @@
       ctx.globalAlpha = 1;
     };
     if (S.card) { const c = G.p.cols.findIndex((col) => col.id === S.card); if (c >= 0) tint(c, 0.06); }
+    if (lift && lift.moved) { tint(lift.c, 0.05); if (lift.to !== null) tint(lift.to, 0.14); }
+    if (lit) {
+      const c = G.p.cols.findIndex((col) => col.id === lit.id);
+      if (c >= 0) tint(c, 0.18 * Math.max(0, 1 - (performance.now() - lit.t) / 900));
+    }
     if (S.hoverCol !== null && S.hoverCol < G.n) tint(S.hoverCol, 0.04);
     if (S.matches && S.matches.size) {
       ctx.globalAlpha = 0.72;
@@ -398,10 +408,20 @@
       + `<div class="tt"><span class="part">${X.esc(col.label)}</span><b>${main}</b><span>${aside}</span></div>`;
   }
 
+  // The column at a point of the layer, by where it is across: along the violins and the tree, and in the strips.
+  function colAt(lx, ly) {
+    if (!G || lx < AX || lx >= G.END) return null;
+    const along = (ly >= G.V.y0 - 6 && ly <= G.TR.y0 + G.labelY) || (ly >= G.TL.y0 && ly <= G.TL.y1);
+    return along ? Math.min(G.n - 1, Math.floor((lx - AX) / G.colW)) : null;
+  }
+  // Where a column's line meets its name, on the stage.
+  const tipOf = (c) => ({ x: Z.x + G.xOf(c) * Z.z, y: Z.y + (G.TR.y0 + G.labelY - 2) * Z.z });
+
   // px, py: on the stage; the figure's own coordinates come from the zoom.
   function move(e, px, py) {
     if (drag) { pan(px, py); return; }
     if (!G) return;
+    if (lift) { carry(e, px, py); return; }
     // Over a pill or the factors, nothing under them is hovered.
     if (e.target.closest && e.target.closest('[data-pill], #v-factor-menu')) {
       if (S.hover !== null) { S.hover = null; X.schedule(drawHover); }
@@ -421,10 +441,13 @@
     pad.classList.toggle('on-dot', !!hit);
     if (hit) X.tipHtml(dotTip(hit), px, py); else X.hideTip();
     showPill(col !== null ? col : lx >= AX && lx < G.END && ly >= G.V.y0 - 6 && ly <= G.V.y1 + 6 ? Math.floor((lx - AX) / G.colW) : null);
-    X.edit.showHide(col !== null && !G.p.cols[col].root ? { id: G.p.cols[col].id, label: G.p.cols[col].label, x: Z.x + (G.xOf(col) + 3) * Z.z, y: Z.y + (G.TR.y0 + G.labelY) * Z.z } : null);
+    const along = col !== null ? col : colAt(lx, ly);
+    X.edit.showHide(along !== null && !G.p.cols[along].root ? Object.assign({ id: G.p.cols[along].id, label: G.p.cols[along].label }, tipOf(along)) : null);
     if (dirty) X.schedule(drawHover);
   }
   function leave(e) {
+    // Off the stage, a carried name is dropped nowhere; over the controls, it is still carried.
+    if (lift) { if (!e) letGo(); return; }
     if (S.hover !== null || S.hoverCol !== null) { S.hover = null; S.hoverCol = null; X.schedule(drawHover); }
     X.hideTip();
     showPill(null);
@@ -506,6 +529,7 @@
     return true;
   }
 
+  let cardSoon = 0;
   function click(e, px, py) {
     if (dragged) { dragged = false; return; }
     const pillEl = e.target.closest && e.target.closest('[data-pill]');
@@ -525,8 +549,12 @@
     if (colEl) {
       const col = G.p.cols[Number(colEl.dataset.col)];
       // Shift and a click picks it to merge with others; a click alone opens its card.
-      if (e.shiftKey && !col.root) X.edit.pick(col.id);
-      else X.openCard(col.id, colEl.getBoundingClientRect());
+      if (e.shiftKey && !col.root) { X.edit.pick(col.id); return; }
+      // A moment later, so that a double-click renames it instead.
+      clearTimeout(cardSoon);
+      if (e.detail > 1) return;
+      const rect = colEl.getBoundingClientRect();
+      cardSoon = setTimeout(() => X.openCard(col.id, rect), 220);
       return;
     }
     const [lx, ly] = toLayer(px, py);
@@ -585,6 +613,8 @@
   let drag = null, dragged = false;
   function down(e, px, py) {
     dragged = false;
+    const name = e.target.closest && e.target.closest('[data-col]');
+    if (name && G && !e.shiftKey && !G.p.cols[Number(name.dataset.col)].root) { lift = { c: Number(name.dataset.col), px, py, moved: false, to: null }; return false; }
     if (Z.z === 1 || (e.target.closest && e.target.closest('.hit, [data-pill], #v-factor-menu'))) return false;
     drag = { px, py, x: Z.x, y: Z.y, moved: false };
     return true;
@@ -598,11 +628,63 @@
     zoomed();
   }
   function up() {
+    if (lift) { letGo(true); return; }
     if (!drag) return;
     dragged = drag.moved;
     drag = null;
     root.classList.remove('panning');
   }
+  // A name carried onto another column merges the two: into it when it is merged already, else as a new merged violin
+  // where the other was, named at once. Columns it can't merge with take nothing.
+  let lift = null;
+  function carry(e, px, py) {
+    const dx = px - lift.px, dy = py - lift.py;
+    if (!lift.moved && dx * dx + dy * dy < 25) return;
+    if (!lift.moved) {
+      lift.moved = true;
+      root.classList.add('lifting');
+      X.hideTip();
+      pill.hidden = true;
+      X.edit.showHide(null);
+      clearTimeout(cardSoon);
+    }
+    const [lx, ly] = toLayer(px, py), from = G.p.cols[lift.c];
+    const el = e.target.closest && e.target.closest('[data-col]');
+    const c = el ? Number(el.dataset.col) : colAt(lx, ly);
+    lift.to = c !== null && X.layout.canMerge(from.id, G.p.cols[c].id) ? c : null;
+    X.edit.showLift(from.label, px, py, lift.to !== null ? G.p.cols[lift.to].id : null);
+    X.schedule(drawHover);
+  }
+  function letGo(drop) {
+    const l = lift;
+    lift = null;
+    root.classList.remove('lifting');
+    X.edit.showLift(null);
+    if (!l.moved) return;
+    dragged = true;
+    X.schedule(drawHover);
+    if (!drop || l.to === null) return;
+    const a = G.p.cols[l.c].id, b = G.p.cols[l.to].id;
+    X.picked.delete(a); X.picked.delete(b);
+    if (X.layout.isMerged(b)) { flash(X.layout.join(a, b)); return; }
+    const id = X.layout.merge([a, b], '', b);
+    flash(id);
+    requestAnimationFrame(() => X.edit.rename(id));
+  }
+  // Where a change landed, lit for a moment.
+  let lit = null;
+  function flash(id) {
+    lit = { id, t: performance.now() };
+    const step = (now) => { drawHover(); if (lit && now - lit.t < 900) requestAnimationFrame(step); else lit = null; };
+    requestAnimationFrame(step);
+  }
+  // A name's place on the stage, for typing over it: where its line meets it, its slant, its length and the zoom.
+  function nameAt(id) {
+    const c = G ? G.p.cols.findIndex((col) => col.id === id) : -1;
+    if (c < 0) return null;
+    return { x: Z.x + (G.xOf(c) + 3) * Z.z, y: Z.y + (G.TR.y0 + G.labelY) * Z.z, z: Z.z, deg: Number(G.deg), len: G.lens[c], size: SIZE };
+  }
+
   // All of it again, gliding there.
   function fit() {
     if (Z.z === 1) return;
@@ -616,6 +698,13 @@
     requestAnimationFrame(step);
   }
   function dbl(e, px, py) {
+    const name = e.target.closest && e.target.closest('[data-col]');
+    if (name) {
+      clearTimeout(cardSoon);
+      const col = G.p.cols[Number(name.dataset.col)];
+      if (!col.root) { X.panel.closeCard(); X.edit.rename(col.id); }
+      return;
+    }
     const [lx, ly] = toLayer(px, py);
     if (!(e.target.closest && e.target.closest('.hit, [data-pill], #v-factor-menu')) && !nearestDot(lx, ly)) fit();
   }
@@ -628,6 +717,6 @@
     drawHover();
   }
 
-  X.violins = { init, render, drawHover, move, leave, click, rezoom, wheel, down, up, dbl, fit, get G() { return G; }, invalidate() { lastKey = null; },
+  X.violins = { init, render, drawHover, move, leave, click, rezoom, wheel, down, up, dbl, fit, nameAt, flash, get G() { return G; }, invalidate() { lastKey = null; },
     closeMenu, get menuOpen() { return menuId !== null; } };
 })();

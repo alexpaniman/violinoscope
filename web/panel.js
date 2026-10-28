@@ -122,13 +122,17 @@
       row(`${esc(X.UNIT)}, what if`, (u) => X.fmtMs(compile(u, false)), 'proj');
       row('Speed-up', (u) => `${(compile(u, true) / compile(u, false)).toFixed(2)}×`, 'proj');
     }
-    let html = `<div class="card-top"><div><h3>${esc(col.label)}</h3>${crumbs.length ? `<div class="crumbs">${crumbs.map((p) => `<button type="button" data-open-part="${esc(data.columns[p].id)}">${esc(data.columns[p].label)}</button>`).join(' › ')}</div>` : ''}</div>`
+    // Renamed, the name of its spans too.
+    const spans = root ? null : X.layout.spanName(col.id);
+    const was = spans && spans !== col.label ? `<div class="span-name">Spans: ${esc(spans)}</div>` : '';
+    let html = `<div class="card-top"><div><h3>${esc(col.label)}</h3>${was}${crumbs.length ? `<div class="crumbs">${crumbs.map((p) => `<button type="button" data-open-part="${esc(data.columns[p].id)}">${esc(data.columns[p].label)}</button>`).join(' › ')}</div>` : ''}</div>`
       + '<button class="icon-btn" type="button" data-close aria-label="Close">×</button></div>'
       + `<table class="stats"><thead><tr><th></th>${halves.map(([hk, , name]) => `<th><span class="sw" style="background:${T[hk]}"></span>${esc(name)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
     if (ck !== undefined) html += runsScatter(k, ck, halves);
     if (!root) {
       html += `<div class="card-actions"><button type="button" class="btn small" data-act="hide" title="Its parent still counts its time">Hide</button>`
-        + (col.merged ? '<button type="button" class="btn small" data-act="rename">Rename</button><button type="button" class="btn small" data-act="split" title="Show what it merges on its own again">Split up</button>' : '')
+        + '<button type="button" class="btn small" data-act="rename" title="Or double-click its name">Rename</button>'
+        + (col.merged ? '<button type="button" class="btn small" data-act="split" title="Show what it merges on its own again">Split up</button>' : '')
         + '</div>';
     }
     card.innerHTML = html;
