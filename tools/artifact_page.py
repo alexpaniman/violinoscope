@@ -14,7 +14,9 @@ def main():
     page = open(os.path.join(out, 'index.html')).read()
     page = re.sub(r'\A<!doctype html>\n<html[^>]*><head>.*?</style>\n', '', page, flags=re.S)
     page = page.replace('</head><body>\n', '').replace('</body></html>\n', '')
-    if '<html' in page or '<body' in page:
+    # In the markup, not in the scripts, which write a whole page when downloading one.
+    markup = page.split('<script', 1)[0]
+    if '<html' in markup or '<body' in markup:
         sys.exit('artifact_page.py: unexpected skeleton in index.html')
     with open(os.path.join(out, 'artifact.html'), 'w') as f:
         f.write(page)
