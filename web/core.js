@@ -82,7 +82,7 @@
     // flame graph, heavy), timeline (the waterfall) or spans (the table, as a list or a tree).
     tab: 'violins', tl: 'chart', prof: 'table', view: 'violins', mode: 'share', linear: false, flame: 'time',
     side: {}, range: null, factors: new Map(),
-    sel: null, card: null, expanded: false, hover: null, hoverCol: null, search: '', matches: null,
+    sel: null, card: null, hover: null, hoverCol: null, search: '', matches: null,
     sort: { key: 'self', dir: -1 }, tlSort: { key: 'ms', dir: -1 }, name: null, namePath: null, spansMode: 'table', tableTree: false, treeOpen: new Map(), treeLevel: 2,
   };
   const slot = new Map();
@@ -193,19 +193,12 @@
   // Columns, scales and prepared violins. Both measures show the same columns, so switching keeps them in place.
 
   // The violins' columns: the unit's own span, the root the others branch from, then every column shown.
-  // After them, once it has any, the second tree's root, with nothing of its own to show, and its columns.
+  // The second tree's columns come after the first's; its root (X.ROOT2) is not shown.
   X.ROOT = '_all';
   X.ROOT2 = '~two';
-  X.columnsFor = () => {
-    const cols = [{ id: X.ROOT, label: X.UNIT, parent: null, base: -1, root: true }];
-    const two = { id: X.ROOT2, label: 'Projections', parent: null, base: -1, root: true, blank: true, second: true };
-    data.columns.forEach((c, k) => {
-      if (c.second && !cols.includes(two)) cols.push(two);
-      cols.push({ id: c.id, label: c.label, parent: c.parent, base: k, merged: c.merged, second: c.second });
-    });
-    return cols;
-  };
-  X.colMs = (i, col, measured) => (col.blank ? NaN : col.root ? X.totalMs(i, measured) : X.partMs(i, col.base, measured));
+  X.columnsFor = () => [{ id: X.ROOT, label: X.UNIT, parent: null, base: -1, root: true }]
+    .concat(data.columns.map((c, k) => ({ id: c.id, label: c.label, parent: c.parent, base: k, merged: c.merged, second: c.second })));
+  X.colMs = (i, col, measured) => (col.root ? X.totalMs(i, measured) : X.partMs(i, col.base, measured));
 
   const clamp = X.clamp;
   function scaleFor(mode, linear, top) {
@@ -252,7 +245,7 @@
     let top = 1, above = 0;
     if (mode === 'ms') {
       const all = [];
-      for (const i of view.left.concat(view.right)) for (let c = 0; c < cols.length; c++) if (!cols[c].blank) all.push(value(i, c));
+      for (const i of view.left.concat(view.right)) for (let c = 0; c < cols.length; c++) all.push(value(i, c));
       const sorted = Float64Array.from(all).sort();
       top = Math.max(1, sorted[sorted.length - 1] || 1);
       if (linear) {

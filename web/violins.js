@@ -12,6 +12,7 @@
   const { $, esc, clamp, n1, txt } = X;
   const HALF = R.HALF, RIGHT = 20, AX = 80, MIN_COL = 26, MAX_COL = 68, ANGLE = 30 * Math.PI / 180, SIZE = 12.5, DOT = 2.8, DIAMOND = 10;
   const DOT_R = DOT / 2;  // as the GPU draws it
+  const COUNT = 10.5;  // the size of a merged violin's count of spans
 
   const MAX_ZOOM = 12, GAP = 0.6, SIDE = 40;
 
@@ -60,9 +61,9 @@
 
     // Columns keep their width until there are more than fit, so opening one moves only the columns after it and no
     // violin changes shape; the plot ends after the last column.
-    // The second tree after a gap; while it is empty, only a small + at the side, to start it.
-    const n = p.cols.length, two = p.cols.findIndex((col) => col.id === X.ROOT2), gap = two >= 0 ? GAP : 0, side = two >= 0 ? 0 : SIDE;
-    const colW = clamp((W - AX - RIGHT - side) / Math.max(n + gap, 16), MIN_COL, MAX_COL), END = AX + (n + gap) * colW;
+    // The second tree after a gap, without a root of its own; after it, a small + at the side that adds to it.
+    const n = p.cols.length, two = p.cols.findIndex((col) => col.second), gap = two >= 0 ? GAP : 0;
+    const colW = clamp((W - AX - RIGHT - SIDE) / Math.max(n + gap, 16), MIN_COL, MAX_COL), END = AX + (n + gap) * colW;
     const xOf = (c) => AX + (c + 0.5 + (two >= 0 && c >= two ? gap : 0)) * colW;
     // The unit's own span is the root the columns branch from; in Share it is 100% everywhere, so it shows only its
     // median time.
@@ -70,11 +71,11 @@
     const isParent = p.cols.map((col) => X.layout.kids(col.id).length > 0);
     const bare = (c) => p.cols[c].root && S.mode === 'share';
     const visKids = p.cols.map((col) => p.cols.map((_, j) => j).filter((j) => p.cols[j].parent === col.id));
-    // A name is bold while what it holds is shown under it.
-    const weight = p.cols.map((col, c) => (col.root || visKids[c].length ? 600 : 400));
-    // A column with children not shown has a + at the end of those it shows; the second tree's root always has one,
-    // as any span can go there.
-    const more = p.cols.map((col, c) => col.id === X.ROOT2 || (visKids[c].length > 0 && X.layout.hidden(col.id) > 0));
+    // A column with children not shown has a + at the end of those it shows.
+    const more = p.cols.map((col, c) => visKids[c].length > 0 && X.layout.hidden(col.id) > 0);
+    // A merged violin's name is followed by how many spans it merges, small and muted.
+    const counts = p.cols.map((col) => (col.merged ? String(X.layout.size(col.id)) : ''));
+    const countW = counts.map((t) => (t ? X.textWidth(t, COUNT, 400) + 4 : 0));
     const maxD = Math.max(0, ...depth);
 
     // Slanted labels all start on one line below the tree, so neighbours never cross; above it, room for the × that
@@ -82,8 +83,8 @@
     // the names below it keep theirs.
     const ROW = maxD > 3 ? 12 : 15, NODE0 = 8, labelY = NODE0 + maxD * ROW + 26;
     const cap = clamp(H * 0.19, 90, 180) + Math.max(0, maxD - 2) * ROW;
-    const labels = p.cols.map((col, c) => X.fitText(col.label, SIZE, weight[c], (cap - labelY - 8) / Math.sin(ANGLE)));
-    const lens = labels.map((s, c) => X.textWidth(s, SIZE, weight[c]));
+    const labels = p.cols.map((col, c) => X.fitText(col.label, SIZE, 400, (cap - labelY - 8) / Math.sin(ANGLE) - countW[c]));
+    const lens = labels.map((s, c) => X.textWidth(s, SIZE, 400) + countW[c]);
     const treeH = labelY + Math.max(...lens) * Math.sin(ANGLE) + SIZE * Math.cos(ANGLE) + 8;
 
     const MED = 32, HEAD = 18, BOTTOM = 14;
@@ -222,7 +223,7 @@
     }
     let lines = '';
     // The + comes after everything under the column, where what it adds usually goes.
-    const plusAt = (c) => (ends[c] === c ? xOf(c) + 14 : xOf(ends[c]) + colW / 2);
+    const plusAt = (c) => xOf(ends[c]) + colW / 2;
     // Several +s in one place: the deepest stays, and each one above it goes a step further along its own line.
     const deepest = new Map();
     p.cols.forEach((col, c) => { if (more[c]) { const at = Math.round(plusAt(c)); deepest.set(at, Math.max(deepest.has(at) ? deepest.get(at) : 0, depth[c])); } });
@@ -235,14 +236,14 @@
         lines += `M${n1(xOf(c) + 7)} ${n1(y)}H${n1(more[c] ? plusX(c) - 6 : xOf(last) - 4)}`;
         if (!more[c]) lines += `Q${n1(xOf(last))} ${n1(y)} ${n1(xOf(last))} ${n1(y + 4)}`;
         for (const j of ch) lines += `M${n1(xOf(j))} ${n1(j === last && !more[c] ? y + 4 : y)}V${n1(nodeY(depth[j]) - (isParent[j] ? 6 : 0))}`;
-      } else if (more[c]) lines += `M${n1(xOf(c) + 4)} ${n1(y)}H${n1(plusX(c) - 6)}`;
+      }
       lines += `M${n1(xOf(c))} ${n1(y + (isParent[c] ? 5 : 0))}V${n1(TR.y0 + labelY - 2)}`;
     });
     o.push(`<path d="${lines}" fill="none" stroke="${T.line}"/>`);
     const deg = n1(-ANGLE * 180 / Math.PI);
     p.cols.forEach((col, c) => {
       const x = xOf(c), y = nodeY(depth[c]), picked = X.picked.has(col.id);
-      if (col.root) o.push(`<circle cx="${n1(x)}" cy="${n1(y)}" r="3.5" fill="${col.blank && !visKids[c].length ? 'none' : T.muted}" stroke="${T.muted}"/>`);
+      if (col.root) o.push(`<circle cx="${n1(x)}" cy="${n1(y)}" r="3.5" fill="${T.muted}"/>`);
       else if (isParent[c]) {
         const open = visKids[c].length > 0;
         const tri = open ? `M${n1(x - 4.5)} ${n1(y - 2.5)}L${n1(x + 4.5)} ${n1(y - 2.5)}L${n1(x)} ${n1(y + 3)}Z`
@@ -251,21 +252,20 @@
       } else o.push(`<circle cx="${n1(x)}" cy="${n1(y)}" r="2" fill="${T.line}"/>`);
       if (more[c]) {
         const px = plusX(c);
-        const tip = col.id === X.ROOT2 ? 'Add violins that take nothing from the tree on the left: any spans, merged as you like'
-          : `Add what ${col.label} has that is not shown (${X.layout.hidden(col.id)})`;
-        o.push(`<g class="hit add" data-add="${esc(col.id)}"><title>${esc(tip)}</title>`
+        o.push(`<g class="hit add" data-add="${esc(col.id)}"><title>${esc(`Add what ${col.label} has that is not shown (${X.layout.hidden(col.id)})`)}</title>`
           + `<circle cx="${n1(px)}" cy="${n1(y)}" r="5.5" fill="${T.surface}" stroke="${T.line}"/>`
           + `<path d="M${n1(px - 2.6)} ${n1(y)}h5.2M${n1(px)} ${n1(y - 2.6)}v5.2" stroke="${T.muted}" stroke-width="1.4" stroke-linecap="round"/></g>`);
       }
-      // A merged violin's name in italics; picked to merge, on a tint.
+      // Picked to merge, on a tint.
       o.push(`<g class="hit" data-col="${c}" transform="translate(${n1(x + 3)} ${n1(TR.y0 + labelY)}) rotate(${deg})">`
         + `<rect x="${n1(-lens[c] - 4)}" y="-3" width="${n1(lens[c] + 8)}" height="${n1(SIZE + 6)}" rx="4" fill="${picked ? T.sel : 'transparent'}" fill-opacity="${picked ? 0.22 : 0}"${picked ? ` stroke="${T.sel}"` : ''}/>`
-        + `<text text-anchor="end" dominant-baseline="hanging" font-family="${X.SANS}" font-size="${SIZE}" font-weight="${weight[c]}"${col.merged ? ' font-style="italic"' : ''} fill="${col.blank && !visKids[c].length ? T.muted : T.ink}">${esc(labels[c])}</text></g>`);
+        + `<text text-anchor="end" dominant-baseline="hanging" font-family="${X.SANS}" font-size="${SIZE}" fill="${T.ink}">${esc(labels[c])}`
+        + `${counts[c] ? `<tspan dx="4" dy="${n1((SIZE - COUNT) * 0.8)}" font-size="${COUNT}" fill="${T.muted}">${counts[c]}</tspan>` : ''}</text></g>`);
     });
-    // The second tree, empty: a small dashed + to the side of the first tree's root line, clear of its +.
-    if (two < 0) {
+    // The second tree's +: small and dashed, at the side, clear of the + at the end of the root's line.
+    {
       const sx = END + SIDE - 12, sy = nodeY(0);
-      o.push(`<g class="hit add" data-add="${X.ROOT2}"><title>Projections: violins beside this tree that take nothing from it, any spans, merged as you like; or drop a name here</title>`
+      o.push(`<g class="hit add" data-add="${X.ROOT2}"><title>Projections: violins beside the tree that take nothing from it, any spans, merged as you like; or drop a name here</title>`
         + `<rect x="${n1(sx - 10)}" y="${n1(sy - 10)}" width="20" height="20" fill="transparent"/>`
         + `<circle cx="${n1(sx)}" cy="${n1(sy)}" r="5" fill="none" stroke="${T.line}" stroke-dasharray="2 2"/>`
         + `<path d="M${n1(sx - 2.3)} ${n1(sy)}h4.6M${n1(sx)} ${n1(sy - 2.3)}v4.6" stroke="${T.muted}" stroke-width="1.2" stroke-linecap="round"/></g>`);
@@ -458,8 +458,10 @@
     const [lx, ly] = toLayer(px, py);
     const colEl = e.target.closest && e.target.closest('[data-col]');
     const col = colEl ? Number(colEl.dataset.col) : null;
+    // Lit anywhere along it, as a click there opens its card.
+    const lit = col !== null ? col : e.target.closest && e.target.closest('.hit') ? null : colAt(lx, ly);
     let dirty = false;
-    if (col !== S.hoverCol) { S.hoverCol = col; dirty = true; }
+    if (lit !== S.hoverCol) { S.hoverCol = lit; dirty = true; }
     let hit = null;
     if (col === null && !(e.target.closest && e.target.closest('[data-open], [data-add]'))) hit = nearestDot(lx, ly);
     const unit = hit ? hit.unit : null;
@@ -469,6 +471,7 @@
     showPill(col !== null ? col : lx >= AX && lx < G.END && ly >= G.V.y0 - 6 && ly <= G.V.y1 + 6 ? colOfX(lx) : null);
     const along = col !== null ? col : colAt(lx, ly);
     X.edit.showHide(along !== null && !G.p.cols[along].root ? Object.assign({ id: G.p.cols[along].id, label: G.p.cols[along].label }, tipOf(along)) : null);
+    pad.classList.toggle('on-col', !hit && lit !== null);
     if (dirty) X.schedule(drawHover);
   }
   function leave(e) {
@@ -576,7 +579,6 @@
       const col = G.p.cols[Number(colEl.dataset.col)];
       // Shift and a click picks it to merge with others; a click alone opens its card.
       if (e.shiftKey && !col.root) { X.edit.pick(col.id); return; }
-      if (col.blank) { X.edit.openAdd(X.ROOT2, colEl.getBoundingClientRect()); return; }
       // A moment later, so that a double-click renames it instead.
       clearTimeout(cardSoon);
       if (e.detail > 1) return;
@@ -586,7 +588,10 @@
     }
     const [lx, ly] = toLayer(px, py);
     const hit = nearestDot(lx, ly);
-    if (hit) X.select(hit.unit);
+    if (hit) { X.select(hit.unit); return; }
+    // Anywhere else along a violin's column, its card; outside the columns, the selection goes.
+    const c = colAt(lx, ly);
+    if (c !== null) X.openCard(G.p.cols[c].id, { left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY });
     else if (ly >= G.V.y0 - 6 && ly <= G.V.y1 + 6 && S.sel !== null) X.select(null);
   }
 

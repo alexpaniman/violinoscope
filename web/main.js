@@ -609,7 +609,9 @@
     X.on('name', renderNameChip);
 
     const stage = $('stage');
-    const own = (e) => e.target.closest('#controls, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-merge, #v-hide, .name-edit');
+    // By the path the event took, as its target may be gone by now: a card redrawn by its own click.
+    const OWN = '#controls, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-merge, #v-hide, .name-edit';
+    const own = (e) => e.composedPath().some((el) => el.matches && el.matches(OWN));
     const at = (e) => { const b = stage.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
     stage.addEventListener('pointermove', (e) => {
       if (own(e)) { if (S.view === 'violins') X.violins.leave(e); return; }

@@ -203,7 +203,6 @@ svg.layer.fade { animation: fade-in .2s ease-out; }
 .add-row:hover { background: var(--raised); }
 .add-row.all { color: var(--muted); border-bottom: 1px solid var(--grid); border-radius: 6px 6px 0 0; }
 .add-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.add-row .nm.merged { font-style: italic; }
 .add-row small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .add-row .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
 .add-row .pct small { text-align: right; }
@@ -460,10 +459,9 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .top-unit:hover { background: var(--raised); }
 .top-unit.sel { background: var(--raised); box-shadow: inset 0 0 0 1px var(--edge); }
 .top-unit .nm, .member .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.top-unit small { display: block; color: var(--muted); font-size: 11px; }
+.top-unit small { color: var(--muted); font-size: 11px; }
 .top-unit .ms { text-align: right; font-variant-numeric: tabular-nums; }
 .member { display: grid; grid-template-columns: minmax(0, 1fr) auto 22px; align-items: center; gap: 6px; padding: 2px 0 2px 6px; font-size: 12.5px; }
-.member .nm.merged { font-style: italic; }
 .member .pct { text-align: right; font-variant-numeric: tabular-nums; }
 .member.more { display: block; color: var(--muted); font-size: 12px; }
 
@@ -471,3 +469,14 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .quiet-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); }
 .quiet-btn:hover:not(:disabled) { color: var(--ink); background: var(--raised); }
 .quiet-btn:disabled { opacity: .35; }
+
+/* A merged violin's count of spans after its name; the card's name, to edit; a line about runs */
+.count { margin-left: 5px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.title-edit { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: text; border-radius: 3px; }
+.title-edit:hover { text-decoration: underline dotted var(--line); text-underline-offset: 3px; }
+.runs-line { margin: 0; font-size: 12.5px; color: var(--muted); }
+.runs-line b { color: var(--ink); font-weight: 600; margin-right: 4px; }
+.section-title .sub { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.hitpad.on-col { cursor: pointer; }
+/* The card scrolls rather than squeeze what is in it */
+.card-pop > * { flex-shrink: 0; }

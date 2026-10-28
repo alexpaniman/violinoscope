@@ -124,7 +124,7 @@
       ? `<label class="add-row all"><input type="checkbox" data-all${rows.every((r) => ticked.has(r.id)) ? ' checked' : ''}><span class="nm">All ${X.fmtInt(rows.length)}</span></label>` : '';
     list.innerHTML = rows.length ? head + rows.map((r) => `<label class="add-row" title="${esc(r.where ? `${r.where} › ${r.label}` : r.label)}">`
       + `<input type="checkbox" data-id="${esc(r.id)}"${ticked.has(r.id) ? ' checked' : ''}>`
-      + `<span class="nm${r.group ? ' merged' : ''}">${esc(r.label)}${r.where ? `<small>${esc(r.where)}</small>` : ''}</span>`
+      + `<span class="nm">${esc(r.label)}${r.group ? `<span class="count">${X.fmtInt(X.layout.size(r.id))}</span>` : ''}${r.where ? `<small>${esc(r.where)}</small>` : ''}</span>`
       + `<span class="pct" title="Its average share of ${esc(X.layout.label(under === X.ROOT ? X.layout.rootKey() : under))}'s time${r.seen < 0.995 ? `; present in ${X.fmtPct(r.seen)} of them` : ''}">${X.fmtPct(r.share)}${r.seen < 0.995 ? `<small>in ${X.fmtPct(r.seen)}</small>` : ''}</span></label>`).join('')
       : `<p class="add-none">${query.trim() ? 'Nothing not shown has that in its name.' : 'Everything inside it is shown.'}</p>`;
     renderFoot();

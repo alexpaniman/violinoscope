@@ -1,6 +1,6 @@
 // The selected unit's chip in the filter row (its name, workload and times, its trace id to copy, and clearing it),
-// and a violin's card: what it is, its numbers, a chart, the units that spend most in it, a merged violin's members,
-// what the what-if makes of them, and hiding, renaming, splitting it up or finding it in the Spans tab.
+// and a violin's card: what it is, its name to edit, its share against the unit's time, its runs against its time,
+// the units that spend most in it, what a merged violin is made of, and splitting it up or finding it in Spans.
 (function () {
   'use strict';
   const X = window.TX, S = X.S, data = X.data;
@@ -28,14 +28,14 @@
       if (out) { X.layout.leave(out.dataset.leave); return; }
       const part = e.target.closest('[data-open-part]');
       if (part) { const b = card.getBoundingClientRect(); openCard(part.dataset.openPart, { left: b.left, right: b.right, top: b.top, bottom: b.top }); return; }
-      const act = e.target.closest('[data-act]');
+      const act = e.target.closest('[data-act], button[data-rename]');
       if (!act) return;
       const id = S.card;
       if (act.dataset.act === 'hide') { closeCard(); X.layout.hide(id); }
       else if (act.dataset.act === 'reset') { closeCard(); X.layout.reset(); }
-      else if (act.dataset.act === 'spans') { const name = X.layout.spanName(id); closeCard(); X.spans.pick(name); X.go('profile', 'callers'); }
+      else if (act.dataset.act === 'spans') { const name = X.layout.spanNames(id)[0]; closeCard(); X.spans.pick(name); X.go('profile', 'callers'); }
       else if (act.dataset.act === 'split') { closeCard(); X.layout.ungroup(id); }
-      else if (act.dataset.act === 'rename') {
+      else if (act.dataset.act === 'rename' || act.dataset.rename !== undefined) {
         const h = card.querySelector('h3');
         h.innerHTML = `<input data-rename aria-label="Name" value="${esc(X.layout.label(id))}">`;
         const input = h.querySelector('input');
@@ -44,11 +44,11 @@
       }
     });
     card.addEventListener('keydown', (e) => {
-      if (!e.target.matches('[data-rename]')) return;
+      if (!e.target.matches('input[data-rename]')) return;
       if (e.key === 'Enter') { X.layout.rename(S.card, e.target.value); e.preventDefault(); }
       if (e.key === 'Escape') { renderCard(); e.stopPropagation(); }
     });
-    card.addEventListener('focusout', (e) => { if (e.target.matches('[data-rename]') && S.card !== null) X.layout.rename(S.card, e.target.value); });
+    card.addEventListener('focusout', (e) => { if (e.target.matches('input[data-rename]') && S.card !== null) X.layout.rename(S.card, e.target.value); });
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -98,80 +98,67 @@
     X.violins.drawHover();
   }
 
-  // What it is; its numbers in each half; one chart, runs against time when its spans run more than once in a unit,
-  // else its share against the unit's time; the units that spend most in it; a merged violin's members; and actions.
+  // What it is and where it sits, its name to edit; its share against the unit's time; its runs against its time, or
+  // what they always are; the units that spend most in it; what a merged violin is made of; and splitting it up,
+  // finding its span in the Spans tab, or for the root, starting over.
   function renderCard() {
     if (S.card === null) return;
-    const root = S.card === X.ROOT, k = root ? -1 : data.columnIndex.get(S.card), T = X.T;
+    const root = S.card === X.ROOT, k = root ? -1 : data.columnIndex.get(S.card);
     if (!root && k === undefined) { closeCard(); return; }
     const col = root ? { id: X.ROOT, label: X.UNIT } : data.columns[k];
     const v = X.unitsInView(true);
-    const halves = [['left', v.left, X.sideNames('left')], ['right', v.right, X.sideNames('right')]].filter(([, u]) => u.length);
+    const halves = [['left', v.left], ['right', v.right]].filter(([, u]) => u.length);
     const crumbs = [];
     for (let p = root ? -1 : X.parentIdx[k]; p >= 0; p = X.parentIdx[p]) crumbs.unshift(p);
-    const rows = [];
-    const row = (name, f, cls, title) => rows.push(`<tr${cls ? ` class="${cls}"` : ''}><td${title ? ` title="${esc(title)}"` : ''}>${name}</td>${halves.map(([, u]) => `<td>${f(u)}</td>`).join('')}</tr>`);
     const time = (i) => (root ? data.units[i].ms : X.partMs(i, k, true));
-    if (root) row('Spans', (u) => X.fmtInt(u.length));
-    row('Time, median', (u) => X.fmtMs(X.median(u.map(time))));
-    row('90th percentile', (u) => X.fmtMs(X.R.quantile(X.sortedOf(u.map(time)), 0.9)));
-    if (!root && X.kids[k].length) {
-      row('Own time, median', (u) => X.fmtMs(X.median(u.map((i) => data.units[i].o[k] * data.units[i].ms))), '', 'Its time that none of the violins shown under it counts');
-    }
-    if (!root && S.mode === 'ms') row('Share, median', (u) => X.fmtPct(X.median(u.map((i) => data.units[i].s[k]))));
-    const seen = (u) => u.filter((i) => data.units[i].s[k] > 0).length / u.length;
-    if (!root && halves.some(([, u]) => seen(u) < 0.995)) row(`In, of ${esc(X.UNIT)} spans`, (u) => X.fmtPct(seen(u)));
-    const ck = root ? undefined : X.countFor.get(k);
-    if (ck !== undefined) {
-      row('Runs, median', (u) => X.fmtInt(Math.round(X.median(u.map((i) => data.units[i].c[ck])))));
-      row('Per run, median', (u) => X.fmtUs(X.median(u.filter((i) => data.units[i].c[ck] > 0).map((i) => X.partMs(i, k, true) / data.units[i].c[ck]))));
-    }
-    const f = S.factors.has(col.id) ? S.factors.get(col.id) : 1;
-    if (f !== 1) row(`Time, ${X.fmtFactor(f)}`, (u) => X.fmtMs(X.median(u.map((i) => X.partMs(i, k, false)))), 'proj');
-    // What the what-if does to the whole compile time, whichever parts it changes: below 1× is slower.
-    if (X.scenarioOn()) {
-      const compile = (u, measured) => X.median(u.map((i) => X.totalMs(i, measured)));
-      row(`${esc(X.UNIT)}, what if`, (u) => X.fmtMs(compile(u, false)), 'proj');
-      row('Speed-up', (u) => `${(compile(u, true) / compile(u, false)).toFixed(2)}×`, 'proj');
-    }
-    // What it is: merged, or a span renamed, and in which tree.
     const kind = [];
     if (!root && col.merged) kind.push(`Merged: ${X.fmtInt(X.layout.size(col.id))} spans`);
-    const spans = root ? null : X.layout.spanName(col.id);
-    if (spans && spans !== col.label) kind.push(`Span: ${esc(spans)}`);
-    if (!root && col.second) kind.push('In Projections: takes nothing from the tree on the left');
-    let html = `<div class="card-top"><div><h3>${esc(col.label)}</h3>${kind.length ? `<div class="span-name">${kind.join(' · ')}</div>` : ''}`
+    const own = root ? null : X.layout.spanName(col.id);
+    if (own && own !== col.label) kind.push(`Span: ${esc(own)}`);
+    if (!root && col.second) kind.push('In Projections');
+    const title = root ? esc(col.label) : `<button type="button" class="title-edit" data-rename title="Rename it">${esc(col.label)}</button>`;
+    let html = `<div class="card-top"><div><h3>${title}</h3>${kind.length ? `<div class="span-name">${kind.join(' · ')}</div>` : ''}`
       + `${crumbs.length ? `<div class="crumbs">${crumbs.map((p) => `<button type="button" data-open-part="${esc(data.columns[p].id)}">${esc(data.columns[p].label)}</button>`).join(' › ')}</div>` : ''}</div>`
-      + '<button class="icon-btn" type="button" data-close aria-label="Close">×</button></div>'
-      + `<table class="stats"><thead><tr><th></th>${halves.map(([hk, , name]) => `<th><span class="sw" style="background:${T[hk]}"></span>${esc(name)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
-    if (!root) html += ck !== undefined ? runsScatter(k, ck, halves) : shareScatter(k, halves);
+      + '<button class="icon-btn" type="button" data-close aria-label="Close">×</button></div>';
+    if (!root) html += shareScatter(k, halves) + runsOf(k, halves, col);
     html += topUnits(k, halves, time);
     if (!root && col.merged) html += membersOf(col.id, halves);
-    // The root: back to where the page starts, the violins saved in it, or the unit's span and its largest children.
-    if (root) {
-      html += `<div class="card-actions"><button type="button" class="btn small" data-act="reset" title="${X.layout.saved ? 'The violins this page was saved with' : `${esc(X.UNIT)} and the spans that take most of its time`}">`
-        + `${X.layout.saved ? 'Back to the saved violins' : 'Start over'}</button></div>`;
-    } else {
-      html += `<div class="card-actions"><button type="button" class="btn small" data-act="hide" title="Its parent still counts its time">Hide</button>`
-        + '<button type="button" class="btn small" data-act="rename" title="Or double-click its name">Rename</button>'
-        + (col.merged ? '<button type="button" class="btn small" data-act="split" title="Show what it merges on its own again">Split up</button>' : '')
-        + (spans ? `<button type="button" class="btn small" data-act="spans" title="${esc(spans)} in the Spans tab: what calls it and what it calls">In Spans</button>` : '')
-        + '</div>';
-    }
+    // Its one span name, also when merged from spans of one name: what calls it and what it calls, in Spans.
+    const names = root ? [] : X.layout.spanNames(col.id);
+    const acts = root ? [`<button type="button" class="btn small" data-act="reset" title="${X.layout.saved ? 'The violins this page was saved with' : `${esc(X.UNIT)} and the spans that take most of its time`}">${X.layout.saved ? 'Back to the saved violins' : 'Start over'}</button>`]
+      : [col.merged ? '<button type="button" class="btn small" data-act="split" title="Its larger members on their own again; the rest behind the + of where they go">Split up</button>' : '',
+        names.length === 1 ? `<button type="button" class="btn small" data-act="spans" title="${esc(names[0])} in the Spans tab: what calls it and what it calls">In Spans</button>` : ''].filter(Boolean);
+    if (acts.length) html += `<div class="card-actions">${acts.join('')}</div>`;
     card.innerHTML = html;
+  }
+
+  // Runs against time when how many times its spans run differs between units: at least two counts, each in 5% of
+  // them. Else what the count is, and what each run takes.
+  function runsOf(k, halves, col) {
+    const counts = new Map();
+    for (const [, u] of halves) for (const i of u) { const n = data.units[i].c[k]; if (n > 0) counts.set(n, (counts.get(n) || 0) + 1); }
+    const present = [...counts.values()].reduce((a, b) => a + b, 0);
+    if (!present) return '';
+    const what = (n) => (col.merged ? (n === 1 ? 'span' : 'spans') : (n === 1 ? 'run' : 'runs'));
+    if ([...counts.values()].filter((m) => m >= 0.05 * present).length >= 2) return runsScatter(k, halves, what(2));
+    const [n, m] = [...counts].sort((a, b) => b[1] - a[1])[0];
+    const units = halves.flatMap(([, u]) => u).filter((i) => data.units[i].c[k] === n);
+    const each = n > 1 ? `, ${X.fmtUs(X.median(units.map((i) => X.partMs(i, k, true) / n)))} each` : '';
+    const how = m === present ? 'Always' : `In ${X.fmtPct(m / present)} of ${esc(X.UNIT)} spans`;
+    return `<p class="runs-line"><b>Runs</b> ${how}: ${n} ${what(n)}${each}</p>`;
   }
 
   // The units in view that spend the most in it: a click selects one, a click on the selected one opens the Timeline.
   function topUnits(k, halves, time) {
-    const all = halves.flatMap(([, u]) => u).map((i) => [i, time(i)]).filter(([, ms]) => ms > 0).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const all = halves.flatMap(([, u]) => u).map((i) => [i, time(i)]).filter(([, ms]) => ms > 0).sort((a, b) => b[1] - a[1]).slice(0, 8);
     if (!all.length) return '';
     const T = X.T;
     const rows = all.map(([i, ms]) => {
       const u = data.units[i], side = X.sideKey(u.g), sel = S.sel === i;
       const share = k < 0 ? '' : X.fmtPct(u.s[k]);
-      return `<button type="button" class="top-unit${sel ? ' sel' : ''}" data-unit="${i}" title="${sel ? 'Open it in the Timeline' : 'Select it everywhere; click again for the Timeline'}">`
-        + `${X.glyph(side === 'left' || side === 'right' ? side : 'marker', T[side])}<span class="nm">${esc(u.l)}<small>${esc(X.groupName(u.g))}</small></span>`
-        + `<span class="ms">${X.fmtMs(ms)}${share ? `<small>${share}</small>` : ''}</span></button>`;
+      return `<button type="button" class="top-unit${sel ? ' sel' : ''}" data-unit="${i}" title="${esc(`${u.l}, ${X.groupName(u.g)}: ${sel ? 'open it in the Timeline' : 'select it everywhere; click again for the Timeline'}`)}">`
+        + `${X.glyph(side === 'left' || side === 'right' ? side : 'marker', T[side])}<span class="nm">${esc(u.l)} <small>${esc(X.groupName(u.g))}</small></span>`
+        + `<span class="ms">${X.fmtMs(ms)}${share ? ` <small>${share}</small>` : ''}</span></button>`;
     });
     return `<div><p class="section-title">${k < 0 ? 'Longest' : 'Most time in it'}</p><div class="top-units">${rows.join('')}</div></div>`;
   }
@@ -184,15 +171,15 @@
       return [m, X.median(units.map((i) => ms[i] / data.units[i].ms))];
     }).sort((a, b) => b[1] - a[1]);
     const SHOW = 12;
-    const rows = list.slice(0, SHOW).map(([m, share]) => `<div class="member"><span class="nm${X.layout.isMerged(m) ? ' merged' : ''}">${esc(X.layout.label(m))}</span>`
+    const rows = list.slice(0, SHOW).map(([m, share]) => `<div class="member"><span class="nm">${esc(X.layout.label(m))}${X.layout.isMerged(m) ? `<span class="count">${X.fmtInt(X.layout.size(m))}</span>` : ''}</span>`
       + `<span class="pct">${X.fmtPct(share)}</span><button type="button" class="chip-x" data-leave="${esc(m)}" title="Take it out of ${esc(X.layout.label(id))}" aria-label="Take it out">×</button></div>`);
     const more = list.length > SHOW ? `<div class="member more">and ${X.fmtInt(list.length - SHOW)} more</div>` : '';
-    return `<div><p class="section-title">Merges, median share</p><div class="members">${rows.join('')}${more}</div></div>`;
+    return `<div><p class="section-title">Made of <span class="sub">median share</span></p><div class="members">${rows.join('')}${more}</div></div>`;
   }
 
   // Its share against the unit's time, both halves, one dot per unit: whether it is what makes long units long.
   function shareScatter(k, halves) {
-    const T = X.T, W = 320, H = 150, L = 40, Rt = 8, Tp = 6, B = 28;
+    const T = X.T, W = 320, H = 132, L = 40, Rt = 8, Tp = 6, B = 28;
     const pts = [];
     let xmin = Infinity, xmax = -Infinity, ymax = 0;
     for (const [hk, u] of halves) for (const i of u) {
@@ -212,7 +199,7 @@
     }
     for (let e = xmin; e <= xmax; e++) {
       out.push(`<path d="M${n1(Xp(e))} ${Tp}V${H - B}" stroke="${T.grid}"/>`);
-      out.push(X.txt(Xp(e), H - B + 13, X.decade(10 ** e), { anchor: 'middle', fill: T.muted, size: 10.5, tabular: true }));
+      out.push(X.txt(Xp(e), H - B + 13, X.decade(10 ** e), { anchor: e === xmax ? 'end' : 'middle', fill: T.muted, size: 10.5, tabular: true }));
     }
     out.push(X.txt((L + W - Rt) / 2, H - 2, `${X.UNIT} time`, { anchor: 'middle', fill: T.muted, size: 10.5 }));
     for (const hk of ['left', 'right']) {
@@ -224,12 +211,12 @@
     return out.join('');
   }
 
-  function runsScatter(k, ck, halves) {
-    const T = X.T, W = 320, H = 160, L = 46, Rt = 8, Tp = 6, B = 28;
+  function runsScatter(k, halves, what) {
+    const T = X.T, W = 320, H = 140, L = 46, Rt = 8, Tp = 6, B = 28;
     const pts = [];
     let xmax = 1, ymin = Infinity, ymax = -Infinity;
     for (const [hk, u] of halves) for (const i of u) {
-      const n = data.units[i].c[ck], ms = data.units[i].s[k] * data.units[i].ms;
+      const n = data.units[i].c[k], ms = data.units[i].s[k] * data.units[i].ms;
       if (n < 1 || ms <= 0) continue;
       const x = Math.log10(n), y = Math.log10(Math.max(ms, 1e-4));
       xmax = Math.max(xmax, x); ymin = Math.min(ymin, y); ymax = Math.max(ymax, y);
@@ -249,7 +236,7 @@
       out.push(`<path d="M${n1(Xp(e))} ${Tp}V${H - B}" stroke="${T.grid}"/>`);
       out.push(X.txt(Xp(e), H - B + 13, X.fmtInt(10 ** e), { anchor: 'middle', fill: T.muted, size: 10.5, tabular: true }));
     }
-    out.push(X.txt((L + W - Rt) / 2, H - 2, `runs per ${X.UNIT}`, { anchor: 'middle', fill: T.muted, size: 10.5 }));
+    out.push(X.txt((L + W - Rt) / 2, H - 2, `${what} per ${X.UNIT}`, { anchor: 'middle', fill: T.muted, size: 10.5 }));
     out.push('<g clip-path="url(#sc)">');
     const labels = [];
     for (let e = -4; e <= 2; e++) {

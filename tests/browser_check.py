@@ -161,7 +161,7 @@ async def main():
         expect('Two as one' in await page.evaluate('TX.data.columns.filter((c) => c.second).map((c) => c.label)'), 'merging in the second tree did not take')
         n = await second()
         x0, y0 = await centre(page, '[data-col="1"]')
-        x1, y1 = await centre(page, f'[data-col="{await page.evaluate(f"TX.violins.G.p.cols.findIndex((c) => c.id === {TWO!r})")}"]')
+        x1, y1 = await centre(page, f'[data-add="{TWO}"]')
         await page.mouse.move(x0, y0)
         await page.mouse.down()
         await page.mouse.move(x1, y1, steps=12)
@@ -182,17 +182,29 @@ async def main():
         expect(ok, 'a what-if across both trees gave times that make no sense')
         await shot(page, 'phases-built')
 
-        # The card of a merged violin: the units that spend most in it, its members; taking one out keeps the rest.
+        # The card of a merged violin, opened by a click by its violin, off the dots: its charts, the units that spend
+        # most in it, what it is made of; its name edited in place; a click on a unit selects it.
         merged = await page.evaluate('TX.violins.G.p.cols.findIndex((c) => c.merged && !c.second)')
         if merged < 0:
             errors.append('no merged violin to open a card for')
         else:
-            await page.click(f'[data-col="{merged}"]')
-            await page.wait_for_timeout(500)
+            x, y = await page.evaluate(f"""(() => {{
+              const G = TX.violins.G, b = document.getElementById('stage').getBoundingClientRect();
+              return [b.left + G.xOf({merged}), b.top + G.TR.y0 + 2];
+            }})()""")
+            await page.mouse.click(x, y)
+            await page.wait_for_timeout(300)
+            expect(await page.is_visible('#card-pop'), 'a click by a violin opened no card')
+            expect(len(await page.query_selector_all('#card-pop svg')) >= 1, 'the card shows no chart')
             expect(await page.is_visible('#card-pop .top-unit'), 'the card lists no units')
             members = await page.query_selector_all('#card-pop [data-leave]')
             expect(len(members) >= 2, 'the card of a merged violin lists no members')
             await shot(page, 'card')
+            await page.click('#card-pop [data-rename]')
+            await page.fill('#card-pop [data-rename]', 'Named in its card')
+            await page.keyboard.press('Enter')
+            await page.wait_for_timeout(300)
+            expect('Named in its card' in await page.evaluate('TX.data.columns.map((c) => c.label)'), 'renaming in the card did not take')
             await page.click('#card-pop .top-unit')
             await page.wait_for_timeout(200)
             expect(await page.evaluate('TX.S.sel !== null'), 'clicking a unit in the card selected nothing')

@@ -293,9 +293,12 @@
   // whose spans repeat names opens into those names first.
   function expand(id) {
     if (L.groups.has(id)) byName(id);
-    const kids = kidsOfNode(id).map((k) => [k, shareIn(k, id).share]).sort((x, y) => y[1] - x[1]);
+    for (const k of largest(kidsOfNode(id), id)) L.shown.add(k);
+  }
+  function largest(list, of) {
+    const kids = list.map((k) => [k, shareIn(k, of).share]).sort((x, y) => y[1] - x[1]);
     const big = kids.filter(([, s]) => s >= BIG).slice(0, MAX_OPEN);
-    for (const [k] of big.length ? big : kids.slice(0, 1)) L.shown.add(k);
+    return (big.length ? big : kids.slice(0, 1)).map(([k]) => k);
   }
   function byName(g) {
     const d = L.groups.get(g), named = new Map();
@@ -371,18 +374,19 @@
     showUp(id);
   }
   // A merged node split up: inside another merged node, its members join that one; else each goes where it belongs,
-  // a copy left nowhere to the top of the second tree.
+  // a copy left nowhere to the top of the second tree. Shown, it leaves its larger members shown, as opening it would,
+  // and the rest behind the + of where they go.
   function ungroup(id) {
     const d = L.groups.get(id);
     if (!d) return;
-    const was = shownOf(id), outer = memberOf.get(id);
+    const was = shownOf(id), outer = memberOf.get(id), keep = was ? largest(d.members, id) : [];
     L.groups.delete(id);
     L.shown.delete(id);
     if (outer) { const o = L.groups.get(outer); o.members = o.members.filter((m) => m !== id).concat(d.members); }
     relink();
     for (const m of d.members) if (isCopy(m) && parentOf(m) === null) L.top2.add(m);
     relink();
-    if (was) for (const m of d.members) L.shown.add(m);
+    for (const m of keep) L.shown.add(m);
   }
   // A node of the first tree copied to the top of the second: a path as its copy, a merged node with its members.
   function copyOver(id) {
@@ -674,6 +678,13 @@
     progress: () => [X.chunksLoaded(), X.chunkCount],
     rootKey: () => (ready ? rootKey() : null),
     label, spanName, inside, parentOf, canMerge, treeOf,
+    // The span names a node's paths have, each once.
+    spanNames: (id) => {
+      const out = new Set();
+      const walk = (x) => { if (L.groups.has(x)) L.groups.get(x).members.forEach(walk); else if (pathOf(x) >= 0) out.add(spanName(x)); };
+      walk(id);
+      return [...out];
+    },
     // How many spans a node has: one path, or a merged node's paths.
     size: (id) => { const n = (x) => (L.groups.has(x) ? L.groups.get(x).members.reduce((t, m) => t + n(m), 0) : 1); return n(id); },
     // Whether the second tree has anything in it.
