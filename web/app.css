@@ -186,6 +186,45 @@ svg.layer.fade { animation: fade-in .2s ease-out; }
 .tip .tt span { opacity: .72; }
 .tip .tt .part { opacity: 1; }
 
+/* Changing the violins: the × by a name, the + list, the bar that merges picked violins */
+.hide-x { position: absolute; left: 0; top: 0; z-index: 2; width: 18px; height: 18px; padding: 0; border: 1px solid var(--line); border-radius: 50%;
+  background: var(--surface); color: var(--muted); font-size: 12px; line-height: 1; }
+.hide-x:hover { color: var(--ink); background: var(--raised); }
+.add-menu {
+  position: absolute; left: 0; top: 0; z-index: 6; width: 380px; max-height: min(440px, calc(100% - 24px));
+  background: var(--surface); border: 1px solid var(--edge); border-radius: 12px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column;
+}
+.add-head { padding: 10px 10px 6px; }
+.add-head input { width: 100%; box-sizing: border-box; border: 1px solid var(--edge); background: var(--surface); border-radius: 7px; padding: 5px 9px; font: 12.5px var(--sans); color: var(--ink); }
+.add-head input:focus { outline: 2px solid var(--sel); outline-offset: -1px; }
+.add-list { overflow: auto; min-height: 0; flex: 1; padding: 0 4px; }
+.add-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; font-size: 12.5px; cursor: pointer; }
+.add-row:hover { background: var(--raised); }
+.add-row.all { color: var(--muted); border-bottom: 1px solid var(--grid); border-radius: 6px 6px 0 0; }
+.add-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-row .nm.merged { font-style: italic; }
+.add-row small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.add-row .pct { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+.add-row .pct small { text-align: right; }
+.add-none { margin: 6px 8px 10px; color: var(--muted); font-size: 12.5px; }
+.add-foot { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--grid); }
+.add-count { margin-right: auto; color: var(--muted); font-size: 12px; }
+.add-foot input, .merge-bar input { flex: 1; min-width: 0; border: 1px solid var(--edge); background: var(--surface); border-radius: 6px; padding: 3px 8px; font: 12.5px var(--sans); color: var(--ink); }
+.add-foot input:focus, .merge-bar input:focus { outline: 2px solid var(--sel); outline-offset: -1px; }
+.text-btn.primary { color: var(--bg); background: var(--ink); font-weight: 600; }
+.text-btn.primary:hover { color: var(--bg); background: var(--ink); opacity: .88; }
+.text-btn:disabled { opacity: .45; cursor: default; background: none; }
+.merge-bar {
+  position: absolute; left: 50%; bottom: 16px; z-index: 6; transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
+  width: min(460px, calc(100% - 32px)); box-sizing: border-box; padding: 8px 10px; font-size: 12.5px;
+  background: var(--surface); border: 1px solid var(--edge); border-radius: 10px; box-shadow: var(--shadow);
+}
+.merge-bar > span { color: var(--muted); white-space: nowrap; }
+.merge-bar .chip-x { border-left: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.card-top h3 input { font: inherit; width: 100%; box-sizing: border-box; border: 1px solid var(--edge); border-radius: 6px; padding: 1px 6px; color: var(--ink); background: var(--surface); }
+
 /* Part card */
 .card-pop {
   position: absolute; left: 0; top: 0; z-index: 5; width: 352px; max-height: calc(100% - 20px); overflow: auto;

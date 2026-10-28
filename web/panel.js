@@ -1,5 +1,6 @@
-// The selected compilation's chip in the filter row (its name, workload and times, its trace id to copy, and clearing
-// it), and the part card (a part's numbers, runs against time, and what the what-if makes of them).
+// The selected unit's chip in the filter row (its name, workload and times, its trace id to copy, and clearing it),
+// and a violin's card: its numbers, runs against time, what the what-if makes of them, and hiding, renaming or
+// splitting it up.
 (function () {
   'use strict';
   const X = window.TX, S = X.S, data = X.data;
@@ -22,8 +23,26 @@
     card.addEventListener('click', (e) => {
       if (e.target.closest('[data-close]')) { closeCard(); return; }
       const part = e.target.closest('[data-open-part]');
-      if (part) { const b = card.getBoundingClientRect(); openCard(part.dataset.openPart, { left: b.left, right: b.right, top: b.top, bottom: b.top }); }
+      if (part) { const b = card.getBoundingClientRect(); openCard(part.dataset.openPart, { left: b.left, right: b.right, top: b.top, bottom: b.top }); return; }
+      const act = e.target.closest('[data-act]');
+      if (!act) return;
+      const id = S.card;
+      if (act.dataset.act === 'hide') { closeCard(); X.layout.hide(id); }
+      else if (act.dataset.act === 'split') { closeCard(); X.layout.ungroup(id); }
+      else if (act.dataset.act === 'rename') {
+        const h = card.querySelector('h3');
+        h.innerHTML = `<input data-rename aria-label="Name" value="${esc(X.layout.label(id))}">`;
+        const input = h.querySelector('input');
+        input.focus();
+        input.select();
+      }
     });
+    card.addEventListener('keydown', (e) => {
+      if (!e.target.matches('[data-rename]')) return;
+      if (e.key === 'Enter') { X.layout.rename(S.card, e.target.value); e.preventDefault(); }
+      if (e.key === 'Escape') { renderCard(); e.stopPropagation(); }
+    });
+    card.addEventListener('focusout', (e) => { if (e.target.matches('[data-rename]') && S.card !== null) X.layout.rename(S.card, e.target.value); });
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -77,7 +96,8 @@
     if (S.card === null) return;
     // The whole compilation, the root, has its compile times; a part, its own.
     const root = S.card === X.ROOT, k = root ? -1 : data.columnIndex.get(S.card), T = X.T;
-    const col = root ? { id: X.ROOT, label: 'Compilation' } : data.columns[k];
+    if (!root && k === undefined) { closeCard(); return; }
+    const col = root ? { id: X.ROOT, label: X.UNIT } : data.columns[k];
     const v = X.unitsInView(true);
     const halves = [['left', v.left, X.sideNames('left')], ['right', v.right, X.sideNames('right')]].filter(([, u]) => u.length);
     const crumbs = [];
@@ -85,7 +105,7 @@
     const rows = [];
     const row = (name, f, cls) => rows.push(`<tr${cls ? ` class="${cls}"` : ''}><td>${name}</td>${halves.map(([, u]) => `<td>${f(u)}</td>`).join('')}</tr>`);
     const own = (i) => (root ? data.units[i].ms : X.partMs(i, k, true));
-    if (root) row('Compilations', (u) => X.fmtInt(u.length));
+    if (root) row('Spans', (u) => X.fmtInt(u.length));
     else row('Share, median', (u) => X.fmtPct(X.median(u.map((i) => data.units[i].s[k]))));
     row('Time, median', (u) => X.fmtMs(X.median(u.map(own))));
     row('90th percentile', (u) => X.fmtMs(X.R.quantile(X.sortedOf(u.map(own)), 0.9)));
@@ -99,13 +119,18 @@
     // What the what-if does to the whole compile time, whichever parts it changes: below 1× is slower.
     if (X.scenarioOn()) {
       const compile = (u, measured) => X.median(u.map((i) => X.totalMs(i, measured)));
-      row('Compile, what if', (u) => X.fmtMs(compile(u, false)), 'proj');
+      row(`${esc(X.UNIT)}, what if`, (u) => X.fmtMs(compile(u, false)), 'proj');
       row('Speed-up', (u) => `${(compile(u, true) / compile(u, false)).toFixed(2)}×`, 'proj');
     }
     let html = `<div class="card-top"><div><h3>${esc(col.label)}</h3>${crumbs.length ? `<div class="crumbs">${crumbs.map((p) => `<button type="button" data-open-part="${esc(data.columns[p].id)}">${esc(data.columns[p].label)}</button>`).join(' › ')}</div>` : ''}</div>`
       + '<button class="icon-btn" type="button" data-close aria-label="Close">×</button></div>'
       + `<table class="stats"><thead><tr><th></th>${halves.map(([hk, , name]) => `<th><span class="sw" style="background:${T[hk]}"></span>${esc(name)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
     if (ck !== undefined) html += runsScatter(k, ck, halves);
+    if (!root) {
+      html += `<div class="card-actions"><button type="button" class="btn small" data-act="hide" title="Its parent still counts its time">Hide</button>`
+        + (col.merged ? '<button type="button" class="btn small" data-act="rename">Rename</button><button type="button" class="btn small" data-act="split" title="Show what it merges on its own again">Split up</button>' : '')
+        + '</div>';
+    }
     card.innerHTML = html;
   }
 
@@ -124,7 +149,7 @@
     ymin = Math.floor(ymin * 2) / 2; ymax = Math.ceil(ymax * 2) / 2;
     const x1 = Math.max(1, Math.ceil(xmax * 4) / 4);
     const Xp = (x) => L + x / x1 * (W - L - Rt), Yp = (y) => Tp + (ymax - y) / (ymax - ymin) * (H - Tp - B);
-    const out = [`<p class="section-title">Runs against time</p><svg width="100%" viewBox="0 0 ${W} ${H}" role="img" aria-label="Runs against time for each compilation">`,
+    const out = [`<p class="section-title">Runs against time</p><svg width="100%" viewBox="0 0 ${W} ${H}" role="img" aria-label="Runs against time for each ${esc(X.UNIT)} span">`,
       `<defs><clipPath id="sc"><rect x="${L}" y="${Tp}" width="${W - L - Rt}" height="${H - Tp - B}"/></clipPath></defs>`];
     for (let e = Math.ceil(ymin); e <= ymax; e++) {
       out.push(`<path d="M${L} ${n1(Yp(e))}H${W - Rt}" stroke="${T.grid}"/>`);
@@ -134,7 +159,7 @@
       out.push(`<path d="M${n1(Xp(e))} ${Tp}V${H - B}" stroke="${T.grid}"/>`);
       out.push(X.txt(Xp(e), H - B + 13, X.fmtInt(10 ** e), { anchor: 'middle', fill: T.muted, size: 10.5, tabular: true }));
     }
-    out.push(X.txt((L + W - Rt) / 2, H - 2, 'runs per compilation', { anchor: 'middle', fill: T.muted, size: 10.5 }));
+    out.push(X.txt((L + W - Rt) / 2, H - 2, `runs per ${X.UNIT}`, { anchor: 'middle', fill: T.muted, size: 10.5 }));
     out.push('<g clip-path="url(#sc)">');
     const labels = [];
     for (let e = -4; e <= 2; e++) {

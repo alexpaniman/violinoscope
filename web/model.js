@@ -31,9 +31,10 @@
   }
 
   function load(summary) {
+    // The columns, their split of each unit's time and the counts come from what the viewer shows (layout.js).
     const data = {
-      meta: summary.meta, columns: summary.columns, partition: summary.partition, families: summary.families,
-      counts: summary.counts, units: summary.units, failures: summary.failures,
+      meta: summary.meta, columns: summary.columns || [], partition: summary.partition || [], families: summary.families || [],
+      counts: summary.counts || [], units: summary.units, failures: summary.failures || [],
     };
     const groups = new Map();
     data.units.forEach((u, i) => {

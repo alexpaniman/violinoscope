@@ -144,15 +144,19 @@
     if (!X.included(u.g) || (S.range && (u.ms < S.range[0] || u.ms > S.range[1]))) X.select(null);
   };
 
+  // What is changed, so it is plain the page is showing a what-if; the dashed outlines are as measured. A factor on a
+  // violin not shown waits until it is shown again.
+  function renderWhatif() {
+    const changed = [...S.factors].filter(([k, v]) => v !== 1 && data.columnIndex.has(k));
+    $('whatif-chip').hidden = !changed.length;
+    const named = changed.map(([id, v]) => `${data.columns[data.columnIndex.get(id)].label} ${X.fmtFactor(v)}`);
+    $('whatif-text').innerHTML = `What if: <b>${changed.length === 1 ? esc(named[0]) : `${changed.length} violins`}</b>`;
+    $('whatif-text').title = `What if: ${named.join(', ')}\nDashed outlines: every violin as measured`;
+  }
   X.setFactor = (id, f) => {
     if (f === 1) S.factors.delete(id); else S.factors.set(id, f);
     X.project();
-    const changed = [...S.factors].filter(([, v]) => v !== 1);
-    $('whatif-chip').hidden = !changed.length;
-    // What is changed, so it is plain the page is showing a what-if; the dashed outlines are as measured.
-    const named = changed.map(([id, v]) => `${data.columns[data.columnIndex.get(id)].label} ${X.fmtFactor(v)}`);
-    $('whatif-text').innerHTML = `What if: <b>${changed.length === 1 ? esc(named[0]) : `${changed.length} parts`}</b>`;
-    $('whatif-text').title = `What if: ${named.join(', ')}\nDashed outlines: every part as measured`;
+    renderWhatif();
     X.violins.invalidate();
     X.render();
     X.panel.renderCard();
@@ -285,7 +289,7 @@
         const y = proj[b] ? HIST - Math.max(1.5, Math.log1p(proj[b]) / top * HIST) : HIST;
         d += `V${n1(y)}H${n1(PAD + (b + 1) / rc.NB * w)}`;
       }
-      out.push(`<path d="${d}V${HIST}" fill="none" stroke="${T.m3}" stroke-width="1.5" stroke-linejoin="round"><title>Compile times if the what-if held</title></path>`);
+      out.push(`<path d="${d}V${HIST}" fill="none" stroke="${T.m3}" stroke-width="1.5" stroke-linejoin="round"><title>${esc(X.UNIT)} times if the what-if held</title></path>`);
     }
     let rug = '';
     for (const i of rc.all.right) rug += `M${n1(xOfL(Math.log10(Math.max(data.units[i].ms, 1e-3))))} ${RUG0}V${RUG1}`;
@@ -333,25 +337,14 @@
   function bucketShares(rc) {
     const P = data.partition.length, NB = rc.NB, at = (l) => clamp(Math.floor((l - rc.lo) / (rc.hi - rc.lo) * NB), 0, NB - 1);
     const sum = Array.from({ length: NB }, () => new Float64Array(P)), n = new Float64Array(NB), logs = new Float64Array(NB);
-    // With a what-if, each part takes the factor of the parts of the tree it is made of, and each compilation sits at
-    // the compile time it would have.
-    const proj = X.proj(), from = data.partition.map((q) => (q.from || []).map((id) => data.columnIndex.get(id)).filter((k) => k !== undefined));
+    // With a what-if, each column's own time takes its factor, and each unit sits at the time it would take.
+    const proj = X.proj();
     const row = new Float64Array(P);
     for (const i of rc.all.left.concat(rc.all.right)) {
       const u = data.units[i];
       let total = 0;
       for (let p = 0; p < P; p++) {
-        let f = 1;
-        if (proj && from[p].length) {
-          let own = 0, scaled = 0;
-          for (const k of from[p]) {
-            let s = u.s[k];
-            for (const ch of X.kids[k]) s -= u.s[ch];
-            own += Math.max(0, s); scaled += Math.max(0, s) * proj.eff[k];
-          }
-          f = own > 0 ? scaled / own : proj.eff[from[p][0]];
-        }
-        row[p] = u.p[p] * f;
+        row[p] = u.p[p] * (proj && p < X.NC ? proj.eff[p] : 1);
         total += row[p];
       }
       const l = Math.log10(Math.max(proj ? X.totalMs(i, false) : u.ms, 1e-3)), b = at(l);
@@ -512,7 +505,7 @@
             const share = (q) => cum[q + 1] - cum[q];
             const rest = data.partition.map((p, q) => [q, share(q)]).filter(([q, m]) => q !== k && m >= 0.02).sort((a, b2) => b2[1] - a[1]).slice(0, 2);
             const near = !dom.neff[j] ? `none around ${X.fmtMs(10 ** dom.grid[j])}: drawn between its neighbours`
-              : `${X.fmtInt(dom.neff[j])} compilations around ${X.fmtMs(10 ** dom.grid[j])}${dom.wide[j] ? ', few: from a wider stretch' : ''}${X.proj() ? ', if the what-if held' : ''}`;
+              : `${X.nUnits(dom.neff[j])} around ${X.fmtMs(10 ** dom.grid[j])}${dom.wide[j] ? ', few: from a wider stretch' : ''}${X.proj() ? ', if the what-if held' : ''}`;
             X.tip([`${data.partition[k].label} · ${X.fmtPct(share(k))}`, near,
               ...rest.map(([q, m]) => `${data.partition[q].label} ${X.fmtPct(m)}`)], e.clientX - s.left, e.clientY - s.top);
           } else { hoverBand(-1); X.hideTip(); }
@@ -575,7 +568,7 @@
     const q = text.trim().toLowerCase();
     if (q.length < 6 || /\s/.test(q)) return false;
     const i = data.units.findIndex((u) => (u.t && u.t.toLowerCase() === q) || (u.fp && u.fp.toLowerCase().startsWith(q)));
-    if (i < 0) { X.toast('No compilation has that trace id or fingerprint'); return true; }
+    if (i < 0) { X.toast(`No ${X.UNIT} span has that trace id or fingerprint`); return true; }
     const u = data.units[i];
     if (!X.included(u.g) || (S.range && (u.ms < S.range[0] || u.ms > S.range[1]))) { X.toast(`${u.l} is left out by the filters`); return true; }
     X.select(i);
@@ -591,12 +584,12 @@
       [k('Esc'), 'Timeline: back to where it was before the last jump in'],
       [`${k('W')} ${k('S')} · ${k('A')} ${k('D')}`, 'Flame chart and flame graph: zoom · pan'],
       [k('F'), 'All of it again; or double-click empty space'], ['Double-click', 'A span: fit it'],
-      ['Paste', 'A trace id or fingerprint: select its compilation'], [k('Esc'), 'Close, then clear the selection'], [k('?'), 'This sheet'],
+      ['Paste', `A trace id or fingerprint: select its ${esc(X.UNIT)} span`], [k('Esc'), 'Close, then clear the selection'], [k('?'), 'This sheet'],
     ];
     const runs = X.RUNS.map((r, j) => `<tr><td>${X.fmtInt(r.units)}</td><td>${esc(X.runTitle(j))}</td></tr>`).join('');
-    return `<h3>${esc(meta.title || 'Trace explorer')}</h3><table>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>`
+    return `<h3>${esc(meta.title || X.UNIT)}</h3><table>${rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>`
       + `<h4>Runs, in the order the time views show them</h4><table class="runs">${runs}</table>`
-      + `<p>${X.fmtInt(data.units.length)} compilations, built ${esc(meta.generated || '')}${failed ? `; ${X.fmtInt(failed)} more failed to compile and are left out` : ''}.</p>`;
+      + `<p>${esc(X.nUnits(data.units.length))}, built ${esc(meta.generated || '')}${failed ? `; ${X.fmtInt(failed)} more failed and are left out` : ''}.</p>`;
   }
   function toggleKeys(open) {
     const pop = $('keys');
@@ -619,10 +612,10 @@
     X.on('name', renderNameChip);
 
     const stage = $('stage');
-    const own = (e) => e.target.closest('#controls, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast');
+    const own = (e) => e.target.closest('#controls, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-merge, #v-hide');
     const at = (e) => { const b = stage.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
     stage.addEventListener('pointermove', (e) => {
-      if (own(e)) { if (S.view === 'violins') X.violins.leave(); return; }
+      if (own(e)) { if (S.view === 'violins') X.violins.leave(e); return; }
       const [px, py] = at(e);
       if (S.view === 'violins') X.violins.move(e, px, py);
       else if (S.view === 'flame') X.flame.move(e, px, py);
@@ -679,6 +672,7 @@
       if (!$('rangecard').hidden && !e.target.closest('#rangecard') && !e.target.closest('#range-chip')) toggleRange(false);
       if (S.card !== null && !e.target.closest('#card-pop') && !e.target.closest('[data-col]')) X.panel.closeCard();
       if (!e.target.closest('#v-factor-menu, [data-pill]')) X.violins.closeMenu();
+      if (!e.target.closest('#v-add, [data-add]')) X.edit.closeAdd();
     });
     $('whatif-clear').addEventListener('click', () => { for (const id of [...S.factors.keys()]) S.factors.delete(id); X.setFactor('__none__', 1); });
     document.addEventListener('paste', (e) => {
@@ -690,8 +684,10 @@
       if (e.key === 'Escape') {
         if (!$('keys').hidden) toggleKeys(false);
         else if (!$('rangecard').hidden) toggleRange(false);
+        else if (X.edit.closeAdd()) { /* closed the + list */ }
         else if (X.violins.closeMenu()) { /* closed the factors */ }
         else if (S.card !== null) X.panel.closeCard();
+        else if (X.edit.clearPicked()) { /* let the picked violins go */ }
         else if (X.nav.back()) { /* back to where the time views were before a jump in */ }
         else if (S.sel !== null) X.select(null);
         else if (S.name !== null) X.spans.pick(null);
@@ -726,9 +722,20 @@
     new MutationObserver(theme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   }
 
+  // The unit's name where the markup leaves room for it.
+  function nameUnit() {
+    document.title = meta.title || X.UNIT;
+    for (const el of document.querySelectorAll('[data-u]')) {
+      for (const a of ['title', 'aria-label']) if (el.hasAttribute(a)) el.setAttribute(a, el.getAttribute(a).replaceAll('{unit}', X.UNIT));
+      if (!el.children.length && el.textContent.includes('{unit}')) el.textContent = el.textContent.replaceAll('{unit}', X.UNIT);
+    }
+  }
+
   function start() {
+    nameUnit();
     X.tokens();
     X.violins.init();
+    X.edit.init();
     X.flame.init();
     X.spans.init();
     X.panel.init();
@@ -736,13 +743,21 @@
     X.nav.init();
     wire();
     X.render();
-    // The other measure and scale, then names and span trees, in the background.
-    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 300));
-    idle(() => {
-      const G = X.violins.G;
-      if (G) for (const [mode, linear] of [['ms', false], ['share', true], ['ms', true]]) X.prepare(mode, linear, G.p.folded);
-      setTimeout(() => { X.loadNames().catch(() => {}); X.prefetchChunks(); }, 800);
+    // Every span tree, which the violins are built from; until then the Phases tab says how far reading has got.
+    X.on('chunk', () => { if (!X.layout.ready && S.view === 'violins') X.schedule(X.render); });
+    X.on('layout', () => {
+      renderWhatif();
+      X.violins.invalidate();
+      X.spans.invalidate();
+      X.flame.layoutChanged();
+      RC = null;
+      X.render();
+      X.panel.renderCard();
     });
+    X.prefetchChunks();
+    // The other measure and scale, in the background, once the violins are there.
+    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 300));
+    X.on('layout', () => idle(() => { for (const [mode, linear] of [['ms', false], ['share', true], ['ms', true]]) X.prepare(mode, linear); }));
   }
 
   const faces = ['400 12.5px "IBM Plex Sans"', '600 12.5px "IBM Plex Sans"', '500 11px "IBM Plex Sans"'];

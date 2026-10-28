@@ -28,7 +28,7 @@
     root.innerHTML = '<div class="tl-head"><div class="tl-axis-row"><div class="tl-headcell"><span class="tl-th">Span</span><span class="tl-folds" role="group" aria-label="Fold spans">'
       + fold('none', 'Collapse all', 'M3.5 6.5 7 3l3.5 3.5M3.5 11 7 7.5l3.5 3.5') + fold('less', 'Collapse a level', 'M3.5 9 7 5.5 10.5 9')
       + fold('more', 'Expand a level', 'M3.5 5 7 8.5 10.5 5') + fold('all', 'Expand all', 'M3.5 3 7 6.5 10.5 3M3.5 7.5 7 11l3.5-3.5')
-      + '</span></div><div class="tl-ticks" title="Time since the first compilation in view began; each run counts from its own"></div></div></div>'
+      + '</span></div><div class="tl-ticks" title="Time since the first span in view began; each run counts from its own"></div></div></div>'
       + '<div class="tl-rows"><div class="tl-grid"></div><div class="tl-layer"></div></div>';
     head = root.firstChild;
     rowsEl = root.lastChild;
@@ -319,7 +319,7 @@
 
   function rowHtml(j, y, T, w) {
     const i = M.U[j], r = M.R[j], t = treeOf(i), u = data.units[i], span = w[1] - w[0];
-    const flags = t ? t.flat[5 * r + 4] : 0, part = ((flags >> 2) & 255) - 1, depth = t ? t.depth[r] : 0;
+    const flags = t ? t.flat[5 * r + 4] : 0, part = X.layout.partOfRow(i, r), depth = t ? t.depth[r] : 0;
     const color = r === 0 ? (T.scheme === 'dark' ? '#4a505a' : '#a9b0ba') : part >= 0 ? T.cols[part] : T.unowned;
     const async = r > 0 && (flags & 1);
     const x0 = (M.D0[j] - w[0]) / span * 100, x1 = (M.D1[j] - w[0]) / span * 100;
@@ -327,7 +327,7 @@
     const tw = kids ? `<button type="button" class="tl-tw" data-fold="${j}" aria-expanded="${!isFolded}" aria-label="${isFolded ? 'Open' : 'Fold'}">`
       + '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>'
       : '<span class="tl-tw"></span>';
-    const name = t ? t.names[t.flat[5 * r]] : 'Compile query';
+    const name = t ? t.names[t.flat[5 * r]] : X.UNIT;
     let label;
     if (r === 0) {
       const side = X.sideKey(u.g);
@@ -345,16 +345,16 @@
   function tipFor(j) {
     const i = M.U[j], r = M.R[j], u = data.units[i], t = treeOf(i);
     if (r === 0 || !t) {
-      const top = data.partition.map((p, q) => [p.label, u.p[q]]).sort((a, b) => b[1] - a[1]).slice(0, 2);
-      return [u.l, X.groupName(u.g), `Compile ${X.fmtMs(u.ms)}`, ...top.map(([label, v]) => `${label} ${X.fmtPct(v)}`)];
+      const top = u.p ? data.partition.map((p, q) => [p.label, u.p[q]]).sort((a, b) => b[1] - a[1]).slice(0, 2) : [];
+      return [u.l, X.groupName(u.g), `${X.UNIT} ${X.fmtMs(u.ms)}`, ...top.map(([label, v]) => `${label} ${X.fmtPct(v)}`)];
     }
-    const f = t.flat, flags = f[5 * r + 4], part = ((flags >> 2) & 255) - 1, dur = f[5 * r + 3] / 1000;
+    const f = t.flat, flags = f[5 * r + 4], part = X.layout.partOfRow(i, r), dur = f[5 * r + 3] / 1000;
     // Self time: less what its synchronous children cover.
     let inner = 0;
     for (let q = r + 1; q < r + t.size[r]; q++) if (t.depth[q] === t.depth[r] + 1 && !(f[5 * q + 4] & 1)) inner += f[5 * q + 3] / 1000;
     const lines = [t.names[f[5 * r]], `${X.fmtMs(dur)} · self ${X.fmtMs(Math.max(0, dur - inner))}`, `from ${X.fmtMs(f[5 * r + 2] / 1000)} into ${u.l}`];
     lines.push(part >= 0 ? data.columns[part].label : '');
-    if (flags & 1) lines.push('Runs beside the compiler');
+    if (flags & 1) lines.push('Runs beside its parent');
     return lines.filter((l, k) => l || k < 3);
   }
 

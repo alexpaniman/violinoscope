@@ -3,11 +3,13 @@
 // so moving the mouse never touches the rest. The figure zooms itself, on a pinch or Ctrl and the wheel: the SVGs
 // through their view box, and the canvases drawn again for what shows, at the new scale, so everything stays sharp.
 // What-if: each part's factor in a pill at the top of its column, and the factors in a row when it is clicked.
+// The tree under the violins is what X.layout shows: a triangle opens or closes a column, a + at the end of a
+// column's children adds the ones not shown, and Shift and a click on names picks violins to merge.
 (function () {
   'use strict';
   const X = window.TX, S = X.S, R = X.R, data = X.data;
   const { $, esc, clamp, n1, txt } = X;
-  const HALF = R.HALF, RIGHT = 20, AX = 80, MIN_COL = 40, ANGLE = 30 * Math.PI / 180, SIZE = 12.5, DOT = 2.8, DIAMOND = 10;
+  const HALF = R.HALF, RIGHT = 20, AX = 80, MIN_COL = 26, MAX_COL = 68, ANGLE = 30 * Math.PI / 180, SIZE = 12.5, DOT = 2.8, DIAMOND = 10;
   const DOT_R = DOT / 2;  // as the GPU draws it
 
   const MAX_ZOOM = 12;
@@ -46,29 +48,31 @@
     if (!W || !H) return;
     const TOP = X.contentTop() + 8;
     clampZoom(W, H, TOP);
-    const folded = X.foldsFor(W - AX - RIGHT, MIN_COL);
-    const p = X.prepare(S.mode, S.linear, folded);
-    const key = `${p.key}|${W}x${H}|${T.scheme}|${TOP}`;
+    if (!X.layout.ready) { loading(W, H, TOP); return; }
+    const p = X.prepare(S.mode, S.linear);
+    const key = `${p.key}|${W}x${H}|${T.scheme}|${TOP}|${[...X.picked].join(',')}`;
     if (key === lastKey && !(opts && opts.force)) { drawHover(); return; }
     const glide = !!(G && G.p.cols.length === p.cols.length && G.p.vk === p.vk && G.p.cols.every((c, i) => c.id === p.cols[i].id));
     lastKey = key;
 
-    // Every column as wide as when all parts are open, so folding or opening a part moves only the columns after it
-    // and no violin changes shape; the plot ends after the last column.
-    const n = p.cols.length, colW = clamp((W - AX - RIGHT) / (1 + X.NC + S.extra.length), MIN_COL, 68), END = AX + n * colW;
+    // Columns keep their width until there are more than fit, so opening one moves only the columns after it and no
+    // violin changes shape; the plot ends after the last column.
+    const n = p.cols.length, colW = clamp((W - AX - RIGHT) / Math.max(n, 16), MIN_COL, MAX_COL), END = AX + n * colW;
     const xOf = (c) => AX + (c + 0.5) * colW;
-    // A span name added from the spans table stands alone, at the top level.
-    // The whole compilation is the root the parts branch from; in Share it is 100% everywhere, so it shows only its
+    // The unit's own span is the root the columns branch from; in Share it is 100% everywhere, so it shows only its
     // median time.
-    const depth = p.cols.map((col) => (col.root || col.extra ? 0 : X.depthIdx[col.base] + 1));
-    const isParent = p.cols.map((col) => col.root || (!col.extra && X.kids[col.base].length > 0));
+    const depth = p.cols.map((col) => (col.root ? 0 : X.depthIdx[col.base] + 1));
+    const isParent = p.cols.map((col) => X.layout.kids(col.id).length > 0);
     const bare = (c) => p.cols[c].root && S.mode === 'share';
     const visKids = p.cols.map((col) => p.cols.map((_, j) => j).filter((j) => p.cols[j].parent === col.id));
+    // A column with children not shown has a + at the end of those it shows.
+    const more = p.cols.map((col, c) => visKids[c].length > 0 && X.layout.hidden(col.id) > 0);
     const maxD = Math.max(0, ...depth);
 
-    // Slanted labels all start on one line below the tree, so neighbours never cross.
-    const ROW = 15, NODE0 = 8, labelY = NODE0 + maxD * ROW + 11;
-    const cap = clamp(H * 0.19, 90, 180);
+    // Slanted labels all start on one line below the tree, so neighbours never cross. A deeper tree packs its levels
+    // closer and takes more room, so the names below it keep theirs.
+    const ROW = maxD > 3 ? 12 : 15, NODE0 = 8, labelY = NODE0 + maxD * ROW + 11;
+    const cap = clamp(H * 0.19, 90, 180) + Math.max(0, maxD - 2) * ROW;
     const labels = p.cols.map((col, c) => X.fitText(col.label, SIZE, isParent[c] ? 600 : 400, (cap - labelY - 8) / Math.sin(ANGLE)));
     const lens = labels.map((s, c) => X.textWidth(s, SIZE, isParent[c] ? 600 : 400));
     const treeH = labelY + Math.max(...lens) * Math.sin(ANGLE) + SIZE * Math.cos(ANGLE) + 8;
@@ -87,7 +91,7 @@
     const ends = R.subtreeEnd(p.cols);
     let band = 0;
     p.cols.forEach((col, c) => {
-      if (col.root || (!col.extra && depth[c] !== 1)) return;
+      if (col.root || depth[c] !== 1) return;
       if (band++ % 2 === 0) u.push(`<rect x="${n1(xOf(c) - colW / 2)}" y="${n1(V.y0 - 8)}" width="${n1((ends[c] - c + 1) * colW)}" height="${n1(TR.y0 + labelY - V.y0 + 8)}" rx="6" fill="${T.band}"/>`);
     });
     for (const t of sc.ticks) {
@@ -185,7 +189,7 @@
     if (sc.above) o.push(txt(6, V.y0 + 4, `↑ ${X.fmtInt(sc.above)} more`, { base: 'central', fill: T.muted, size: 10.5 }));
     // What the axis measures, along it.
     o.push(`<text transform="translate(16 ${n1((V.y0 + V.y1) / 2)}) rotate(-90)" text-anchor="middle" dominant-baseline="central" font-family="${X.SANS}" font-size="11.5" font-weight="500" fill="${T.muted}">`
-      + `${S.mode === 'share' ? 'Share of compile time' : 'Time per compilation'}</text>`);
+      + `${esc(S.mode === 'share' ? `Share of ${X.UNIT} time` : `Time per ${X.UNIT}`)}</text>`);
     o.push(`<path d="M${AX} ${n1(V.y1)}H${n1(END)}" stroke="${T.line}"/>`);
     let med = '';
     for (let c = 0; c < n; c++) {
@@ -208,33 +212,39 @@
       });
     }
     let lines = '';
+    const plusX = (c) => xOf(visKids[c][visKids[c].length - 1]) + colW / 2;
     p.cols.forEach((col, c) => {
       const y = nodeY(depth[c]), ch = visKids[c];
       if (ch.length) {
         const last = ch[ch.length - 1];
-        lines += `M${n1(xOf(c) + 7)} ${n1(y)}H${n1(xOf(last) - 4)}Q${n1(xOf(last))} ${n1(y)} ${n1(xOf(last))} ${n1(y + 4)}`;
-        for (const j of ch) lines += `M${n1(xOf(j))} ${n1(j === last ? y + 4 : y)}V${n1(nodeY(depth[j]) - (isParent[j] ? 6 : 0))}`;
+        // Past the last child, to the + when there is one.
+        lines += `M${n1(xOf(c) + 7)} ${n1(y)}H${n1(more[c] ? plusX(c) - 7 : xOf(last) - 4)}`;
+        if (!more[c]) lines += `Q${n1(xOf(last))} ${n1(y)} ${n1(xOf(last))} ${n1(y + 4)}`;
+        for (const j of ch) lines += `M${n1(xOf(j))} ${n1(j === last && !more[c] ? y + 4 : y)}V${n1(nodeY(depth[j]) - (isParent[j] ? 6 : 0))}`;
       }
       lines += `M${n1(xOf(c))} ${n1(y + (isParent[c] ? 5 : 0))}V${n1(TR.y0 + labelY - 2)}`;
     });
     o.push(`<path d="${lines}" fill="none" stroke="${T.line}"/>`);
     const deg = n1(-ANGLE * 180 / Math.PI);
     p.cols.forEach((col, c) => {
-      const x = xOf(c), y = nodeY(depth[c]);
+      const x = xOf(c), y = nodeY(depth[c]), picked = X.picked.has(col.id);
       if (col.root) o.push(`<circle cx="${n1(x)}" cy="${n1(y)}" r="3.5" fill="${T.muted}"/>`);
       else if (isParent[c]) {
         const open = visKids[c].length > 0;
         const tri = open ? `M${n1(x - 4.5)} ${n1(y - 2.5)}L${n1(x + 4.5)} ${n1(y - 2.5)}L${n1(x)} ${n1(y + 3)}Z`
           : `M${n1(x - 2.5)} ${n1(y - 4.5)}L${n1(x + 3)} ${n1(y)}L${n1(x - 2.5)} ${n1(y + 4.5)}Z`;
-        o.push(`<g class="hit" data-fold="${esc(col.id)}"><rect x="${n1(x - 11)}" y="${n1(y - 8)}" width="22" height="16" fill="transparent"/><path d="${tri}" fill="${open ? T.muted : T.ink}"/></g>`);
-        if (!open) o.push(txt(x + 7, y, `+${X.subEnd[col.base] - col.base}`, { base: 'central', fill: T.muted, size: 11, tabular: true }));
-      } else if (col.extra) {
-        o.push(`<g class="hit" data-unextra="${esc(col.extra)}"><title>Remove this span's violin</title><rect x="${n1(x - 9)}" y="${n1(y - 9)}" width="18" height="18" fill="transparent"/>`
-          + `<path d="M${n1(x - 3.5)} ${n1(y - 3.5)}l7 7m0 -7l-7 7" stroke="${T.muted}" stroke-width="1.6" stroke-linecap="round"/></g>`);
+        o.push(`<g class="hit" data-open="${esc(col.id)}"><title>${open ? 'Close' : 'Open'} ${esc(col.label)}</title><rect x="${n1(x - 11)}" y="${n1(y - 8)}" width="22" height="16" fill="transparent"/><path d="${tri}" fill="${open ? T.muted : T.ink}"/></g>`);
       } else o.push(`<circle cx="${n1(x)}" cy="${n1(y)}" r="2" fill="${T.line}"/>`);
+      if (more[c]) {
+        const px = plusX(c);
+        o.push(`<g class="hit add" data-add="${esc(col.id)}"><title>Add what ${esc(col.label)} has that is not shown (${X.layout.hidden(col.id)})</title>`
+          + `<circle cx="${n1(px)}" cy="${n1(y)}" r="6.5" fill="${T.surface}" stroke="${T.line}"/>`
+          + `<path d="M${n1(px - 3)} ${n1(y)}h6M${n1(px)} ${n1(y - 3)}v6" stroke="${T.muted}" stroke-width="1.4" stroke-linecap="round"/></g>`);
+      }
+      // A merged violin's name in italics; picked to merge, on a tint.
       o.push(`<g class="hit" data-col="${c}" transform="translate(${n1(x + 3)} ${n1(TR.y0 + labelY)}) rotate(${deg})">`
-        + `<rect x="${n1(-lens[c] - 4)}" y="-3" width="${n1(lens[c] + 8)}" height="${n1(SIZE + 6)}" fill="transparent"/>`
-        + `<text text-anchor="end" dominant-baseline="hanging" font-family="${X.SANS}" font-size="${SIZE}" font-weight="${isParent[c] ? 600 : 400}" fill="${T.ink}">${esc(labels[c])}</text></g>`);
+        + `<rect x="${n1(-lens[c] - 4)}" y="-3" width="${n1(lens[c] + 8)}" height="${n1(SIZE + 6)}" rx="4" fill="${picked ? T.sel : 'transparent'}" fill-opacity="${picked ? 0.22 : 0}"${picked ? ` stroke="${T.sel}"` : ''}/>`
+        + `<text text-anchor="end" dominant-baseline="hanging" font-family="${X.SANS}" font-size="${SIZE}" font-weight="${isParent[c] ? 600 : 400}"${col.merged ? ' font-style="italic"' : ''} fill="${T.ink}">${esc(labels[c])}</text></g>`);
     });
     // Its axis as the violins' is: named along it, ticked where its grid lines are, through each compilation's time.
     o.push(`<text transform="translate(16 ${n1((TL.y0 + TL.y1) / 2)}) rotate(-90)" text-anchor="middle" dominant-baseline="central" font-family="${X.SANS}" font-size="11.5" font-weight="500" fill="${T.muted}">When it runs</text>`);
@@ -247,10 +257,23 @@
     if (glide) for (const el of [under, over]) { el.classList.remove('fade'); void el.getBoundingClientRect(); el.classList.add('fade'); }
     points.resize(W, H, view(W, H));
     points.set(pos, rgba, size, { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 }, glide);
-    G = { W, H, n, colW, xOf, V, TR, TL, MD, yOfU, p, pts, where, half, labelY, END, pad: { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 } };
+    G = { W, H, n, colW, xOf, V, TR, TL, MD, yOfU, p, pts, where, half, labelY, END, deg, pad: { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 } };
     placeLayers();
     drawHeat();
     drawHover();
+  }
+
+  // Until every span is read, how far that has got.
+  function loading(W, H, top) {
+    const T = X.T, [k, n] = X.layout.progress();
+    under.innerHTML = '';
+    over.removeAttribute('viewBox');
+    over.innerHTML = txt(W / 2, Math.max(top + 120, H * 0.4), `Reading spans: ${k} of ${n} files`, { anchor: 'middle', base: 'central', fill: T.muted, size: 13 });
+    points.resize(W, H, view(W, H));
+    points.set(new Float32Array(0), new Uint8Array(0), new Float32Array(0), { x: 0, y: 0, w: W, h: H }, false);
+    for (const c of [heat, hover]) c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    G = null;
+    lastKey = null;
   }
 
   // The old look: per column, how many compilations are in the part at each moment, darker for more.
@@ -335,7 +358,7 @@
       ctx.fillStyle = T.ink;
       ctx.globalAlpha = strong ? 0.75 : 0.85;
       G.p.cols.forEach((col, c) => {
-        if (col.extra || col.root) return;
+        if (col.root) return;
         const f = u.f[col.base], hw = G.half * 0.5;
         let pos = 0;
         for (let j = 0; j < f.length; j += 2) {
@@ -392,15 +415,21 @@
     let dirty = false;
     if (col !== S.hoverCol) { S.hoverCol = col; dirty = true; }
     let hit = null;
-    if (col === null && !(e.target.closest && e.target.closest('[data-fold], [data-unextra]'))) hit = nearestDot(lx, ly);
+    if (col === null && !(e.target.closest && e.target.closest('[data-open], [data-add]'))) hit = nearestDot(lx, ly);
     const unit = hit ? hit.unit : null;
     if (unit !== S.hover) { S.hover = unit; dirty = true; }
     pad.classList.toggle('on-dot', !!hit);
     if (hit) X.tipHtml(dotTip(hit), px, py); else X.hideTip();
     showPill(col !== null ? col : lx >= AX && lx < G.END && ly >= G.V.y0 - 6 && ly <= G.V.y1 + 6 ? Math.floor((lx - AX) / G.colW) : null);
+    X.edit.showHide(col !== null && !G.p.cols[col].root ? { id: G.p.cols[col].id, label: G.p.cols[col].label, x: Z.x + (G.xOf(col) + 3) * Z.z, y: Z.y + (G.TR.y0 + G.labelY) * Z.z } : null);
     if (dirty) X.schedule(drawHover);
   }
-  function leave() { if (S.hover !== null || S.hoverCol !== null) { S.hover = null; S.hoverCol = null; X.schedule(drawHover); } X.hideTip(); showPill(null); }
+  function leave(e) {
+    if (S.hover !== null || S.hoverCol !== null) { S.hover = null; S.hoverCol = null; X.schedule(drawHover); }
+    X.hideTip();
+    showPill(null);
+    if (!(e && e.target && e.target.closest && e.target.closest('#v-hide'))) X.edit.showHide(null);
+  }
 
   // ---------------------------------------------------------------------------------------------------------
   // What-if. A part's factor shows in a pill at the top of its column: always once it is changed, and under the
@@ -414,7 +443,7 @@
 
   function showPill(c) {
     const col = c === null || !G ? null : G.p.cols[c];
-    if (!col || col.extra || col.root || drag || menuId !== null || factorOf(col.id) !== 1) { pill.hidden = true; return; }
+    if (!col || col.root || drag || menuId !== null || factorOf(col.id) !== 1) { pill.hidden = true; return; }
     if (!pill.hidden && pill.dataset.pill === String(c)) return;
     pill.dataset.pill = String(c);
     pill.title = pillTitle(col);
@@ -427,7 +456,7 @@
     const top = Math.round(pillTop());
     let html = '';
     G.p.cols.forEach((col, c) => {
-      const f = col.extra || col.root ? 1 : factorOf(col.id);
+      const f = col.root ? 1 : factorOf(col.id);
       if (f === 1 || col.id === menuId) return;
       html += `<button type="button" class="whatif-pill set" data-pill="${c}" title="${esc(pillTitle(col))}" style="left:${Math.round(pillX(c))}px;top:${top}px">${X.fmtFactor(f)}</button>`;
     });
@@ -484,19 +513,20 @@
     const step = e.target.closest && e.target.closest('[data-step]');
     if (step) { stepFactor(Number(step.dataset.step)); return; }
     if (e.target.closest && e.target.closest('#v-factor-menu')) return;
-    const fold = e.target.closest && e.target.closest('[data-fold]');
-    if (fold) {
-      const id = fold.dataset.fold;
-      S.foldTouched.set(id, !(G && G.p.folded.has(id)));
-      X.render();
+    const open = e.target.closest && e.target.closest('[data-open]');
+    if (open) {
+      const id = open.dataset.open;
+      if (X.layout.open(id)) X.layout.collapse(id); else X.layout.expand(id);
       return;
     }
-    const unextra = e.target.closest && e.target.closest('[data-unextra]');
-    if (unextra) { S.extra = S.extra.filter((name) => name !== unextra.dataset.unextra); X.render(); return; }
+    const add = e.target.closest && e.target.closest('[data-add]');
+    if (add) { X.edit.openAdd(add.dataset.add, add.getBoundingClientRect()); return; }
     const colEl = e.target.closest && e.target.closest('[data-col]');
     if (colEl) {
       const col = G.p.cols[Number(colEl.dataset.col)];
-      if (!col.extra) X.openCard(col.id, colEl.getBoundingClientRect());
+      // Shift and a click picks it to merge with others; a click alone opens its card.
+      if (e.shiftKey && !col.root) X.edit.pick(col.id);
+      else X.openCard(col.id, colEl.getBoundingClientRect());
       return;
     }
     const [lx, ly] = toLayer(px, py);

@@ -12,6 +12,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+LABELS = r'^--\s*(?P<group>\S+)\s+(?P<label>\S+), level'
 
 
 def read_js(path):
@@ -33,9 +34,13 @@ class Converter(unittest.TestCase):
                 s = json.loads(line)
                 cls.spans.setdefault(s['traceId'], []).append(s)
         subprocess.run([sys.executable, os.path.join(ROOT, 'violinoscope.py'), f'one={d}/a.jsonl', f'two={d}/b.jsonl',
-                        '--profile', os.path.join(HERE, 'profile.json'), '-o', f'{d}/out'], check=True, capture_output=True)
+                        '--unit', 'Handle request', '--label-regex', LABELS, '--cpu-attr', 'app.cpu_us', '-o', f'{d}/out'],
+                       check=True, capture_output=True)
+        # Without --unit, each trace's root is a unit; here the same span.
+        subprocess.run([sys.executable, os.path.join(ROOT, 'violinoscope.py'), f'{d}/a.jsonl', '-o', f'{d}/roots'],
+                       check=True, capture_output=True)
         cls.summary = read_js(f'{d}/out/data/summary.js')
-        cls.names = read_js(f'{d}/out/data/names.js')
+        cls.roots = read_js(f'{d}/roots/data/summary.js')
         cls.chunks = []
         k = 0
         while os.path.exists(f'{d}/out/data/trees-{k:04d}.js'):
@@ -58,13 +63,22 @@ class Converter(unittest.TestCase):
         self.assertEqual({u['g'] for u in self.summary['units']}, {'alpha', 'beta'})
         self.assertEqual({u['ds'] for u in self.summary['units']}, {'one', 'two'})
 
-    def test_shares(self):
-        ids = [c['id'] for c in self.summary['columns']]
-        plan, rules = ids.index('plan'), ids.index('rules')
-        for u in self.summary['units']:
-            self.assertTrue(all(0 <= s <= 1 for s in u['s']), u['s'])
-            # A child part lies inside its parent, so it can't take more of the time.
-            self.assertLessEqual(u['s'][rules], u['s'][plan] + 1e-3)
+    def test_unit(self):
+        self.assertEqual(self.summary['meta']['unit'], 'Handle request')
+        self.assertEqual(self.roots['meta']['unit'], 'Handle request')
+        self.assertEqual(len(self.roots['units']) + len(self.roots['failures']), 120)
+        # Without a pattern, every unit is in its input's group.
+        self.assertEqual({u['g'] for u in self.roots['units']}, {'a'})
+
+    def test_rows_inside_their_unit(self):
+        for c in self.chunks:
+            for t in c['trees']:
+                rows = t['rows']
+                self.assertEqual(rows[1], -1)
+                self.assertEqual(rows[2], 0)
+                for r in range(1, len(rows) // 5):
+                    self.assertLess(rows[5 * r + 1], r)  # a parent comes before its children
+                    self.assertGreaterEqual(rows[5 * r + 2], 0)
 
     def test_trees_hold_every_span_under_the_root(self):
         trees = [t for c in self.chunks for t in c['trees']]

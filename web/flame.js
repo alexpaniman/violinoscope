@@ -619,7 +619,7 @@
       // The top bar is all the compilations merged, or the selected one: named as by time. A track's top bar too narrow
       // for its name has it after the bar.
       const label = node.depth === 0 && !node.async
-        ? (h.unit !== null ? `${data.units[h.unit].l} · ${X.fmtMs(h.total)}` : `${X.fmtInt(h.units)} compilations · ${X.fmtMs(h.total)}`)
+        ? (h.unit !== null ? `${data.units[h.unit].l} · ${X.fmtMs(h.total)}` : `${X.nUnits(h.units)} · ${X.fmtMs(h.total)}`)
         : node.name;
       const tx = Math.max(sx, xL) + 4, room = Math.min(ex, xR) - tx - 3;
       if (node.async && node.depth === 0 && X.textWidth(label, 11, 500) > room) {
@@ -651,18 +651,18 @@
       const node = b.heavy.node, k = b.heavy.k, h = M.heavy, root = node.depth === 0 && !node.async, part = node.part >= 0 ? data.columns[node.part].label : '';
       const who = h.unit !== null ? data.units[h.unit].l : null, dur = h.dur(k), n = h.n(k);
       const lines = [root ? who || 'All in view' : node.name, `${X.fmtMs(dur)} · ${X.fmtPct(dur / h.total)}${who ? ` of ${who}` : ''}`];
-      lines.push(node.async ? 'Beside the compiler; spans that overlap add up' : `self ${X.fmtMs(Math.max(0, dur - h.inner(k)))}`);
+      lines.push(node.async ? 'Beside its parent; spans that overlap add up' : `self ${X.fmtMs(Math.max(0, dur - h.inner(k)))}`);
       // How often it runs: spans on this path, and per compilation.
-      lines.push(h.units > 1 ? `${X.fmtInt(n)} spans, ${X.round3(n / h.units)} per compilation · ${X.fmtMs(dur / h.units)} each` : `${X.fmtInt(n)} ${n === 1 ? 'span' : 'spans'}`);
+      lines.push(h.units > 1 ? `${X.fmtInt(n)} spans, ${X.round3(n / h.units)} per ${X.UNIT} · ${X.fmtMs(dur / h.units)} each` : `${X.fmtInt(n)} ${n === 1 ? 'span' : 'spans'}`);
       lines.push(part);
       return lines;
     }
     const u = data.units[b.i];
-    if (b.r < 0) return [u.l, X.groupName(u.g), `Compile ${X.fmtMs(u.ms)}`];
+    if (b.r < 0) return [u.l, X.groupName(u.g), `${X.UNIT} ${X.fmtMs(u.ms)}`];
     const s = X.spansOf(b.i).rows[b.r];
     const lines = [s.name, `${X.fmtMs(s.dur)} · from ${X.fmtMs(s.start)} into ${u.l}`];
     if (s.part >= 0) lines.push(data.columns[s.part].label);
-    if (s.lane >= 0) lines.push('Runs beside the compiler');
+    if (s.lane >= 0) lines.push('Runs beside its parent');
     return lines;
   }
 
@@ -777,5 +777,7 @@
       setWindow(a + s.start - s.dur * 0.05, a + s.start + s.dur * 1.05, true);
     },
     invalidate() { M = null; },
+    // Spans count toward other columns now: their colours, merged again.
+    layoutChanged() { dominant.clear(); M = null; if (S.view === 'flame') request(); },
   };
 })();

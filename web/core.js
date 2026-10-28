@@ -10,8 +10,10 @@
   X.SANS = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif";
   X.MONO = "'IBM Plex Mono', ui-monospace, Menlo, monospace";
   X.MS_FLOOR = 0.01;
-  X.NC = data.columns.length;
   X.NU = data.units.length;
+  // What one unit is: the name of its span. "6,576 Compile query spans".
+  X.UNIT = meta.unit || 'Unit';
+  X.nUnits = (n) => `${X.fmtInt(n)} ${X.UNIT} ${n === 1 ? 'span' : 'spans'}`;
   X.GRID = meta.units || 500;
   X.STOPS = [0, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3];
   const NAMES = meta.names || {};
@@ -51,18 +53,24 @@
   };
 
   // ---------------------------------------------------------------------------------------------------------
-  // The parts as a tree.
+  // The columns as a tree, built again whenever the violins shown change (X.layout): each column's parent, children,
+  // depth, top-level column and the last column of its subtree, which follows it.
 
-  X.parentIdx = data.columns.map((c) => (c.parent && data.columnIndex.has(c.parent) ? data.columnIndex.get(c.parent) : -1));
-  X.kids = data.columns.map(() => []);
-  X.parentIdx.forEach((p, k) => { if (p >= 0) X.kids[p].push(k); });
-  X.depthIdx = X.parentIdx.map((_, k) => { let d = 0; for (let p = X.parentIdx[k]; p >= 0; p = X.parentIdx[p]) d++; return d; });
-  X.rootOf = X.parentIdx.map((_, k) => { let r = k; while (X.parentIdx[r] >= 0) r = X.parentIdx[r]; return r; });
-  X.subEnd = R.subtreeEnd(data.columns);
+  X.reindex = () => {
+    data.columnIndex = new Map(data.columns.map((c, i) => [c.id, i]));
+    X.NC = data.columns.length;
+    X.parentIdx = data.columns.map((c) => (c.parent && data.columnIndex.has(c.parent) ? data.columnIndex.get(c.parent) : -1));
+    X.kids = data.columns.map(() => []);
+    X.parentIdx.forEach((p, k) => { if (p >= 0) X.kids[p].push(k); });
+    X.depthIdx = X.parentIdx.map((_, k) => { let d = 0; for (let p = X.parentIdx[k]; p >= 0; p = X.parentIdx[p]) d++; return d; });
+    X.rootOf = X.parentIdx.map((_, k) => { let r = k; while (X.parentIdx[r] >= 0) r = X.parentIdx[r]; return r; });
+    X.subEnd = R.subtreeEnd(data.columns);
+    for (const f of [() => occCache.clear(), X.forgetPrepared, X.forgetSpans]) if (f) f();
+    X.project();
+  };
+  data.columns = [];
+  data.partition = [];
   X.countFor = new Map();
-  data.counts.forEach((c, k) => { if (c.per_call_of && data.columnIndex.has(c.per_call_of)) X.countFor.set(data.columnIndex.get(c.per_call_of), k); });
-  X.FOLD_ORDER = data.columns.map((c, k) => k).filter((k) => X.kids[k].length)
-    .sort((a, b) => X.depthIdx[b] - X.depthIdx[a] || (X.subEnd[a] - a) - (X.subEnd[b] - b));
 
   // ---------------------------------------------------------------------------------------------------------
   // State. The selection is one compilation or none; the compile-time range and the legend choose what is in view.
@@ -71,9 +79,9 @@
     // The tab and each tab's mode; view is what they put on screen: violins, flame (the flame chart by time or the
     // flame graph, heavy), timeline (the waterfall) or spans (the table, as a list or a tree).
     tab: 'violins', tl: 'chart', prof: 'table', view: 'violins', mode: 'share', linear: false, flame: 'time',
-    side: {}, range: null, foldTouched: new Map(), factors: new Map(),
+    side: {}, range: null, factors: new Map(),
     sel: null, card: null, expanded: false, hover: null, hoverCol: null, search: '', matches: null,
-    sort: { key: 'self', dir: -1 }, tlSort: { key: 'ms', dir: -1 }, name: null, namePath: null, spansMode: 'table', tableTree: false, treeOpen: new Map(), treeLevel: 2, extra: [],
+    sort: { key: 'self', dir: -1 }, tlSort: { key: 'ms', dir: -1 }, name: null, namePath: null, spansMode: 'table', tableTree: false, treeOpen: new Map(), treeLevel: 2,
   };
   const slot = new Map();
   {
@@ -130,11 +138,12 @@
   };
 
   // ---------------------------------------------------------------------------------------------------------
-  // What-if: a factor on any part scales its own time and everything inside it; nested factors multiply.
+  // What-if: a factor on any column scales its own time and everything inside it; nested factors multiply. A column's
+  // own time is the part of the unit's time it counts (u.p), so overlapping columns save nothing twice.
 
   let proj = null;
-  X.scenarioOn = () => [...S.factors.values()].some((f) => f !== 1);
-  X.scenarioKey = () => [...S.factors].filter(([, f]) => f !== 1).map(([k, f]) => `${k}=${f}`).sort().join(',');
+  X.scenarioOn = () => data.columns.some((c) => S.factors.has(c.id) && S.factors.get(c.id) !== 1);
+  X.scenarioKey = () => [...S.factors].filter(([k, f]) => f !== 1 && data.columnIndex.has(k)).map(([k, f]) => `${k}=${f}`).sort().join(',');
   X.project = () => {
     if (!X.scenarioOn()) { proj = null; return; }
     const NC = X.NC, eff = new Float64Array(NC);
@@ -147,9 +156,7 @@
     data.units.forEach((u, i) => {
       let all = 0;
       for (let k = 0; k < NC; k++) {
-        let inner = 0;
-        for (const ch of X.kids[k]) inner += u.s[ch];
-        save[k] = Math.max(0, u.s[k] - inner) * u.ms * (1 - eff[k]);
+        save[k] = u.p[k] * u.ms * (1 - eff[k]);
         all += save[k];
       }
       total[i] = Math.max(1e-3, u.ms - all);
@@ -168,36 +175,11 @@
   // ---------------------------------------------------------------------------------------------------------
   // Columns, scales and prepared violins. Both measures show the same columns, so switching keeps them in place.
 
-  // The violins' columns: the whole compilation, the root the parts branch from; the profile's parts; then any span
-  // name added from the spans table, with its own time.
+  // The violins' columns: the unit's own span, the root the others branch from, then every column shown.
   X.ROOT = '_all';
-  X.columnsFor = (folded) => {
-    const cols = [{ id: X.ROOT, label: 'Compilation', parent: null, base: -1, root: true }];
-    data.columns.forEach((c, k) => { if (!M.hiddenBy(data, c, folded)) cols.push({ id: c.id, label: c.label, parent: c.parent || X.ROOT, base: k }); });
-    for (const name of S.extra) cols.push({ id: `span:${name}`, label: name, parent: null, base: -1, extra: name });
-    return cols;
-  };
-  // A span name's time in each compilation, from the per-name totals.
-  const extraCache = new Map();
-  X.extraMs = (name) => {
-    if (extraCache.has(name)) return extraCache.get(name);
-    const nm = X.names(), out = new Float64Array(X.NU), id = nm.names.indexOf(name);
-    nm.rows.forEach((flat, i) => { for (let j = 0; j < flat.length; j += 5) if (flat[j] === id) out[i] += flat[j + 3] / 1000; });
-    extraCache.set(name, out);
-    return out;
-  };
-  X.colMs = (i, col, measured) => (col.root ? X.totalMs(i, measured) : col.extra ? X.extraMs(col.extra)[i] : X.partMs(i, col.base, measured));
-  X.foldsFor = (room, minCol) => {
-    const folded = new Set();
-    for (const [id, f] of S.foldTouched) if (f) folded.add(id);
-    const fits = () => room / X.columnsFor(folded).length >= minCol;
-    for (const k of X.FOLD_ORDER) {
-      if (fits()) break;
-      const id = data.columns[k].id;
-      if (!S.foldTouched.has(id)) folded.add(id);
-    }
-    return folded;
-  };
+  X.columnsFor = () => [{ id: X.ROOT, label: X.UNIT, parent: null, base: -1, root: true }]
+    .concat(data.columns.map((c, k) => ({ id: c.id, label: c.label, parent: c.parent, base: k, merged: c.merged })));
+  X.colMs = (i, col, measured) => (col.root ? X.totalMs(i, measured) : X.partMs(i, col.base, measured));
 
   const clamp = X.clamp;
   function scaleFor(mode, linear, top) {
@@ -222,7 +204,7 @@
     return mode === 'share' ? ms / X.totalMs(i, measured) : Math.max(X.MS_FLOOR, ms);
   };
 
-  // Occupancy depends only on which compilations are in view, so it is kept across measures, folds and scenarios.
+  // Occupancy depends only on which units are in view and the columns, so it is kept across measures and scenarios.
   const occCache = new Map();
   X.occupancyOf = (base, units, unitsKey) => {
     const key = `${unitsKey}|${base}`;
@@ -234,12 +216,12 @@
   };
 
   const prepared = new Map();
-  X.prepareKey = (mode, linear, folded) => [mode, linear, [...folded].sort().join(','), X.viewKey(), X.scenarioKey(), S.extra.join('\u0001')].join('|');
-  X.prepare = (mode, linear, folded) => {
-    const key = X.prepareKey(mode, linear, folded);
+  X.prepareKey = (mode, linear) => [mode, linear, X.layout.version, X.viewKey(), X.scenarioKey()].join('|');
+  X.prepare = (mode, linear) => {
+    const key = X.prepareKey(mode, linear);
     if (prepared.has(key)) return prepared.get(key);
     const view = X.unitsInView(true), vk = X.viewKey();
-    const cols = X.columnsFor(folded);
+    const cols = X.columnsFor();
     const value = X.valueFn(cols, mode, false);
     let top = 1, above = 0;
     if (mode === 'ms') {
@@ -257,11 +239,11 @@
     const markers = [...view.markers].map(([g, units]) => ({ g, units, shape: 'o', key: `m${X.slotOf(g)}` }));
     const spec = {
       columns: cols, value, scale, left: view.left, right: view.right, markers, seed: 0, panels: { timeline: true },
-      occupancy: (c, half) => (cols[c].extra || cols[c].root ? null : X.occupancyOf(cols[c].base, half === 'left' ? view.left : view.right, `${vk}|${half}`)),
+      occupancy: (c, half) => (cols[c].root ? null : X.occupancyOf(cols[c].base, half === 'left' ? view.left : view.right, `${vk}|${half}`)),
     };
     const model = R.prepareViolins(spec);
     const ghost = proj ? R.prepareViolins(Object.assign({}, spec, { value: X.valueFn(cols, mode, true), markers: [], panels: { timeline: false } })) : null;
-    const P = { key, cols, scale, model, ghost, view, folded, vk, mode };
+    const P = { key, cols, scale, model, ghost, view, vk, mode };
     if (prepared.size > 8) prepared.delete(prepared.keys().next().value);
     prepared.set(key, P);
     return P;
@@ -271,14 +253,17 @@
   // ---------------------------------------------------------------------------------------------------------
   // Colours.
 
-  // Parts get their own hues by stage, kept clear of the halves' blue and orange.
+  // Each of the first top-level columns gets a hue, kept clear of the halves' blue and orange, and the columns under it
+  // its shades; the rest are grey.
   const PART_SHADES = {
-    light: { front: ['#134e4a', '#1f6f68', '#3a9188', '#73b9ae', '#b3dcd3', '#d5ece7'], logical: ['#4b3a99', '#7c69c9', '#9b8ad8', '#cbc0ee'],
-      physical: ['#7a5410', '#a8771f', '#c9973d', '#dfbb72', '#efd9a8'], other: ['#5d646e', '#8e959f', '#c3c8cf', '#737a84'] },
-    dark: { front: ['#1e6b64', '#2c8a81', '#4aa69c', '#7fc4b9', '#b0dbd3', '#cfe9e4'], logical: ['#6450c0', '#8a78d6', '#a594e3', '#cdc3f1'],
-      physical: ['#946a1c', '#b3822b', '#c39439', '#dcbc7a', '#ead6a9'], other: ['#6b727c', '#959ca6', '#c0c5cc', '#80878f'] },
+    light: { f0: ['#134e4a', '#1f6f68', '#3a9188', '#73b9ae', '#b3dcd3', '#d5ece7'], f1: ['#4b3a99', '#7c69c9', '#9b8ad8', '#cbc0ee', '#e2dcf6'],
+      f2: ['#7a5410', '#a8771f', '#c9973d', '#dfbb72', '#efd9a8'], f3: ['#7a1f45', '#a33a63', '#c45f84', '#de97b0', '#efc6d4'],
+      other: ['#5d646e', '#8e959f', '#c3c8cf', '#737a84'] },
+    dark: { f0: ['#1e6b64', '#2c8a81', '#4aa69c', '#7fc4b9', '#b0dbd3', '#cfe9e4'], f1: ['#6450c0', '#8a78d6', '#a594e3', '#cdc3f1', '#e0daf6'],
+      f2: ['#946a1c', '#b3822b', '#c39439', '#dcbc7a', '#ead6a9'], f3: ['#9b2f5a', '#b84a74', '#cf6f92', '#e3a1b8', '#f0c9d6'],
+      other: ['#6b727c', '#959ca6', '#c0c5cc', '#80878f'] },
   };
-  const familyOf = (k) => (['front', 'logical', 'physical'].includes(data.columns[X.rootOf[k]].id) ? data.columns[X.rootOf[k]].id : 'other');
+  const familyOf = (k) => (data.partition[k] && data.partition[k].family) || 'other';
   X.T = null;
   X.tokens = () => {
     const cs = getComputedStyle(document.documentElement);
@@ -288,13 +273,14 @@
     }
     t.scheme = cs.getPropertyValue('--scheme').trim() === 'dark' ? 'dark' : 'light';
     const shades = PART_SHADES[t.scheme];
-    t.parts = R.partColors(data.partition, shades);
     t.cols = data.columns.map((c, k) => {
       const list = shades[familyOf(k)];
       const sib = X.parentIdx[k] >= 0 ? X.kids[X.parentIdx[k]].indexOf(k)
         : data.columns.map((_, j) => j).filter((j) => X.parentIdx[j] < 0 && familyOf(j) === familyOf(k)).indexOf(k);
-      return list[Math.min(list.length - 1, X.depthIdx[k] + (sib % 2))];
+      return list[Math.min(list.length - 1, X.depthIdx[k] + 1 + (sib % 2))];
     });
+    // The split of a unit's time: a column's own share in its colour, what no column counts in grey.
+    t.parts = data.partition.map((p, k) => (k < t.cols.length ? t.cols[k] : shades.other[2]));
     t.unowned = t.scheme === 'dark' ? '#3a3f47' : '#d9dde3';
     X.T = t;
     return t;
@@ -360,7 +346,7 @@
   X.toView = (v) => [v.s, 0, 0, v.s, -v.x * v.s, -v.y * v.s];
 
   // ---------------------------------------------------------------------------------------------------------
-  // Span trees, per file of meta.chunk compilations, and per-name totals per compilation.
+  // Span trees, per file of meta.chunk units.
 
   const chunks = new Map(), chunkLoads = new Map();
   const loadScript = (src) => new Promise((resolve, reject) => {
@@ -408,6 +394,7 @@
   // asynchronous span other than the root, its track and its lane in it across all compilations; and its links
   // between spans as rows: from, to, and 1 for depends_on, 2 for follows_from.
   const spanCache = new Map();
+  X.forgetSpans = () => spanCache.clear();
   // Kept apart from the parsed spans, which are dropped and parsed again: each compilation's highest lane on each
   // track (-1 for none), once its spans are read.
   const trackLanes = new Array(X.NU).fill(null);
@@ -429,7 +416,7 @@
       const async = parent >= 0 && (flags & 1), track = async ? trackIndex.get(name) : -1, lane = async ? flags >>> 10 : -1;
       if (!async && depth > maxDepth) maxDepth = depth;
       if (async && lane > top[track]) top[track] = lane;
-      rows[r] = { name, parent, start: flat[5 * r + 2] / 1000, dur: flat[5 * r + 3] / 1000, depth, part: ((flags >> 2) & 255) - 1, track, lane, flags };
+      rows[r] = { name, parent, start: flat[5 * r + 2] / 1000, dur: flat[5 * r + 3] / 1000, depth, part: X.layout.partOfRow(unit, r), track, lane, flags };
     }
     const tree = chunk.trees[unit - u.k * meta.chunk];
     const out = { rows, maxDepth, links: tree.links || [], total: rows[0] ? rows[0].dur : u.ms };
@@ -437,13 +424,6 @@
     if (spanCache.size > 400) spanCache.clear();
     spanCache.set(unit, out);
     return out;
-  };
-
-  let names = null, namesLoad = null;
-  X.names = () => names;
-  X.loadNames = () => {
-    if (!namesLoad) namesLoad = loadScript('data/names.js').then(() => { names = window.EXPLORER_NAMES; X.emit('names'); return names; });
-    return namesLoad;
   };
 
   // ---------------------------------------------------------------------------------------------------------
@@ -592,4 +572,7 @@
   const handlers = new Map();
   X.on = (e, f) => { if (!handlers.has(e)) handlers.set(e, []); handlers.get(e).push(f); };
   X.emit = (e, arg) => { for (const f of handlers.get(e) || []) f(arg); };
+
+  // No columns until the spans are read.
+  X.reindex();
 })();
