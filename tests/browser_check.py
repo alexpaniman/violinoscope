@@ -343,6 +343,26 @@ async def main():
         if back is not None:
             expect(all(back.values()), f'putting a removed level back did not work: {back}')
 
+        # Shown again any other way, as by opening its parent with nothing under it shown, a removed level holds its
+        # children again.
+        again = await page.evaluate("""(() => {
+          const T = TX.layout, cols = TX.violins.G.p.cols;
+          const c = cols.find((c) => !c.root && !c.merged && T.kids(c.id).length);
+          if (!c) return null;
+          T.expand(c.id);
+          if (!T.lifts(c.id)) return null;
+          const up = T.parentOf(c.id);
+          T.hide(c.id);
+          T.remove(T.kids(up).filter((k) => T.shown(k)));
+          T.collapse(up);
+          T.expand(up);
+          const skip = T.state().skip;
+          return { shown: T.shown(c.id), holds: !T.shown(c.id) || T.kids(c.id).length > 0,
+            none: T.kids(up).every((k) => !T.shown(k) || !skip.includes(k)) };
+        })()""")
+        if again is not None:
+            expect(again['holds'] and again['none'], f'a removed level shown again lost its children: {again}')
+
         # Two violins picked with Shift, removed at once.
         two = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.merged).map(([c, k]) => [c.id, k]).slice(-2)')
         if len(two) == 2:

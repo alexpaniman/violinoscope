@@ -526,6 +526,15 @@
     showUp(id);
     L.open.add(id);
   }
+  // A level taken out and then shown again, by opening its parent, splitting up or anything else, is back: it holds its
+  // children again, open when one of them is shown, as if put back from the card.
+  function settle() {
+    const back = [...L.skip].filter((id) => L.shown.has(id));
+    if (!back.length) return;
+    for (const id of back) L.skip.delete(id);
+    relink();
+    for (const id of back) if (kidsOfNode(id).some((k) => L.shown.has(k))) L.open.add(id);
+  }
   // A node into a merged one, which stays where it is, open or not as it was: its spans, a merged node going.
   function join(id, into) {
     if (!L.groups.has(into) || !canMerge(id, into)) return null;
@@ -864,6 +873,7 @@
     for (const id of s.open || []) if (exists(id)) L.open.add(id);
     // Saved before closing kept what was under a node: every node with a child shown was open.
     if (s.v !== 2) for (const id of L.shown) { const p = parentOf(id); if (p !== null && !isRoot(p)) L.open.add(p); }
+    settle();
     prune();
     rematch();
     return L.shown.size > 0;
@@ -910,7 +920,7 @@
 
   // ---------------------------------------------------------------------------------------------------------
 
-  function change(f) { return (...args) => { const r = f(...args); relink(); prune(); apply(); X.render(); return r; }; }
+  function change(f) { return (...args) => { const r = f(...args); relink(); settle(); prune(); apply(); X.render(); return r; }; }
 
   X.layout = {
     get ready() { return ready; },
