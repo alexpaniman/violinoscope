@@ -462,29 +462,72 @@
     const spans = [...new Set(picked.flatMap(spansOf))];
     const members = spans.filter((x) => !spans.some((y) => y !== x && inside(x, y)));
     if (members.length < 2) { add(members, members.length && tree === 2 ? ROOT2 : null); return members[0] || null; }
-    for (const g of picked) if (L.groups.has(g)) drop(g);
+    // What was on screen stays there, now under the new one, open, with what was open under it.
+    const seen = new Set(members.filter((m) => shownOf(m)));
+    for (const g of picked) if (L.groups.has(g)) absorb(g);
     relink();
     free(members, home);
     if (home && !L.groups.has(home)) return null;
     const id = `g${L.next++}`;
     L.groups.set(id, Object.assign({ label: name || suggestName(members), members }, tree === 2 ? { tree } : {}, match ? { match } : {}, home ? { parent: home } : {}));
     relink();
-    for (const m of members) unshow(m);
+    for (const m of members) if (!seen.has(m)) unshow(m);
+    if (seen.size) L.open.add(id);
     showUp(id);
     return id;
+  }
+  // A merged node taken into another: it goes; what was shown under it stays shown, under the other.
+  function absorb(g) {
+    L.shown.delete(g); L.open.delete(g); L.except.delete(g); L.names.delete(g); L.order.delete(g);
+    L.groups.delete(g);
+  }
+  // The span a merged node's spans are all inside, when it is not on screen: the merged node made that span, which
+  // then shows where it was, open, with what was shown under the merged node under it. A level removed comes back so.
+  function promotable(g) {
+    const d = L.groups.get(g);
+    if (!d) return null;
+    const a = anchor(g), span = d.tree === 2 ? copyOf(paths[a].key) : paths[a].key;
+    return a === rootPath || shownOf(span) ? null : span;
+  }
+  function promote(g) {
+    const span = promotable(g);
+    if (span === null) return null;
+    const d = L.groups.get(g), seen = d.members.filter((m) => shownOf(m));
+    absorb(g);
+    L.skip.delete(span);
+    if (isCopy(span) && !in2.has(span.slice(1))) L.top2.add(span);
+    relink();
+    showUp(span);
+    L.open.add(span);
+    for (const m of seen) showUp(m);
+    return span;
+  }
+  // Levels taken out from above a node, outermost first; one put back holds what is under it again.
+  function skippedAbove(id) {
+    const out = [];
+    for (let up = callParent(id); up !== null && L.skip.has(up); up = callParent(up)) out.unshift(up);
+    return out;
+  }
+  function unskip(id) {
+    if (!L.skip.delete(id)) return;
+    relink();
+    showUp(id);
+    L.open.add(id);
   }
   // A node into a merged one, which stays where it is, open or not as it was: its spans, a merged node going.
   function join(id, into) {
     if (!L.groups.has(into) || !canMerge(id, into)) return null;
     const d = L.groups.get(into), spans = spansOf(id).filter((m) => !d.members.some((x) => inside(m, x)));
     if (d.parent && !spans.every((m) => inside(m, d.parent))) return null;
-    if (L.groups.has(id)) drop(id);
+    const seen = new Set(spans.filter((m) => shownOf(m)));
+    if (L.groups.has(id)) absorb(id);
     free(spans, into);
     if (!L.groups.has(into)) return null;
-    const open = isOpen(into);
+    const open = isOpen(into) || seen.size > 0;
     d.members.push(...spans);
     relink();
-    for (const m of spans) if (open) L.shown.add(m); else unshow(m);
+    for (const m of spans) if (open && (seen.has(m) || isOpen(into))) L.shown.add(m); else unshow(m);
+    if (open) L.open.add(into);
     showUp(into);
     return into;
   }
@@ -893,6 +936,10 @@
     hide: change(hide),
     // Whether removing it leaves its children, moved up to its parent.
     lifts: (id) => lifts(id),
+    promotable: (id) => promotable(id),
+    promote: change(promote),
+    skippedAbove: (id) => skippedAbove(id),
+    unskip: change(unskip),
     exclude: change(exclude),
     unexclude: change(unexclude),
     include: change(include),

@@ -494,3 +494,8 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .totals { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .totals .k { color: var(--muted); }
 .totals span { display: inline-flex; align-items: center; gap: 5px; }
+/* A level taken out, in a card's path: muted, a click puts it back; making a merged violin its span */
+.crumbs button.skipped { color: var(--muted); font-style: normal; text-decoration-style: dotted; opacity: .8; }
+.crumbs button.skipped::before { content: '('; }
+.crumbs button.skipped::after { content: ')'; }
+.text-btn.promote { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

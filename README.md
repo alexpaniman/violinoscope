@@ -45,15 +45,16 @@ nothing from outside `out/`.
     text keeps it, and takes in new matches when the spans are read again. A merged violin is made of spans only, and
     stays until removed. Spans merged that are all inside a merged violin, from its + or picked there, make its child
     and stay in it: Compute types inside Compute *;
-  - a name dragged onto another violin merges the two, or adds it to that one when it is merged already; dragged to
-    the edge of a sibling's column, it moves before or after it, with everything under it; Shift and a click on names
-    picks several to merge;
+  - a name dragged onto another violin or its name merges the two, or adds it to that one when it is merged already;
+    dragged to the edge of a sibling's column, it moves before or after it, with everything under it; Shift and a
+    click on names picks several to merge. What was on screen stays there, under the merged violin;
   - a double-click on a name renames it, any violin, not only merged ones; a merged violin's name is followed by how
     many spans it merges;
   - hovering a violin shows a × where its line meets its name, which removes it, its parent still counting the time;
     removed, nothing about it or under it is kept, and added again it comes back as its spans are called. Open with
-    children shown, it removes just its level: they move up to its parent, and adding it back from there puts them
-    under it again. Shift and a click on names picks several, to remove at once (Delete) or merge;
+    children shown, it removes just its level: they move up to its parent. A card's path shows such levels muted, and
+    a click puts one back with what is under it; a merged violin whose spans all run in one span not on screen can be
+    made that span. Shift and a click on names picks several, to remove at once (Delete) or merge;
   - a click on its name, or anywhere along its column off the dots, opens its card: its name, to edit, and where it
     sits, with Split up (its larger spans shown, the rest behind a +) and In Spans (callers and callees) at the top;
     its time summed over the units in view and its share of theirs, per half (the root's: how many units, their time);

@@ -26,6 +26,8 @@
       if (unit) { const i = Number(unit.dataset.unit); if (S.sel === i) X.go('timeline'); else { X.select(i); renderCard(); } return; }
       const out = e.target.closest('[data-leave]');
       if (out) { X.layout.leave(out.dataset.leave, S.card); return; }
+      const level = e.target.closest('[data-unskip]');
+      if (level) { X.layout.unskip(level.dataset.unskip); return; }
       const back = e.target.closest('[data-unexclude]');
       if (back) { X.layout.unexclude(S.card, back.dataset.unexclude); return; }
       if (e.target.closest('[data-made]')) { madeOpen = !madeOpen; renderCard(); return; }
@@ -41,6 +43,7 @@
       else if (act.dataset.act === 'saved') { closeCard(); X.layout.reset(); }
       else if (act.dataset.act === 'spans') { const name = X.layout.spanNames(id)[0]; closeCard(); X.spans.pick(name); X.go('profile', 'callers'); }
       else if (act.dataset.act === 'split') { closeCard(); X.layout.ungroup(id); }
+      else if (act.dataset.act === 'promote') { const to = X.layout.promote(id); if (to) openCard(to, card.getBoundingClientRect()); }
       else if (act.dataset.act === 'rename' || act.dataset.rename !== undefined) {
         const h = card.querySelector('h3');
         h.innerHTML = `<input data-rename aria-label="Name" value="${esc(X.layout.label(id))}">`;
@@ -116,11 +119,17 @@
     const halves = [['left', v.left], ['right', v.right]].filter(([, u]) => u.length);
     const crumbs = [];
     for (let p = root ? -1 : X.parentIdx[k]; p >= 0; p = X.parentIdx[p]) crumbs.unshift(p);
+    // Where it sits, with the levels taken out from between, muted: a click puts one back.
+    const skipped = (id) => X.layout.skippedAbove(id).map((s) => `<button type="button" class="skipped" data-unskip="${esc(s)}" title="Put ${esc(X.layout.label(s))} back, with what is under it">${esc(X.layout.label(s))}</button>`);
     const where = (!root && col.second ? ['<span>Projections</span>'] : [])
-      .concat(crumbs.map((p) => `<button type="button" data-open-part="${esc(data.columns[p].id)}">${esc(data.columns[p].label)}</button>`));
+      .concat(crumbs.flatMap((p) => [...skipped(data.columns[p].id), `<button type="button" data-open-part="${esc(data.columns[p].id)}">${esc(data.columns[p].label)}</button>`]))
+      .concat(root ? [] : skipped(col.id));
     // Its one span name, also when merged from spans of one name: what calls it and what it calls, in Spans.
     const names = root ? [] : X.layout.spanNames(col.id);
+    // Merged, and all its spans inside one span not on screen: it can become that span.
+    const span = root || !col.merged ? null : X.layout.promotable(col.id);
     const tools = root ? [] : [
+      span ? `<button type="button" class="text-btn small promote" data-act="promote" title="Make it ${esc(X.layout.label(span))}, the span its spans all run in, with them under it">Make it ${esc(X.layout.label(span))}</button>` : '',
       col.merged ? '<button type="button" class="text-btn small" data-act="split" title="Its larger spans on their own again; the rest behind the + of where they go">Split up</button>' : '',
       names.length === 1 ? `<button type="button" class="text-btn small" data-act="spans" title="${esc(names[0])} in the Spans tab: what calls it and what it calls">In Spans</button>` : ''];
     const title = root ? esc(col.label) : `<button type="button" class="title-edit" data-rename title="Rename it">${esc(col.label)}</button>`;

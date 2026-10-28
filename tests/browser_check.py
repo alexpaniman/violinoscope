@@ -86,13 +86,15 @@ async def main():
             await page.click('#v-add [data-do="add"]')
             await page.wait_for_timeout(300)
             expect(await count() == n + 1, 'adding from the + list added no violin')
-        last = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.second).map(([, k]) => k).slice(-2)')
-        n = await count()
-        await page.click(f'[data-col="{last[1]}"]', modifiers=['Shift'])
-        await page.click(f'[data-col="{last[0]}"]', modifiers=['Shift'])
+        # Merged, the two stay on screen, under the new merged violin.
+        last = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.second).map(([c, k]) => [c.id, k]).slice(-2)')
+        await page.click(f'[data-col="{last[1][1]}"]', modifiers=['Shift'])
+        await page.click(f'[data-col="{last[0][1]}"]', modifiers=['Shift'])
         await page.click('#v-merge [data-do="merge"]')
         await page.wait_for_timeout(300)
-        expect(await count() < n, 'merging two violins left them apart')
+        together = await page.evaluate(f"""(() => {{ const T = TX.layout, ids = {[i for i, _ in last]!r};
+          const g = T.parentOf(ids[0]); return T.isMerged(g) && ids.every((id) => T.parentOf(id) === g && T.shown(id)); }})()""")
+        expect(together, 'merging two violins did not put them under one merged violin, still shown')
 
         # Hovering a violin shows its × where its line meets its name.
         x, y = await page.evaluate("""(() => {
@@ -107,7 +109,7 @@ async def main():
         pair = await page.evaluate(f"""(() => {{
           const ids = {COLS};
           for (let a = ids.length - 1; a > 0; a--) for (let b = a - 1; b > 0; b--)
-            if (TX.layout.canMerge(ids[a], ids[b]) && !TX.layout.isMerged(ids[b])) return [a, b, ids[b]];
+            if (TX.layout.canMerge(ids[a], ids[b]) && !TX.layout.isMerged(ids[b]) && !TX.layout.isMerged(TX.layout.parentOf(ids[b]))) return [a, b, ids[b]];
           return null;
         }})()""")
         if pair is None:
@@ -115,7 +117,9 @@ async def main():
         else:
             a, b, target = pair
             x0, y0 = await centre(page, f'[data-col="{a}"]')
-            x1, y1 = await centre(page, f'[data-col="{b}"]')
+            # Onto the middle of its violin: near a column's edge, a carried name moves instead.
+            x1, y1 = await page.evaluate(f"""(() => {{ const G = TX.violins.G, s = document.getElementById('stage').getBoundingClientRect();
+              return [s.left + G.xOf({b}), s.top + G.V.y0 + 20]; }})()""")
             await page.mouse.move(x0, y0)
             await page.mouse.down()
             await page.mouse.move(x1, y1, steps=12)
@@ -315,6 +319,25 @@ async def main():
                 import shutil
                 shutil.copy(png, os.path.join(args.shots, 'picture.png'))
 
+        # A level removed comes back: from the card's path, or by merging its children and making that the span.
+        back = await page.evaluate("""(() => {
+          const T = TX.layout, cols = TX.violins.G.p.cols;
+          const c = cols.find((c) => !c.root && !c.merged && T.lifts(c.id) && T.kids(c.id).filter((k) => T.shown(k)).length >= 2);
+          if (!c) return null;
+          const kids = T.kids(c.id).filter((k) => T.shown(k));
+          T.hide(c.id);
+          const skipped = T.skippedAbove(kids[0]).includes(c.id);
+          T.unskip(c.id);
+          const unskipped = T.shown(c.id) && kids.every((k) => T.parentOf(k) === c.id);
+          T.hide(c.id);
+          const g = T.merge(kids.slice(0, 2), '');
+          const offered = T.promotable(g) === c.id;
+          const to = T.promote(g);
+          return { skipped, unskipped, offered, promoted: to === c.id && T.shown(c.id) && kids.slice(0, 2).every((k) => T.shown(k) && T.parentOf(k) === c.id) };
+        })()""")
+        if back is not None:
+            expect(all(back.values()), f'putting a removed level back did not work: {back}')
+
         # Two violins picked with Shift, removed at once.
         two = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.merged).map(([c, k]) => [c.id, k]).slice(-2)')
         if len(two) == 2:
@@ -399,7 +422,7 @@ async def main():
         await browser.close()
     for e in errors:
         print(e, file=sys.stderr)
-    print(f'{len(STEPS) + 27} steps, {len(errors)} errors')
+    print(f'{len(STEPS) + 28} steps, {len(errors)} errors')
     return 1 if errors else 0
 
 

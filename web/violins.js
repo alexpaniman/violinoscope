@@ -693,8 +693,9 @@
     const [lx, ly] = toLayer(px, py), from = G.p.cols[lift.c];
     const el = e.target.closest && e.target.closest('[data-col]');
     const c = el ? Number(el.dataset.col) : colAt(lx, ly), onto = c !== null ? G.p.cols[c] : null;
-    // Near the edge of a sibling's column, before or after it, its subtree with it; else onto the column, merged.
-    const edge = onto && c !== lift.c && onto.parent === from.parent && Math.abs(lx - G.xOf(c)) > G.colW * 0.25;
+    // Near the edge of a sibling's column, before or after it, its subtree with it; else onto the column, or onto its
+    // name, merged.
+    const edge = !el && onto && c !== lift.c && onto.parent === from.parent && Math.abs(lx - G.xOf(c)) > G.colW * 0.25;
     lift.move = edge ? { to: c, after: lx > G.xOf(c) } : null;
     // From the first tree onto the second, or onto the + that starts it: a copy at its top.
     const start = !!(e.target.closest && e.target.closest(`[data-add="${X.ROOT2}"]`));
