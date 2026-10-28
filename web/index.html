@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>[hidden]{display:none!important}body{margin:0}</style>
+<title>Compile Explorer Redesign</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="app.css">
+</head><body>
+<div class="app" id="app">
+  <main class="stage" id="stage">
+    <div class="view" id="violins">
+      <svg class="layer" id="v-under" aria-hidden="true"></svg>
+      <canvas class="layer" id="v-dots" aria-hidden="true"></canvas>
+      <svg class="layer" id="v-over" role="img" aria-label="Each part of a compilation as a violin, one dot per compilation, with the tree of parts below"></svg>
+      <canvas class="layer" id="v-heat" aria-hidden="true"></canvas>
+      <canvas class="layer" id="v-hover" aria-hidden="true"></canvas>
+      <div class="hitpad" id="hitpad"></div>
+      <div id="v-factors"></div>
+      <button type="button" class="whatif-pill" id="v-whatif" data-pill="0" hidden>×1</button>
+      <div class="seg factor-menu" id="v-factor-menu" role="group" hidden></div>
+    </div>
+    <div class="view" id="flame" hidden><canvas id="flame-canvas" role="img" aria-label="Spans stacked: where they ran, or merged heaviest first"></canvas></div>
+    <div class="view list" id="timeline" hidden></div>
+    <div class="view list" id="spans" hidden><div id="spans-body"></div></div>
+
+    <div class="controls" id="controls">
+      <div class="row">
+        <div class="seg" id="views" role="group" aria-label="View">
+          <button type="button" data-tab="violins" aria-pressed="true" title="Compile time by phase: which phases take the time, and how that varies across compilations and workloads">Phases</button>
+          <button type="button" data-tab="timeline" aria-pressed="false" title="What happened in each compilation, span by span, where it ran">Timeline</button>
+          <button type="button" data-tab="profile" aria-pressed="false" title="Which spans cost the most, summed over every compilation in view or over the one selected">Spans</button>
+        </div>
+        <div class="seg" id="modes" role="group" aria-label="Measure" data-for="violins">
+          <button type="button" data-mode="share" aria-pressed="true" title="Share of each compilation's time (1)">Share</button>
+          <button type="button" data-mode="ms" aria-pressed="false" title="Milliseconds (2)">Time</button>
+        </div>
+        <div class="seg" id="scales" role="group" aria-label="Scale" data-for="violins">
+          <button type="button" data-linear="false" aria-pressed="true" title="Square root: spreads out the small shares, and still shows 0% (L)">Square root</button>
+          <button type="button" data-linear="true" aria-pressed="false" title="Linear (L)">Linear</button>
+        </div>
+        <div class="seg" id="tl-modes" role="group" aria-label="Timeline" data-for="timeline" hidden>
+          <button type="button" data-tl="chart" aria-pressed="true" title="Compilations on one line with their spans stacked below, asynchronous spans on a track per name">Flame chart</button>
+          <button type="button" data-tl="waterfall" aria-pressed="false" title="A row per span, as in Jaeger">Waterfall</button>
+        </div>
+        <div class="seg" id="prof-modes" role="group" aria-label="Spans" data-for="profile" hidden>
+          <button type="button" data-prof="table" aria-pressed="true" title="Every span name, or every call path, with its self and total time; pick one for its callers and callees">Table</button>
+          <button type="button" data-prof="flame" aria-pressed="false" title="Spans with the same path merged, heaviest first">Flame graph</button>
+          <button type="button" data-prof="callers" aria-pressed="false" title="The picked span: what calls it, and what it calls" hidden>Callers &amp; callees</button>
+        </div>
+        <div class="seg" id="table-modes" role="group" aria-label="Rows" data-for="profile" data-for-prof="table" hidden>
+          <button type="button" data-tree="false" aria-pressed="true" title="A row per span name">List</button>
+          <button type="button" data-tree="true" aria-pressed="false" title="A row per call path, merged as in the flame graph; sorting sorts each level">Tree</button>
+        </div>
+      </div>
+      <div class="filters">
+        <div class="legend" id="legend"></div>
+        <div class="chips">
+          <span class="chip-group" id="name-chip" hidden><button class="chip" id="name-text" type="button"></button><button class="chip-x" id="name-clear" type="button" aria-label="Let the span go" title="Let the span go (Esc)">×</button></span>
+          <span class="chip-group sel-chip" id="sel-chip" hidden></span>
+          <span class="chip-group" id="whatif-chip" hidden><span class="chip" id="whatif-text"></span><button class="chip-x" id="whatif-clear" type="button" aria-label="Turn the what-if off" title="Turn the what-if off: every part as measured">×</button></span>
+          <button class="range-chip" id="range-chip" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="rangecard"><span>Compile time</span><b id="range-value">all</b></button>
+          <button class="range-clear" id="range-clear" type="button" aria-label="Show every compile time" title="Show every compile time" hidden>×</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overview" id="overview" hidden><canvas id="overview-canvas" aria-label="Overview" title="Drag to pick what is shown, drag its edges to resize; double-click or F for all of it"></canvas><div class="ov-nav" id="ov-nav" hidden><button type="button" data-nav="back" title="Back to where you were (Esc)">← Back</button><button type="button" data-nav="all" title="All of it (F, or double-click the strip)">All</button></div></div>
+    <div class="toast" id="toast" role="status" hidden></div>
+
+    <section class="card" id="rangecard" role="dialog" aria-label="Compile time range" hidden>
+      <div class="card-head">
+        <span class="card-title">Compile time</span>
+        <span class="range-inputs">
+          <input id="range-lo" inputmode="decimal" aria-label="Shortest compile time, ms">
+          <span>–</span>
+          <input id="range-hi" inputmode="decimal" aria-label="Longest compile time, ms">
+          <span class="unit">ms</span>
+        </span>
+        <button class="text-btn small" id="range-all" type="button" title="Every compile time (double-click the histogram)">All</button>
+        <span class="spacer"></span>
+        <button class="text-btn small" id="expand" type="button" aria-expanded="false">Parts by time</button>
+      </div>
+      <svg id="range-svg" aria-label="Histogram of compile times: drag the handles or across it to pick a range, double-click to show all"></svg>
+      <div class="dom-legend" id="dom-legend" hidden></div>
+      <div class="card-cross" id="card-cross" hidden></div>
+    </section>
+
+    <div class="card-pop" id="card-pop" role="dialog" aria-label="Part" hidden></div>
+    <div class="tip" id="tip" hidden><div class="t1"></div><div class="k"></div><div></div><div class="k"></div><div class="k"></div></div>
+  </main>
+
+  <section class="about" id="keys" aria-label="Keyboard" hidden></section>
+</div>
+<script src="render.js"></script>
+<script src="model.js"></script>
+<script src="data/summary.js"></script>
+<script src="core.js"></script>
+<script src="gl.js"></script>
+<script src="violins.js"></script>
+<script src="nav.js"></script>
+<script src="flame.js"></script>
+<script src="spans.js"></script>
+<script src="timeline.js"></script>
+<script src="panel.js"></script>
+<script src="main.js"></script>
+</body></html>

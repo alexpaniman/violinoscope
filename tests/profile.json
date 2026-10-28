@@ -1,0 +1,53 @@
+{
+  "name": "synthetic",
+  "title": "Synthetic requests",
+  "root": "Handle request",
+  "query_text": {
+    "attribute": "db.query.text",
+    "label_regex": "^--\\s*(?P<group>\\S+)\\s+(?P<label>\\S+), level"
+  },
+  "attributes": {
+    "cpu_us": {
+      "span": "Handle request",
+      "key": "app.cpu_us"
+    }
+  },
+  "columns": [
+    {
+      "id": "plan",
+      "label": "Planning",
+      "match": {
+        "names": [
+          "Plan"
+        ]
+      }
+    },
+    {
+      "id": "rules",
+      "label": "Rules",
+      "parent": "plan",
+      "match": {
+        "prefix": "Rule: "
+      }
+    },
+    {
+      "id": "execute",
+      "label": "Execution",
+      "match": {
+        "names": [
+          "Execute"
+        ]
+      }
+    },
+    {
+      "id": "other",
+      "label": "Not under any span",
+      "match": {
+        "uncovered_by": [
+          "plan",
+          "execute"
+        ]
+      }
+    }
+  ]
+}
