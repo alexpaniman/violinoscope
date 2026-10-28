@@ -71,8 +71,9 @@
       syncBar();
       X.layout.hide(id);
     });
-    // A violin no longer shown can't stay picked.
+    // A violin no longer shown can't stay picked; the × waits for the pointer to move to where the violins are now.
     X.on('layout', () => {
+      hideBtn.hidden = true;
       for (const id of [...X.picked]) if (!X.data.columnIndex.has(id)) X.picked.delete(id);
       syncBar();
     });
@@ -89,14 +90,23 @@
     const where = id === X.ROOT2 ? `any span of ${X.UNIT}` : X.layout.label(id === X.ROOT ? X.layout.rootKey() : id);
     menu.innerHTML = `<div class="add-head"><input data-filter type="search" autocomplete="off" spellcheck="false" placeholder="Find in ${esc(where)}" aria-label="Find a span"><small class="add-scope"></small></div>`
       + '<div class="add-list" role="listbox" aria-multiselectable="true"></div><div class="add-foot"></div>';
+    // Below the +, or above it when there is more room there; no taller than that room, so its list scrolls and
+    // its buttons stay on screen as it grows.
+    const stage = $('stage').getBoundingClientRect();
+    const below = stage.bottom - rect.bottom - 18, above = rect.top - stage.top - 18;
+    at = { rect, stage, up: below < 320 && above > below };
+    menu.style.maxHeight = `${Math.round(Math.min(440, Math.max(160, at.up ? above : below)))}px`;
     menu.hidden = false;
     renderList();
-    // Below the +, inside the stage.
-    const stage = $('stage').getBoundingClientRect(), w = menu.offsetWidth, h = menu.offsetHeight;
-    const left = clamp(rect.left - stage.left - 20, 12, stage.width - w - 12);
-    const top = rect.bottom - stage.top + 6 + h < stage.height - 12 ? rect.bottom - stage.top + 6 : Math.max(12, rect.top - stage.top - 6 - h);
-    menu.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
     menu.querySelector('[data-filter]').focus({ preventScroll: true });
+  }
+  let at = null;
+  function placeAdd() {
+    if (!at || menu.hidden) return;
+    const { rect, stage } = at, w = menu.offsetWidth, h = menu.offsetHeight;
+    const left = clamp(rect.left - stage.left - 20, 12, stage.width - w - 12);
+    const top = clamp(at.up ? rect.top - stage.top - 6 - h : rect.bottom - stage.top + 6, 12, Math.max(12, stage.height - h - 12));
+    menu.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
   }
   function closeAdd() {
     if (menu.hidden) return false;
@@ -129,11 +139,13 @@
       foot.innerHTML = `<button type="button" class="text-btn small" data-do="back" aria-label="Back">←</button>`
         + `<input data-name autocomplete="off" spellcheck="false" aria-label="Name of the merged violin" value="${esc(X.layout.suggestName([...ticked]))}">`
         + '<button type="button" class="text-btn small primary" data-do="merge">Add</button>';
+      placeAdd();
       return;
     }
     foot.innerHTML = `<span class="add-count">${n ? `${X.fmtInt(n)} ticked` : 'Tick what to add'}</span>`
       + `<button type="button" class="text-btn small" data-do="add"${n ? '' : ' disabled'}>Add${n > 1 ? ` ${X.fmtInt(n)}` : ''}</button>`
       + `<button type="button" class="text-btn small" data-do="one"${n > 1 ? '' : ' disabled'} title="Add them as one violin: their time together">Add as one</button>`;
+    placeAdd();
   }
   // Every match of a typed filter, merged, keeps the filter: spans read again that match it join.
   function mergeTicked() {

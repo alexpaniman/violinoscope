@@ -3,9 +3,11 @@
 (function () {
   'use strict';
   const R = window.ExplorerRender, M = window.ExplorerModel;
+  // As read, before the views add to it, for a page downloaded as one file.
+  const summaryText = JSON.stringify(window.EXPLORER_SUMMARY);
   const data = M.load(window.EXPLORER_SUMMARY);
   const meta = data.meta;
-  const X = window.TX = { R, M, data, meta };
+  const X = window.TX = { R, M, data, meta, summaryText };
 
   X.SANS = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif";
   X.MONO = "'IBM Plex Mono', ui-monospace, Menlo, monospace";
@@ -191,8 +193,7 @@
   // Columns, scales and prepared violins. Both measures show the same columns, so switching keeps them in place.
 
   // The violins' columns: the unit's own span, the root the others branch from, then every column shown.
-  // After them, the second tree's root, with nothing of its own to show, and its columns; while it is empty, its root
-  // alone, to start it from.
+  // After them, once it has any, the second tree's root, with nothing of its own to show, and its columns.
   X.ROOT = '_all';
   X.ROOT2 = '~two';
   X.columnsFor = () => {
@@ -202,7 +203,6 @@
       if (c.second && !cols.includes(two)) cols.push(two);
       cols.push({ id: c.id, label: c.label, parent: c.parent, base: k, merged: c.merged, second: c.second });
     });
-    if (!cols.includes(two)) cols.push(two);
     return cols;
   };
   X.colMs = (i, col, measured) => (col.blank ? NaN : col.root ? X.totalMs(i, measured) : X.partMs(i, col.base, measured));
@@ -383,10 +383,12 @@
     document.head.appendChild(s);
   });
   X.chunk = (k) => chunks.get(k);
+  // A page downloaded as one file has them all in it already.
   X.loadChunk = (k) => {
     if (chunks.has(k)) return Promise.resolve(chunks.get(k));
     if (!chunkLoads.has(k)) {
-      chunkLoads.set(k, loadScript(`data/trees-${String(k).padStart(4, '0')}.js`).then(() => {
+      const inPage = (window.EXPLORER_CHUNKS || {})[k];
+      chunkLoads.set(k, (inPage ? Promise.resolve() : loadScript(`data/trees-${String(k).padStart(4, '0')}.js`)).then(() => {
         const c = (window.EXPLORER_CHUNKS || {})[k];
         if (!c) throw new Error('empty chunk');
         chunks.set(k, c);

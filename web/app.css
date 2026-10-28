@@ -149,7 +149,7 @@ svg.layer.fade { animation: fade-in .2s ease-out; }
   position: absolute; z-index: 6; width: min(400px, calc(100% - 16px));
   background: var(--surface); border: 1px solid var(--edge); border-radius: 10px; box-shadow: var(--shadow); padding: 8px 12px 7px;
 }
-.card.expanded { width: min(620px, calc(100% - 16px)); }
+#rangecard { width: min(620px, calc(100% - 16px)); }
 #range-all:disabled { opacity: .4; cursor: default; }
 #range-all:disabled:hover { background: none; color: var(--muted); }
 .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
@@ -437,7 +437,7 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
   svg.layer.fade { animation: none; }
 }
 
-/* Carrying a name onto another violin, typing over a name, a renamed violin's own spans, and the layout menu */
+/* Carrying a name onto another violin, typing over a name, a renamed violin's own spans */
 .lifting, .lifting * { cursor: grabbing !important; }
 .lift-ghost {
   position: absolute; left: 0; top: 0; z-index: 7; pointer-events: none; max-width: 280px; padding: 5px 9px; font-size: 12.5px;
@@ -452,15 +452,6 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
   box-shadow: var(--shadow); outline: none;
 }
 .span-name { margin-top: 1px; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
-.layout-menu {
-  position: absolute; left: 0; top: 0; z-index: 6; width: 300px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
-  background: var(--surface); border: 1px solid var(--edge); border-radius: 12px; box-shadow: var(--shadow);
-}
-.layout-menu button { display: block; text-align: left; border: 0; background: none; border-radius: 8px; padding: 7px 10px; font: 500 12.5px var(--sans); color: var(--ink); cursor: pointer; }
-.layout-menu button:hover:not(:disabled) { background: var(--raised); }
-.layout-menu button:disabled { cursor: default; color: var(--muted); }
-.layout-menu small { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; font-weight: 400; }
-.layout-link { margin: 2px 6px 6px; box-sizing: border-box; border: 1px solid var(--edge); border-radius: 6px; padding: 4px 8px; font: 11.5px var(--mono); color: var(--ink); background: var(--surface); }
 .add-scope { display: block; margin: 4px 2px 0; color: var(--muted); font-size: 11.5px; }
 .add-scope:empty { display: none; }
 .top-units, .members { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; }
@@ -475,3 +466,8 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .member .nm.merged { font-style: italic; }
 .member .pct { text-align: right; font-variant-numeric: tabular-nums; }
 .member.more { display: block; color: var(--muted); font-size: 12px; }
+
+/* The download icon, quiet */
+.quiet-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); }
+.quiet-btn:hover:not(:disabled) { color: var(--ink); background: var(--raised); }
+.quiet-btn:disabled { opacity: .35; }

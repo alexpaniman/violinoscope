@@ -219,7 +219,8 @@
   }
 
   // ---------------------------------------------------------------------------------------------------------
-  // Compile time: a histogram with a range on it; expanded, which parts dominate at each compile time.
+  // Unit time: a histogram with a range on it, and under it which parts of the first tree take the time at each unit
+  // time.
 
   let RC = null, drag = null;
   function rangeDomain() {
@@ -257,14 +258,11 @@
 
   function renderCard() {
     const rc = rangeDomain(), card = $('rangecard'), svg = $('range-svg'), T = X.T;
-    card.classList.toggle('expanded', S.expanded);
-    $('expand').setAttribute('aria-expanded', String(S.expanded));
-    $('expand').textContent = S.expanded ? 'Hide parts' : 'Parts by time';
-    // Open, the parts are named at the right of the chart, so both charts leave that much room.
-    const LABELS = S.expanded ? 160 : 0, W = svg.clientWidth || card.clientWidth - 24, PAD = 7, w = W - 2 * PAD - LABELS, END = PAD + w;
+    // The parts are named at the right of the chart, so both charts leave that much room.
+    const LABELS = 160, W = svg.clientWidth || card.clientWidth - 24, PAD = 7, w = W - 2 * PAD - LABELS, END = PAD + w;
     const xOfL = (l) => PAD + (l - rc.lo) / (rc.hi - rc.lo) * w;
-    const HIST = 30, RUG0 = 34, RUG1 = 41, DOM0 = RUG1 + 8, DOMH = S.expanded ? 210 : 0;
-    const AXY = (S.expanded ? DOM0 + DOMH : RUG1) + 13, Ht = AXY + 4;
+    const HIST = 30, RUG0 = 34, RUG1 = 41, DOM0 = RUG1 + 8, DOMH = 210;
+    const AXY = DOM0 + DOMH + 13, Ht = AXY + 4;
     const out = [];
     const r = drag ? drag.range : S.range;
     const xa = xOfL(clamp(r ? Math.log10(r[0]) : rc.lo, rc.lo, rc.hi)), xb = xOfL(clamp(r ? Math.log10(r[1]) : rc.hi, rc.lo, rc.hi));
@@ -298,18 +296,16 @@
       out.push(`<circle cx="${n1(xOfL(Math.log10(Math.max(data.units[i].ms, 1e-3))))}" cy="${(RUG0 + RUG1) / 2}" r="3" fill="${T.surface}" stroke="${T[`m${X.slotOf(g)}`]}" stroke-width="1.5"/>`);
     }
     if (S.sel !== null) out.push(`<path d="M${n1(xOfL(Math.log10(Math.max(data.units[S.sel].ms, 1e-3))))} 0V${RUG1}" stroke="${T.sel}" stroke-width="2"/>`);
-    if (S.expanded) {
-      if (!rc.dom || rc.domKey !== X.scenarioKey()) { rc.dom = bucketShares(rc); rc.domKey = X.scenarioKey(); }
-      const key = `${W}|${T.scheme}|${rc.domKey}`;
-      if (!rc.domSvg || rc.domSvg.key !== key) rc.domSvg = { key, svg: dominanceSvg(rc, xOfL, DOM0, DOMH, W).join('') };
-      out.push(rc.domSvg.svg);
-    }
+    if (!rc.dom || rc.domKey !== X.scenarioKey()) { rc.dom = bucketShares(rc); rc.domKey = X.scenarioKey(); }
+    const domKey = `${W}|${T.scheme}|${rc.domKey}`;
+    if (!rc.domSvg || rc.domSvg.key !== domKey) rc.domSvg = { key: domKey, svg: dominanceSvg(rc, xOfL, DOM0, DOMH, W).join('') };
+    out.push(rc.domSvg.svg);
     for (let e = Math.ceil(rc.lo); e <= Math.floor(rc.hi); e++) {
       out.push(`<path d="M${n1(xOfL(e))} ${n1(AXY - 11)}v3" stroke="${T.line}"/>`);
       out.push(X.txt(xOfL(e), AXY, X.decade(10 ** e), { anchor: 'middle', fill: T.muted, size: 10.5, tabular: true }));
     }
     // Outside the range: veiled, the parts too; the handles stand on the histogram only.
-    const veilH = S.expanded ? DOM0 + DOMH : RUG1 + 1;
+    const veilH = DOM0 + DOMH;
     if (xa > PAD) out.push(`<rect x="0" y="0" width="${n1(xa)}" height="${veilH}" fill="${T.surface}" fill-opacity="0.62"/>`);
     if (xb < END) out.push(`<rect x="${n1(xb)}" y="0" width="${n1(END + PAD - xb)}" height="${veilH}" fill="${T.surface}" fill-opacity="0.62"/>`);
     for (const x of [xa, xb]) {
@@ -488,7 +484,7 @@
       const at = cardPointer(e);
       if (!at) return;
       if (!drag) {
-        if (S.expanded && RC && at.y >= RC.DOM0 && at.y <= RC.DOM0 + RC.DOMH) {
+        if (RC && at.y >= RC.DOM0 && at.y <= RC.DOM0 + RC.DOMH) {
           const b = svg.getBoundingClientRect(), c = $('rangecard').getBoundingClientRect();
           cross.hidden = false;
           cross.style.transform = `translateX(${Math.round(b.left - c.left + at.px)}px)`;
@@ -537,7 +533,6 @@
       });
       $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') $(id).blur(); });
     }
-    $('expand').addEventListener('click', () => { S.expanded = !S.expanded; renderCard(); placeCard(); renderCard(); });
     $('range-chip').addEventListener('click', () => toggleRange($('rangecard').hidden));
     $('range-clear').addEventListener('click', () => setRange(null));
     $('range-all').addEventListener('click', () => setRange(null));
@@ -614,7 +609,7 @@
     X.on('name', renderNameChip);
 
     const stage = $('stage');
-    const own = (e) => e.target.closest('#controls, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-merge, #v-hide, #layout-menu, .name-edit');
+    const own = (e) => e.target.closest('#controls, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-merge, #v-hide, .name-edit');
     const at = (e) => { const b = stage.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
     stage.addEventListener('pointermove', (e) => {
       if (own(e)) { if (S.view === 'violins') X.violins.leave(e); return; }
@@ -675,7 +670,6 @@
       if (S.card !== null && !e.target.closest('#card-pop') && !e.target.closest('[data-col]')) X.panel.closeCard();
       if (!e.target.closest('#v-factor-menu, [data-pill]')) X.violins.closeMenu();
       if (!e.target.closest('#v-add, [data-add]')) X.edit.closeAdd();
-      if (!e.target.closest('#layout-menu, #layout-btn')) X.share.close();
     });
     $('whatif-clear').addEventListener('click', () => { for (const id of [...S.factors.keys()]) S.factors.delete(id); X.setFactor('__none__', 1); });
     document.addEventListener('paste', (e) => {
@@ -688,7 +682,6 @@
         if (!$('keys').hidden) toggleKeys(false);
         else if (!$('rangecard').hidden) toggleRange(false);
         else if (X.edit.closeAdd()) { /* closed the + list */ }
-        else if (X.share.close()) { /* closed the layout menu */ }
         else if (X.violins.closeMenu()) { /* closed the factors */ }
         else if (S.card !== null) X.panel.closeCard();
         else if (X.edit.clearPicked()) { /* let the picked violins go */ }
@@ -740,7 +733,7 @@
     X.tokens();
     X.violins.init();
     X.edit.init();
-    X.share.init();
+    X.download.init();
     X.flame.init();
     X.spans.init();
     X.panel.init();

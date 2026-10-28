@@ -592,8 +592,8 @@
 
   // ---------------------------------------------------------------------------------------------------------
   // Keeping it. A layout is what is shown, merged and renamed, by path, so it survives building the data again. One
-  // saved into the page (data/layout.js) is where everyone starts; the viewer's own changes are kept in the browser,
-  // for each kind of unit, until one is saved into the page after them; a link can carry one too.
+  // saved into the page (data/layout.js, or inside a page downloaded as one file) is where everyone starts; the
+  // viewer's own changes are kept in the browser, for each kind of unit, until the page has a newer one saved in it.
 
   const saved = () => window.EXPLORER_LAYOUT || null;
   const savedAt = () => (saved() ? saved().saved : null);
@@ -656,47 +656,12 @@
     return (own.base || null) === savedAt() && load(own.layout);
   }
 
-  // In a link: after #layout=, deflated JSON in base64url, or plain JSON where the browser can't deflate.
-  const B64 = { '+': '-', '/': '_', '-': '+', _: '/' };
-  function toB64(bytes) {
-    let s = '';
-    for (let k = 0; k < bytes.length; k += 0x8000) s += String.fromCharCode(...bytes.subarray(k, k + 0x8000));
-    return btoa(s).replace(/[+/]/g, (c) => B64[c]).replace(/=+$/, '');
-  }
-  const fromB64 = (s) => Uint8Array.from(atob(s.replace(/[-_]/g, (c) => B64[c])), (c) => c.charCodeAt(0));
-  const pipe = (bytes, stream) => new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer();
-  async function encode(s) {
-    const json = new TextEncoder().encode(JSON.stringify(s));
-    if (typeof CompressionStream === 'undefined') return `j${toB64(json)}`;
-    return `z${toB64(new Uint8Array(await pipe(json, new CompressionStream('deflate-raw'))))}`;
-  }
-  async function decode(code) {
-    const bytes = fromB64(code.slice(1));
-    const json = code[0] === 'z' ? new Uint8Array(await pipe(bytes, new DecompressionStream('deflate-raw'))) : bytes;
-    return JSON.parse(new TextDecoder().decode(json));
-  }
-  async function link() {
-    const base = location.href.split('#')[0];
-    return `${base}#layout=${await encode(state())}`;
-  }
-  const linked = (async () => {
-    const m = /[#&]layout=([^&]+)/.exec(location.hash);
-    if (!m) return null;
-    try { return await decode(m[1]); } catch (e) { return null; }
-  })();
-
   function start() {
+    ready = true;
     if (!meta.unit) X.UNIT = paths[rootPath].name;
-    linked.then((fromLink) => {
-      ready = true;
-      relink();
-      if (fromLink && load(fromLink)) {
-        // Once opened, it is the viewer's own: a reload keeps their changes, not the link's.
-        try { history.replaceState(null, '', location.href.split('#')[0]); } catch (e) { /* the address stays */ }
-        setTimeout(() => X.toast('Opened with the violins from the link'), 0);
-      } else if (!restore()) reset();
-      apply();
-    });
+    relink();
+    if (!restore()) reset();
+    apply();
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -735,10 +700,9 @@
     rename: change(rename),
     suggestName: (ids) => suggestName(ids),
     reset: change(reset),
-    // Sharing: what is shown as data, a link that opens it, and the layout saved into the page, once it is saved.
-    state, link,
+    // What is shown, as data, to save into a page; and the layout saved into this one.
+    state,
     get saved() { return saved(); },
-    savedAs(doc) { window.EXPLORER_LAYOUT = doc; save(); },
     // The column a span counts toward in the first tree, by its unit and row.
     partOfRow: (i, r) => (ready && units[i] ? ownerOf[units[i].rowPath[r]] : -1),
     partOfPath: (p) => (ready ? ownerOf[p] : -1),

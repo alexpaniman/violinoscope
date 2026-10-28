@@ -60,19 +60,17 @@ nothing from outside `out/`.
   The left and right halves are two sets of groups. Below them, "When it runs": each unit stretched to the same
   height, start at the top, and how often each violin is running at each point of it. A what-if factor on any violin
   projects every view.
-- **Layout**, the violins shown, merged and renamed:
-  - on claude.ai, **Save for everyone** (for whoever can edit the page) saves them into the page, `data/layout.js`,
-    and everyone who opens it starts with them; claude.ai refuses it once the page is shared publicly;
-  - anywhere else, **Copy link** gives a link that opens them, the layout after `#layout=`, deflated;
-  - **Back to the saved violins**, or **Start over** when none are saved.
-
-  A viewer's own changes are kept in their browser until a newer layout is saved into the page.
+- **Download** (the icon at the top right): the page as one HTML file, its data inside, opening with the violins
+  as they are; it works from disk, and downloads itself again the same way. The root's card goes back to the
+  violins a page was saved with, or starts over. A viewer's own changes are kept in their browser until they open a
+  page saved after them.
 - **Timeline:** the units in view laid out in time, each run on its own clock, as a flame chart or as a waterfall
   with a row per span.
 - **Spans:** a table of span names or call paths with self and total time, the merged flame graph of the
   selection, and the callers and callees of a picked span.
 
-The chip for the unit's time filters units by duration, and shows how the violins' shares change with it.
+The chip for the unit's time filters units by duration; its card shows, under the histogram, how the unit's time
+splits among the first tree's violins at each duration (Parts by time).
 
 A violin's time in a unit is the time its spans cover there, overlaps counted once, cut to the unit; a merged violin's
 is its members' together. For the split of a unit's time ("Parts by time", the what-if), each moment counts toward
@@ -93,15 +91,16 @@ tools/with-browser.sh tests/browser_check.py out/ --shots shots/   # build and s
 ## Files
 
 - `violinoscope.py`: the converter. It reads spans, cuts them into units, and writes `out/data/` (a summary of the
-  units and their span trees in chunks, and an empty `layout.js` unless one is there already) next to a copy of `web/`.
+  units, their span trees in chunks, and an empty `layout.js`, the violins a page starts with, unless one is there
+  already) and `out/index.html`, `web/index.html` with the page's scripts and styles inside it.
 - `web/`: the page, plain scripts sharing `window.TX`:
   - `core.js`: state, data access, columns, scales and the what-if;
   - `layout.js`: the violins from the span trees: call paths, what is shown and merged, each unit's time in them;
   - `violins.js`, `edit.js` and `gl.js`: the Phases tab, changing what it shows, and its dots on the GPU;
-  - `share.js`: the Layout menu: saving the violins into the page, a link that opens them;
+  - `download.js`: the page as one file, with the violins as they are;
   - `timeline.js`, `flame.js`, `nav.js`: the waterfall, flame chart, flame graph and the overview strip;
   - `spans.js`: the spans table and callers and callees;
   - `panel.js`: cards; `main.js`: controls, the time range card and keys;
   - `render.js`, `model.js`: density estimation, scales and shared drawing.
 - `tools/artifact_page.py`: writes `artifact.html`, the page without its document skeleton, for hosting as a
-  claude.ai artifact.
+  claude.ai artifact; `tools/write_page.py OUT` writes `OUT/index.html` again from `web/`, keeping the data.

@@ -43,7 +43,6 @@
           <button type="button" data-linear="false" aria-pressed="true" title="Square root: spreads out the small shares, and still shows 0% (L)">Square root</button>
           <button type="button" data-linear="true" aria-pressed="false" title="Linear (L)">Linear</button>
         </div>
-        <div class="seg" data-for="violins"><button type="button" id="layout-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="layout-menu" title="Save these violins for everyone, or copy a link that opens them">Layout</button></div>
         <div class="seg" id="tl-modes" role="group" aria-label="Timeline" data-for="timeline" hidden>
           <button type="button" data-tl="chart" aria-pressed="true" data-u title="Each {unit} span on one line, what it calls stacked below, asynchronous spans on a track per name">Flame chart</button>
           <button type="button" data-tl="waterfall" aria-pressed="false" title="A row per span, as in Jaeger">Waterfall</button>
@@ -66,13 +65,13 @@
           <span class="chip-group" id="whatif-chip" hidden><span class="chip" id="whatif-text"></span><button class="chip-x" id="whatif-clear" type="button" aria-label="Turn the what-if off" title="Turn the what-if off: every part as measured">×</button></span>
           <button class="range-chip" id="range-chip" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="rangecard"><span data-u>{unit} time</span><b id="range-value">all</b></button>
           <button class="range-clear" id="range-clear" type="button" aria-label="Show every duration" title="Show every duration" hidden>×</button>
+          <button class="quiet-btn" id="download" type="button" disabled aria-label="Download this page as one file" title="Download this page as one HTML file, data and all, opening with these violins"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </div>
       </div>
     </div>
 
     <div class="overview" id="overview" hidden><canvas id="overview-canvas" aria-label="Overview" title="Drag to pick what is shown, drag its edges to resize; double-click or F for all of it"></canvas><div class="ov-nav" id="ov-nav" hidden><button type="button" data-nav="back" title="Back to where you were (Esc)">← Back</button><button type="button" data-nav="all" title="All of it (F, or double-click the strip)">All</button></div></div>
     <div class="toast" id="toast" role="status" hidden></div>
-    <div class="layout-menu" id="layout-menu" role="dialog" aria-label="Layout" hidden></div>
 
     <section class="card" id="rangecard" role="dialog" data-u aria-label="{unit} time range" hidden>
       <div class="card-head">
@@ -85,7 +84,6 @@
         </span>
         <button class="text-btn small" id="range-all" type="button" title="Every duration (double-click the histogram)">All</button>
         <span class="spacer"></span>
-        <button class="text-btn small" id="expand" type="button" aria-expanded="false">Parts by time</button>
       </div>
       <svg id="range-svg" data-u aria-label="Histogram of {unit} times: drag the handles or across it to pick a range, double-click to show all"></svg>
       <div class="dom-legend" id="dom-legend" hidden></div>
@@ -107,7 +105,7 @@
 <script src="gl.js"></script>
 <script src="violins.js"></script>
 <script src="edit.js"></script>
-<script src="share.js"></script>
+<script src="download.js"></script>
 <script src="nav.js"></script>
 <script src="flame.js"></script>
 <script src="spans.js"></script>

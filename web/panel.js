@@ -32,6 +32,7 @@
       if (!act) return;
       const id = S.card;
       if (act.dataset.act === 'hide') { closeCard(); X.layout.hide(id); }
+      else if (act.dataset.act === 'reset') { closeCard(); X.layout.reset(); }
       else if (act.dataset.act === 'spans') { const name = X.layout.spanName(id); closeCard(); X.spans.pick(name); X.go('profile', 'callers'); }
       else if (act.dataset.act === 'split') { closeCard(); X.layout.ungroup(id); }
       else if (act.dataset.act === 'rename') {
@@ -146,7 +147,11 @@
     if (!root) html += ck !== undefined ? runsScatter(k, ck, halves) : shareScatter(k, halves);
     html += topUnits(k, halves, time);
     if (!root && col.merged) html += membersOf(col.id, halves);
-    if (!root) {
+    // The root: back to where the page starts, the violins saved in it, or the unit's span and its largest children.
+    if (root) {
+      html += `<div class="card-actions"><button type="button" class="btn small" data-act="reset" title="${X.layout.saved ? 'The violins this page was saved with' : `${esc(X.UNIT)} and the spans that take most of its time`}">`
+        + `${X.layout.saved ? 'Back to the saved violins' : 'Start over'}</button></div>`;
+    } else {
       html += `<div class="card-actions"><button type="button" class="btn small" data-act="hide" title="Its parent still counts its time">Hide</button>`
         + '<button type="button" class="btn small" data-act="rename" title="Or double-click its name">Rename</button>'
         + (col.merged ? '<button type="button" class="btn small" data-act="split" title="Show what it merges on its own again">Split up</button>' : '')

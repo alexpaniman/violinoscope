@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Opens a generated explorer in headless Chromium, builds violins (opens one, adds from a +, merges two picked, drags
-a name onto another, renames one, fills the second tree, sets a what-if in both trees), opens a card, shares them (a
-link, and saving into the page as on claude.ai, with a stand-in for claude.ai), goes through every tab and mode, and
-fails on any console or page error or a change that did not take.
+a name onto another, renames one, fills the second tree, sets a what-if in both trees), opens a card, downloads the
+page as one file and opens that (and saves it as on claude.ai, with a stand-in for claude.ai), goes through every tab
+and mode, and fails on any console or page error or a change that did not take.
 Needs Playwright for Python and its Chromium; tools/with-browser.sh sets up the environment.
 
   browser_check.py OUT_DIR [--shots DIR]
@@ -10,7 +10,6 @@ Needs Playwright for Python and its Chromium; tools/with-browser.sh sets up the 
 import argparse
 import asyncio
 import os
-import shutil
 import sys
 import tempfile
 
@@ -29,11 +28,10 @@ STEPS = [
 READY = 'window.TX && TX.layout.ready && TX.violins.G'
 TWO = '~two'
 COLS = 'TX.violins.G.p.cols.map((c) => c.id)'
-# claude.ai as a page saving itself sees it: the artifact can publish files, and the viewer can edit.
+# claude.ai as a page offering a file sees it: the viewer accepts.
 STAND_IN = """
-window.__published = null;
-window.claude = { use: async (name) => name === 'artifact' ? { publish: async (files) => { window.__published = files; return { version: 'v2' }; } }
-  : name === 'user' ? { canEdit: async () => true } : null };
+window.__saved = null;
+window.claude = { use: async (name) => name === 'downloads' ? { save: async (r) => { window.__saved = { filename: r.filename, size: r.data.size }; return { status: 'saved' }; } } : null };
 """
 
 
@@ -66,7 +64,7 @@ async def main():
     expect = lambda ok, what: None if ok else errors.append(what)
     async with async_playwright() as p:
         browser = await p.chromium.launch(args=ARGS)
-        page = await opened(browser, url, errors, STAND_IN)
+        page = await opened(browser, url, errors)
         await page.evaluate('localStorage.clear()')
         await page.reload()
         await page.wait_for_function(READY, timeout=60000)
@@ -201,38 +199,38 @@ async def main():
             await page.keyboard.press('Escape')
             await page.keyboard.press('Escape')
 
-        # Save for everyone, as on claude.ai; another viewer opening the page starts with what was saved.
-        layout = await page.evaluate(COLS)
-        await page.click('#layout-btn')
-        await shot(page, 'layout-menu')
-        await page.click('#layout-menu [data-do="save"]')
-        await page.wait_for_timeout(300)
-        published = await page.evaluate('window.__published && window.__published["data/layout.js"]')
-        if not published or not published['content'].startswith('window.EXPLORER_LAYOUT = '):
-            errors.append('saving for everyone published no layout')
-        else:
-            with tempfile.TemporaryDirectory() as tmp:
-                copy = os.path.join(tmp, 'out')
-                shutil.copytree(args.out, copy)
-                with open(os.path.join(copy, 'data', 'layout.js'), 'w') as f:
-                    f.write(published['content'])
-                other = await (await browser.new_context(viewport={'width': 1440, 'height': 820})).new_page()
-                other.on('pageerror', lambda e: errors.append(f'page: {e}'))
-                await other.goto('file://' + os.path.join(copy, 'index.html'))
-                await other.wait_for_function(READY, timeout=60000)
-                expect(await other.evaluate(COLS) == layout, 'a viewer of the saved page did not start with its violins')
-                await other.close()
+        # A + low on the screen: its list, filtered to many rows, stays on screen.
+        plus = await page.query_selector_all('[data-add]')
+        await plus[-1].click()
+        await page.fill('#v-add [data-filter]', 'e')
+        await page.wait_for_timeout(200)
+        box = await (await page.query_selector('#v-add')).bounding_box()
+        expect(box['y'] >= 0 and box['y'] + box['height'] <= 820, f'the + list runs off the screen: {box}')
+        await page.keyboard.press('Escape')
 
-        # A link carries the violins: opened where nothing is kept, it shows them.
-        link = await page.evaluate('TX.layout.link()')
-        fresh = await (await browser.new_context(viewport={'width': 1440, 'height': 820})).new_page()
-        fresh.on('pageerror', lambda e: errors.append(f'page: {e}'))
-        await fresh.goto(link)
-        await fresh.wait_for_function(READY, timeout=60000)
-        expect(await fresh.evaluate(COLS) == layout, 'the link did not open the same violins')
-        expect('#' not in fresh.url, 'the link stayed in the address after opening')
-        print(f'link: {len(link) - len(url)} characters after the address', file=sys.stderr)
-        await fresh.close()
+        # Download the page as one file; opened where nothing is kept, it shows these violins, and works with no data
+        # folder next to it.
+        layout = await page.evaluate(COLS)
+        async with page.expect_download() as info:
+            await page.click('#download')
+        with tempfile.TemporaryDirectory() as tmp:
+            single = os.path.join(tmp, 'page.html')
+            await (await info.value).save_as(single)
+            print(f'one file: {os.path.getsize(single) / 1e6:.1f} MB', file=sys.stderr)
+            other = await (await browser.new_context(viewport={'width': 1440, 'height': 820})).new_page()
+            other.on('pageerror', lambda e: errors.append(f'page (one file): {e}'))
+            other.on('console', lambda m: errors.append(f'console (one file): {m.text}') if m.type == 'error' else None)
+            await other.goto('file://' + single)
+            await other.wait_for_function(READY, timeout=60000)
+            expect(await other.evaluate(COLS) == layout, 'the downloaded page did not open with the same violins')
+            await shot(other, 'one-file')
+            await other.close()
+        # On claude.ai the viewer is offered the file.
+        await page.evaluate(STAND_IN)
+        await page.click('#download')
+        await page.wait_for_timeout(500)
+        saved = await page.evaluate('window.__saved')
+        expect(bool(saved) and saved['filename'].endswith('.html') and saved['size'] > 1000, f'the page offered no file on claude.ai: {saved}')
 
         for name, js in STEPS:
             await page.evaluate(js)
@@ -252,7 +250,7 @@ async def main():
         await browser.close()
     for e in errors:
         print(e, file=sys.stderr)
-    print(f'{len(STEPS) + 16} steps, {len(errors)} errors')
+    print(f'{len(STEPS) + 17} steps, {len(errors)} errors')
     return 1 if errors else 0
 
 

@@ -13,7 +13,7 @@
   const HALF = R.HALF, RIGHT = 20, AX = 80, MIN_COL = 26, MAX_COL = 68, ANGLE = 30 * Math.PI / 180, SIZE = 12.5, DOT = 2.8, DIAMOND = 10;
   const DOT_R = DOT / 2;  // as the GPU draws it
 
-  const MAX_ZOOM = 12, GAP = 0.6;
+  const MAX_ZOOM = 12, GAP = 0.6, SIDE = 40;
 
   let root, pill, pills, menu, under, over, heat, hover, pad, points;
   let G = null, lastKey = null;
@@ -38,6 +38,8 @@
       e.preventDefault();
     });
     under = $('v-under'); over = $('v-over'); heat = $('v-heat'); hover = $('v-hover'); pad = $('hitpad');
+    // The what-if pill waits for the pointer to move to where the violins are now.
+    X.on('layout', () => { pill.hidden = true; });
     points = X.Points($('v-dots'));
   }
 
@@ -58,10 +60,10 @@
 
     // Columns keep their width until there are more than fit, so opening one moves only the columns after it and no
     // violin changes shape; the plot ends after the last column.
-    // The second tree after a gap.
-    const n = p.cols.length, two = p.cols.findIndex((col) => col.id === X.ROOT2);
-    const colW = clamp((W - AX - RIGHT) / Math.max(n + GAP, 16), MIN_COL, MAX_COL), END = AX + (n + GAP) * colW;
-    const xOf = (c) => AX + (c + 0.5 + (c >= two ? GAP : 0)) * colW;
+    // The second tree after a gap; while it is empty, only a small + at the side, to start it.
+    const n = p.cols.length, two = p.cols.findIndex((col) => col.id === X.ROOT2), gap = two >= 0 ? GAP : 0, side = two >= 0 ? 0 : SIDE;
+    const colW = clamp((W - AX - RIGHT - side) / Math.max(n + gap, 16), MIN_COL, MAX_COL), END = AX + (n + gap) * colW;
+    const xOf = (c) => AX + (c + 0.5 + (two >= 0 && c >= two ? gap : 0)) * colW;
     // The unit's own span is the root the columns branch from; in Share it is 100% everywhere, so it shows only its
     // median time.
     const depth = p.cols.map((col) => (col.root ? 0 : X.depthIdx[col.base] + 1));
@@ -221,10 +223,10 @@
     let lines = '';
     // The + comes after everything under the column, where what it adds usually goes.
     const plusAt = (c) => (ends[c] === c ? xOf(c) + 14 : xOf(ends[c]) + colW / 2);
-    // Two +s in one place, a level apart, step aside, so they don't overlap.
-    const stacked = new Map();
-    p.cols.forEach((col, c) => { if (more[c]) { const at = Math.round(plusAt(c)); stacked.set(at, (stacked.get(at) || 0) + 1); } });
-    const plusX = (c) => plusAt(c) + (stacked.get(Math.round(plusAt(c))) > 1 ? (depth[c] % 2 ? -4 : 4) : 0);
+    // Several +s in one place: the deepest stays, and each one above it goes a step further along its own line.
+    const deepest = new Map();
+    p.cols.forEach((col, c) => { if (more[c]) { const at = Math.round(plusAt(c)); deepest.set(at, Math.max(deepest.has(at) ? deepest.get(at) : 0, depth[c])); } });
+    const plusX = (c) => plusAt(c) + (deepest.get(Math.round(plusAt(c))) - depth[c]) * 9;
     p.cols.forEach((col, c) => {
       const y = nodeY(depth[c]), ch = visKids[c];
       if (ch.length) {
@@ -260,6 +262,14 @@
         + `<rect x="${n1(-lens[c] - 4)}" y="-3" width="${n1(lens[c] + 8)}" height="${n1(SIZE + 6)}" rx="4" fill="${picked ? T.sel : 'transparent'}" fill-opacity="${picked ? 0.22 : 0}"${picked ? ` stroke="${T.sel}"` : ''}/>`
         + `<text text-anchor="end" dominant-baseline="hanging" font-family="${X.SANS}" font-size="${SIZE}" font-weight="${weight[c]}"${col.merged ? ' font-style="italic"' : ''} fill="${col.blank && !visKids[c].length ? T.muted : T.ink}">${esc(labels[c])}</text></g>`);
     });
+    // The second tree, empty: a small dashed + to the side of the first tree's root line, clear of its +.
+    if (two < 0) {
+      const sx = END + SIDE - 12, sy = nodeY(0);
+      o.push(`<g class="hit add" data-add="${X.ROOT2}"><title>Projections: violins beside this tree that take nothing from it, any spans, merged as you like; or drop a name here</title>`
+        + `<rect x="${n1(sx - 10)}" y="${n1(sy - 10)}" width="20" height="20" fill="transparent"/>`
+        + `<circle cx="${n1(sx)}" cy="${n1(sy)}" r="5" fill="none" stroke="${T.line}" stroke-dasharray="2 2"/>`
+        + `<path d="M${n1(sx - 2.3)} ${n1(sy)}h4.6M${n1(sx)} ${n1(sy - 2.3)}v4.6" stroke="${T.muted}" stroke-width="1.2" stroke-linecap="round"/></g>`);
+    }
     // Its axis as the violins' is: named along it, ticked where its grid lines are, through each compilation's time.
     o.push(`<text transform="translate(16 ${n1((TL.y0 + TL.y1) / 2)}) rotate(-90)" text-anchor="middle" dominant-baseline="central" font-family="${X.SANS}" font-size="11.5" font-weight="500" fill="${T.muted}">When it runs</text>`);
     [['start', 0], ['25%', 0.25], ['50%', 0.5], ['75%', 0.75], ['end', 1]].forEach(([label, v]) => {
@@ -340,7 +350,7 @@
       ctx.globalAlpha = 1;
     };
     if (S.card) { const c = G.p.cols.findIndex((col) => col.id === S.card); if (c >= 0) tint(c, 0.06); }
-    if (lift && lift.moved) { tint(lift.c, 0.05); if (lift.to !== null) tint(lift.to, 0.14); }
+    if (lift && lift.moved) { tint(lift.c, 0.05); if (lift.to !== null && lift.to >= 0) tint(lift.to, 0.14); }
     if (lit) {
       const c = G.p.cols.findIndex((col) => col.id === lit.id);
       if (c >= 0) tint(c, 0.18 * Math.max(0, 1 - (performance.now() - lit.t) / 900));
@@ -668,9 +678,10 @@
     const [lx, ly] = toLayer(px, py), from = G.p.cols[lift.c];
     const el = e.target.closest && e.target.closest('[data-col]');
     const c = el ? Number(el.dataset.col) : colAt(lx, ly), onto = c !== null ? G.p.cols[c] : null;
-    // From the first tree onto the second: a copy at its top.
-    lift.copy = !!(onto && onto.second && !from.second);
-    lift.to = onto && (lift.copy || X.layout.canMerge(from.id, onto.id)) ? c : null;
+    // From the first tree onto the second, or onto the + that starts it: a copy at its top.
+    const start = !!(e.target.closest && e.target.closest(`[data-add="${X.ROOT2}"]`));
+    lift.copy = !from.second && (start || !!(onto && onto.second));
+    lift.to = lift.copy ? (onto && onto.second ? c : -1) : onto && X.layout.canMerge(from.id, onto.id) ? c : null;
     X.edit.showLift(from.label, px, py, lift.to === null ? null : lift.copy ? X.ROOT2 : onto.id);
     X.schedule(drawHover);
   }
@@ -683,9 +694,10 @@
     dragged = true;
     X.schedule(drawHover);
     if (!drop || l.to === null) return;
-    const a = G.p.cols[l.c].id, b = G.p.cols[l.to].id;
-    X.picked.delete(a); X.picked.delete(b);
+    const a = G.p.cols[l.c].id;
     if (l.copy) { flash(X.layout.copyOver(a)); return; }
+    const b = G.p.cols[l.to].id;
+    X.picked.delete(a); X.picked.delete(b);
     if (X.layout.isMerged(b)) { flash(X.layout.join(a, b)); return; }
     const id = X.layout.merge([a, b], '', b);
     flash(id);

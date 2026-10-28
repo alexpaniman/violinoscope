@@ -26,7 +26,6 @@ import heapq
 import json
 import os
 import re
-import shutil
 import sys
 import time
 import urllib.parse
@@ -379,10 +378,30 @@ def write_bundle(args, unit, records, failures, runs):
             json.dump({'chunk': k // CHUNK, 'names': chunk_names, 'trees': trees}, f, separators=(',', ':'))
             f.write(';\n')
 
-    web = os.path.join(HERE, 'web')
-    for f in os.listdir(web):
-        shutil.copy(os.path.join(web, f), os.path.join(out, f))
+    write_page(out)
     print(f'{len(records)} units of {unit}, {len(failures)} failed -> {out}/index.html', file=sys.stderr)
+
+
+def write_page(out):
+    """Writes out/index.html: web/index.html with its scripts and styles inside it, so the page can save itself as one
+    file; the data stays in out/data."""
+    web = os.path.join(HERE, 'web')
+    page = open(os.path.join(web, 'index.html')).read()
+
+    def inline(m):
+        src = m.group(1)
+        if src.startswith('data/'):
+            return m.group(0)
+        code = open(os.path.join(web, src)).read()
+        # Nothing in a script may end it early.
+        code = re.sub(r'</(script)', r'<\\/\1', code, flags=re.I)
+        return f'<script data-v="{src[:-3]}">\n{code}</script>'
+
+    css = open(os.path.join(web, 'app.css')).read()
+    page = page.replace('<link rel="stylesheet" href="app.css">', f'<style data-v>\n{css}</style>')
+    page = re.sub(r'<script src="([^"]+)"></script>', inline, page)
+    with open(os.path.join(out, 'index.html'), 'w') as f:
+        f.write(page)
 
 
 def natural(s):
