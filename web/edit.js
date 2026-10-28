@@ -28,7 +28,7 @@
     });
     menu.addEventListener('change', (e) => {
       if (e.target.matches('[data-all]')) {
-        for (const r of rows) if (e.target.checked) ticked.add(r.id); else ticked.delete(r.id);
+        for (const r of rowsOf(e.target.dataset.all)) if (e.target.checked) ticked.add(r.id); else ticked.delete(r.id);
         renderList();
         return;
       }
@@ -52,6 +52,7 @@
         return;
       }
       if (act.dataset.do === 'add') { closeAdd(); X.layout.add(ids, at); }
+      else if (act.dataset.do === 'exclude') { closeAdd(); X.layout.exclude(at, ids); }
       else if (act.dataset.do === 'one') {
         if (ids.length < 2) { closeAdd(); X.layout.add(ids, at); return; }
         naming = true;
@@ -69,11 +70,13 @@
     bar.addEventListener('click', (e) => {
       const act = e.target.closest('[data-do]');
       if (!act) return;
-      if (act.dataset.do === 'merge') mergePicked();
+      if (act.dataset.do === 'merge') mergePicked(false);
+      else if (act.dataset.do === 'parent') mergePicked(true);
+      else if (act.dataset.do === 'above') { const span = X.layout.dominator([...X.picked]); X.picked.clear(); bar.hidden = true; if (span) X.layout.unskip(span); }
       else if (act.dataset.do === 'remove') removePicked();
       else { X.picked.clear(); syncBar(); X.violins.invalidate(); X.render(); }
     });
-    bar.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('[data-name]')) { mergePicked(); e.preventDefault(); } });
+    bar.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('[data-name]')) { mergePicked(false); e.preventDefault(); } });
     hideBtn.addEventListener('click', () => {
       const id = hideBtn.dataset.id;
       showHide(null);
@@ -136,28 +139,37 @@
     under = null;
     return true;
   }
+  // The tree's +: its children, then everything deeper under it, each section with an All of its own; a card's:
+  // what to include or exclude.
   function renderList() {
     rows = mode ? X.layout.spansFor(under, query, mode) : X.layout.candidates(under, query);
-    // Typed, the list looks through every level, not only the violin's own children.
     const scope = menu.querySelector('.add-scope'), typed = !!query.trim();
     scope.textContent = mode === 'include' ? (typed ? `Any span of ${X.UNIT} not in it already` : '')
-      : mode === 'exclude' ? (typed ? 'Every level inside it' : 'Its own children; type to look deeper')
-        : !typed ? '' : under === X.ROOT2 ? `Every level of ${X.UNIT}` : `Every level inside ${X.layout.label(under === X.ROOT ? X.layout.rootKey() : under)}`;
-    const list = menu.querySelector('.add-list');
-    const head = query.trim() && rows.length > 1
-      ? `<label class="add-row all"><input type="checkbox" data-all${rows.every((r) => ticked.has(r.id)) ? ' checked' : ''}><span class="nm">All ${X.fmtInt(rows.length)}</span></label>` : '';
-    list.innerHTML = rows.length ? head + rows.map((r) => `<label class="add-row" title="${esc(r.where ? `${r.where} › ${r.label}` : r.label)}">`
+      : mode === 'exclude' ? (typed ? 'Every level inside it' : 'Its own children; type to look deeper') : '';
+    const of = mode === 'include' ? X.UNIT : X.layout.label(under === X.ROOT ? X.layout.rootKey() : under);
+    const row = (r) => `<label class="add-row" title="${esc(r.where ? `${r.where} › ${r.label}` : r.label)}">`
       + `<input type="checkbox" data-id="${esc(r.id)}"${ticked.has(r.id) ? ' checked' : ''}>`
       + `<span class="nm">${esc(r.label)}${r.group ? `<span class="count">${X.fmtInt(X.layout.size(r.id))}</span>` : ''}${r.where ? `<small>${esc(r.where)}</small>` : ''}</span>`
-      + `<span class="pct" title="Its average share of ${esc(mode === 'include' ? X.UNIT : X.layout.label(under === X.ROOT ? X.layout.rootKey() : under))}'s time${r.seen < 0.995 ? `; present in ${X.fmtPct(r.seen)} of them` : ''}">${X.fmtPct(r.share)}${r.seen < 0.995 ? `<small>in ${X.fmtPct(r.seen)}</small>` : ''}</span></label>`).join('')
-      : `<p class="add-none">${mode === 'include' ? (typed ? 'No span not in it has that in its name.' : 'Type a span’s name to find it.')
-        : mode === 'exclude' ? (typed ? 'Nothing inside it has that in its name.' : 'It calls nothing to exclude.')
-          : typed ? 'Nothing not shown has that in its name.' : 'Everything inside it is shown.'}</p>`;
+      + `<span class="pct" title="Its average share of ${esc(of)}'s time${r.seen < 0.995 ? `; present in ${X.fmtPct(r.seen)} of them` : ''}">${X.fmtPct(r.share)}${r.seen < 0.995 ? `<small>in ${X.fmtPct(r.seen)}</small>` : ''}</span></label>`;
+    const section = (name, list, key) => (!list.length ? ''
+      : `<div class="add-section"><label class="add-row all"><input type="checkbox" data-all="${key}"${list.every((r) => ticked.has(r.id)) ? ' checked' : ''}>`
+        + `<span class="nm">${name}</span><span class="pct">All ${X.fmtInt(list.length)}</span></label>${list.map(row).join('')}</div>`);
+    const list = menu.querySelector('.add-list');
+    const html = mode ? section(mode === 'include' ? 'Spans' : 'Inside it', rows, 'all')
+      : section(under === X.ROOT2 ? `Under ${esc(X.UNIT)}` : 'Its children', rows.filter((r) => !r.deep), 'kids')
+        + section('Deeper inside', rows.filter((r) => r.deep), 'deep');
+    list.innerHTML = html || `<p class="add-none">${mode === 'include' ? (typed ? 'No span not in it has that in its name.' : 'Type a span’s name to find it.')
+      : mode === 'exclude' ? (typed ? 'Nothing inside it has that in its name.' : 'It calls nothing to exclude.')
+        : typed ? 'Nothing not shown has that in its name.' : 'Everything inside it is shown.'}</p>`;
     renderFoot();
   }
+  // The rows an All box stands for.
+  const rowsOf = (key) => rows.filter((r) => key === 'all' || (key === 'deep') === !!r.deep);
   function syncAll() {
-    const all = menu.querySelector('[data-all]');
-    if (all) all.checked = rows.length > 0 && rows.every((r) => ticked.has(r.id));
+    for (const all of menu.querySelectorAll('[data-all]')) {
+      const list = rowsOf(all.dataset.all);
+      all.checked = list.length > 0 && list.every((r) => ticked.has(r.id));
+    }
   }
   function renderFoot() {
     const foot = menu.querySelector('.add-foot'), n = ticked.size;
@@ -175,9 +187,11 @@
       placeAdd();
       return;
     }
+    const violin = under !== X.ROOT && under !== X.ROOT2 && under !== X.layout.rootKey();
     foot.innerHTML = `<span class="add-count">${n ? `${X.fmtInt(n)} ticked` : 'Tick what to add'}</span>`
       + `<button type="button" class="text-btn small" data-do="add"${n ? '' : ' disabled'}>Add${n > 1 ? ` ${X.fmtInt(n)}` : ''}</button>`
-      + `<button type="button" class="text-btn small" data-do="one"${n > 1 ? '' : ' disabled'} title="Add them as one violin: their time together">Add as one</button>`;
+      + `<button type="button" class="text-btn small" data-do="one"${n > 1 ? '' : ' disabled'} title="Add them as one violin: their time together">Add as one</button>`
+      + (violin ? `<button type="button" class="text-btn small" data-do="exclude"${n ? '' : ' disabled'} title="Leave their time out of ${esc(X.layout.label(under))}">Exclude</button>` : '');
     placeAdd();
   }
   // Every match of a typed filter, merged, keeps the filter: spans read again that match it join.
@@ -204,19 +218,24 @@
     if (!ids.length) { bar.hidden = true; return; }
     const name = bar.querySelector('[data-name]');
     const keep = name && document.activeElement === name ? name.value : null;
+    const above = ids.length > 1 ? X.layout.dominator(ids) : null;
     bar.innerHTML = `<span>${ids.length === 1 ? '1 violin' : `${X.fmtInt(ids.length)} violins`} picked</span>`
       + (ids.length > 1 ? `<input data-name autocomplete="off" spellcheck="false" aria-label="Name of the merged violin" value="${esc(keep !== null ? keep : X.layout.suggestName(ids))}">`
-        + '<button type="button" class="text-btn small primary" data-do="merge">Merge</button>' : '<span class="spacer"></span>')
+        + '<button type="button" class="text-btn small primary" data-do="merge" title="One violin, their time together, closed">Merge</button>'
+        + '<button type="button" class="text-btn small" data-do="parent" title="A merged violin above them, named so, with them still shown under it">New parent</button>'
+        + (above ? `<button type="button" class="text-btn small promote" data-do="above" title="Put ${esc(X.layout.label(above))} back above them">Under ${esc(X.layout.label(above))}</button>` : '')
+        : '<span class="spacer"></span>')
       + '<button type="button" class="text-btn small" data-do="remove" title="Remove them (Delete): their parents still count their time; merged ones go">Remove</button>'
       + '<button type="button" class="chip-x" data-do="cancel" title="Let them go (Esc)" aria-label="Let them go">×</button>';
     bar.hidden = false;
     if (keep !== null) bar.querySelector('[data-name]').focus();
   }
-  function mergePicked() {
+  // Merged closed, or as a new parent with them shown under it.
+  function mergePicked(parent) {
     const name = bar.querySelector('[data-name]').value, ids = [...X.picked];
     X.picked.clear();
     bar.hidden = true;
-    X.layout.merge(ids, name);
+    X.layout.merge(ids, name, null, parent);
   }
   function removePicked() {
     const ids = [...X.picked];
@@ -249,8 +268,7 @@
   // A carried name by the pointer, and what dropping it does there.
   function showLift(name, px, py, onto, say) {
     if (name === null) { ghost.hidden = true; return; }
-    const what = say || (onto === null ? 'Drop it on another violin to merge them, or by a sibling to move it' : onto === X.ROOT2 ? 'Copy it to Projections'
-      : `${X.layout.isMerged(onto) ? 'Add to' : 'Merge with'} ${X.layout.label(onto)}`);
+    const what = say || (onto === X.ROOT2 ? 'Copy it to Projections' : 'Drop it on a sibling to move it there');
     ghost.innerHTML = `<b>${esc(name)}</b><span>${esc(what)}</span>`;
     ghost.classList.toggle('off', onto === null && !say);
     ghost.style.transform = `translate(${Math.round(px + 14)}px, ${Math.round(py + 12)}px)`;

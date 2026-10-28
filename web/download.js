@@ -44,13 +44,13 @@
     await save(build(), fileName('html'));
   }
 
-  // The figure as it shows, from the plot's top to the strips' bottom and as wide as its columns, at twice the size;
+  // The figure as it shows, from the plot's top to the strips' bottom and as wide as its columns, at three times the size;
   // above it the title and which groups each half and mark is. Its layers drawn in order: shapes, dots, the tree and
   // labels, the strips.
   async function picture() {
     const G = X.violins.G;
     if (!G || !X.layout.ready) return;
-    const view = $('violins'), box = view.getBoundingClientRect(), T = X.T, k = 2, HEAD = 38;
+    const view = $('violins'), box = view.getBoundingClientRect(), T = X.T, k = 3, HEAD = 38;
     const top = X.contentTop() - 4, W = Math.round(X.violins.zoomed ? box.width : Math.min(box.width, G.END + 52)), H = Math.round(box.height - top + HEAD);
     const canvas = document.createElement('canvas');
     canvas.width = W * k;

@@ -71,10 +71,10 @@
     const isParent = p.cols.map((col) => X.layout.kids(col.id).length > 0);
     const bare = (c) => p.cols[c].root && S.mode === 'share';
     const visKids = p.cols.map((col) => p.cols.map((_, j) => j).filter((j) => p.cols[j].parent === col.id));
-    // A column with children not shown has a + at the end of those it shows.
+    // An open column with anything under it off screen has a + at the end of what it shows.
     // Open with none of them shown too: its + is how to add just the ones wanted.
     const open = p.cols.map((col, c) => visKids[c].length > 0 || (!col.root && X.layout.open(col.id)));
-    const more = p.cols.map((col, c) => open[c] && X.layout.hidden(col.id) > 0);
+    const more = p.cols.map((col, c) => open[c] && X.layout.addable(col.id));
     // A merged violin's name is followed by how many spans it merges, small and muted.
     const counts = p.cols.map((col) => (col.merged ? String(X.layout.size(col.id)) : ''));
     const countW = counts.map((t) => (t ? X.textWidth(t, COUNT, 400) + 4 : 0));
@@ -229,7 +229,7 @@
     // Several +s in one place: the deepest stays, and each one above it goes a step further along its own line.
     const deepest = new Map();
     p.cols.forEach((col, c) => { if (more[c]) { const at = Math.round(plusAt(c)); deepest.set(at, Math.max(deepest.has(at) ? deepest.get(at) : 0, depth[c])); } });
-    const plusX = (c) => plusAt(c) + (deepest.get(Math.round(plusAt(c))) - depth[c]) * 9;
+    const plusX = (c) => plusAt(c) + Math.min((deepest.get(Math.round(plusAt(c))) - depth[c]) * 9, Math.max(0, colW / 2 - 12));
     p.cols.forEach((col, c) => {
       const y = nodeY(depth[c]), ch = visKids[c];
       if (ch.length) {
@@ -253,7 +253,7 @@
       } else o.push(`<circle cx="${n1(x)}" cy="${n1(y)}" r="2" fill="${T.line}"/>`);
       if (more[c]) {
         const px = plusX(c);
-        o.push(`<g class="hit add" data-add="${esc(col.id)}"><title>${esc(`Add what ${col.label} has that is not shown (${X.layout.hidden(col.id)})`)}</title>`
+        o.push(`<g class="hit add" data-add="${esc(col.id)}"><title>${esc(`Add what ${col.label} has that is not shown: its children, or anything deeper inside`)}</title>`
           + `<circle cx="${n1(px)}" cy="${n1(y)}" r="5.5" fill="${T.surface}" stroke="${T.line}"/>`
           + `<path d="M${n1(px - 2.6)} ${n1(y)}h5.2M${n1(px)} ${n1(y - 2.6)}v5.2" stroke="${T.muted}" stroke-width="1.4" stroke-linecap="round"/></g>`);
       }
@@ -584,11 +584,13 @@
     const add = e.target.closest && e.target.closest('[data-add]');
     if (add) { X.edit.openAdd(add.dataset.add, add.getBoundingClientRect()); return; }
     const colEl = e.target.closest && e.target.closest('[data-col]');
+    const [lx0, ly0] = toLayer(px, py), along = colEl ? Number(colEl.dataset.col) : nearestDot(lx0, ly0) ? null : colAt(lx0, ly0);
+    // Picked violins: Shift and a click along another picks it too; any other click lets them go.
+    if (e.shiftKey && along !== null && !G.p.cols[along].root) { X.edit.pick(G.p.cols[along].id); return; }
+    if (X.picked.size) { X.edit.clearPicked(); return; }
     if (colEl) {
       const col = G.p.cols[Number(colEl.dataset.col)];
-      // Shift and a click picks it to merge with others; a click alone opens its card.
-      if (e.shiftKey && !col.root) { X.edit.pick(col.id); return; }
-      // A moment later, so that a double-click renames it instead.
+      // A click alone opens its card, a moment later, so that a double-click renames it instead.
       clearTimeout(cardSoon);
       if (e.detail > 1) return;
       const rect = colEl.getBoundingClientRect();
@@ -675,9 +677,7 @@
     drag = null;
     root.classList.remove('panning');
   }
-  // A name carried onto another column merges the two: into it when it is merged already, else as a new merged violin
-  // under the nearest span holding both, named at once. Columns it can't merge with take nothing. Carried to the edge
-  // of a sibling's column, it moves before or after it.
+  // A name carried onto a sibling moves past it, with what is under it; onto the second tree, it is copied there.
   let lift = null;
   function carry(e, px, py) {
     const dx = px - lift.px, dy = py - lift.py;
@@ -693,16 +693,14 @@
     const [lx, ly] = toLayer(px, py), from = G.p.cols[lift.c];
     const el = e.target.closest && e.target.closest('[data-col]');
     const c = el ? Number(el.dataset.col) : colAt(lx, ly), onto = c !== null ? G.p.cols[c] : null;
-    // Near the edge of a sibling's column, before or after it, its subtree with it; else onto the column, or onto its
-    // name, merged.
-    const edge = !el && onto && c !== lift.c && onto.parent === from.parent && Math.abs(lx - G.xOf(c)) > G.colW * 0.25;
-    lift.move = edge ? { to: c, after: lx > G.xOf(c) } : null;
-    // From the first tree onto the second, or onto the + that starts it: a copy at its top.
+    // Onto a sibling, its name or anywhere along it: moved past it, with what is under it. From the first tree onto
+    // the second, or onto the + that starts it: a copy at its top. Merging is the menu's.
+    const sibling = !!(onto && c !== lift.c && onto.parent === from.parent);
+    lift.move = sibling ? { to: c, after: c > lift.c } : null;
     const start = !!(e.target.closest && e.target.closest(`[data-add="${X.ROOT2}"]`));
-    lift.copy = !edge && !from.second && (start || !!(onto && onto.second));
-    lift.to = edge ? null : lift.copy ? (onto && onto.second ? c : -1) : onto && X.layout.canMerge(from.id, onto.id) ? c : null;
-    X.edit.showLift(from.label, px, py, lift.to === null ? null : lift.copy ? X.ROOT2 : onto.id,
-      edge ? `Move ${lift.move.after ? 'after' : 'before'} ${onto.label}` : null);
+    lift.copy = !sibling && !from.second && (start || !!(onto && onto.second));
+    lift.to = lift.copy ? (onto && onto.second ? c : -1) : null;
+    X.edit.showLift(from.label, px, py, lift.copy ? X.ROOT2 : null, sibling ? `Move ${lift.move.after ? 'after' : 'before'} ${onto.label}` : null);
     X.schedule(drawHover);
   }
   function letGo(drop) {
@@ -716,13 +714,7 @@
     if (drop && l.move) { const a = G.p.cols[l.c].id; X.layout.move(a, G.p.cols[l.move.to].id, l.move.after); flash(a); return; }
     if (!drop || l.to === null) return;
     const a = G.p.cols[l.c].id;
-    if (l.copy) { flash(X.layout.copyOver(a)); return; }
-    const b = G.p.cols[l.to].id;
-    X.picked.delete(a); X.picked.delete(b);
-    if (X.layout.isMerged(b)) { flash(X.layout.join(a, b)); return; }
-    const id = X.layout.merge([a, b], '');
-    flash(id);
-    requestAnimationFrame(() => X.edit.rename(id));
+    if (l.copy) flash(X.layout.copyOver(a));
   }
   // Where a change landed, lit for a moment.
   let lit = null;

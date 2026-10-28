@@ -40,14 +40,16 @@ nothing from outside `out/`.
   with the unit's span and the spans it calls that take a fair share of its time. Under the violins:
   - a triangle opens a violin into the spans it calls, its larger ones, or closes it; closed, what was under it waits
     for it to open again; opened, it stays open with all of them hidden, its + there to add just the ones wanted;
-  - a + after everything under a violin lists its children not shown, largest first; typed text searches every level
-    inside it: add them each, or as one violin, their time together, under a name. One made from every match of the
+  - a + after everything under an open violin lists what is not shown: its children, then, apart, everything deeper
+    inside, each largest first and with an All; typed text filters both. Add them each, or as one violin, their time
+    together, under a name, or exclude them from the violin's time. One made from every match of the
     text keeps it, and takes in new matches when the spans are read again. A merged violin is made of spans only, and
     stays until removed. Spans merged that are all inside a merged violin, from its + or picked there, make its child
     and stay in it: Compute types inside Compute *;
-  - a name dragged onto another violin or its name merges the two, or adds it to that one when it is merged already;
-    dragged to the edge of a sibling's column, it moves before or after it, with everything under it; Shift and a
-    click on names picks several to merge. What was on screen stays there, under the merged violin;
+  - a name dragged onto a sibling moves past it, with everything under it, and onto Projections copies it there;
+    Shift and a click on names, or anywhere along a violin off its dots, picks violins, and a click elsewhere lets
+    them go. Picked, they merge into one violin, closed, get a new parent above them, still shown, go back under the
+    span that holds them all when it was removed, or are removed;
   - a double-click on a name renames it, any violin, not only merged ones; a merged violin's name is followed by how
     many spans it merges;
   - hovering a violin shows a × where its line meets its name, which removes it, its parent still counting the time;
@@ -82,7 +84,8 @@ nothing from outside `out/`.
   selection, and the callers and callees of a picked span.
 
 The chip for the unit's time filters units by duration; its card shows, under the histogram, how the unit's time
-splits among the first tree's violins at each duration (Parts by time).
+splits among the first tree's violins at each duration (Parts by time): its leaves, but a parent in place of its
+children where at most one of them matters (wide somewhere, or on average), and what stays small in Other.
 
 A violin's time in a unit is the time its spans cover there, overlaps counted once, cut to the unit; a merged violin's
 is its members' together. For the split of a unit's time ("Parts by time", the what-if), each moment counts toward

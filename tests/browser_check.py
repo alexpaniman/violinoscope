@@ -86,15 +86,32 @@ async def main():
             await page.click('#v-add [data-do="add"]')
             await page.wait_for_timeout(300)
             expect(await count() == n + 1, 'adding from the + list added no violin')
-        # Merged, the two stay on screen, under the new merged violin.
+        # Picked with Shift (one by its name, one anywhere along it), they merge into one violin, closed; a plain
+        # click elsewhere lets picked violins go; New parent puts a merged violin above them, still shown.
         last = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.second).map(([c, k]) => [c.id, k]).slice(-2)')
         await page.click(f'[data-col="{last[1][1]}"]', modifiers=['Shift'])
-        await page.click(f'[data-col="{last[0][1]}"]', modifiers=['Shift'])
+        xy = await page.evaluate(f"""(() => {{ const G = TX.violins.G, s = document.getElementById('stage').getBoundingClientRect();
+          return [s.left + G.xOf({last[0][1]}), s.top + G.TR.y0 + 2]; }})()""")
+        await page.keyboard.down('Shift')
+        await page.mouse.click(xy[0], xy[1])
+        await page.keyboard.up('Shift')
+        expect(await page.evaluate('TX.picked.size') == 2, 'Shift and a click along a violin did not pick it')
         await page.click('#v-merge [data-do="merge"]')
         await page.wait_for_timeout(300)
-        together = await page.evaluate(f"""(() => {{ const T = TX.layout, ids = {[i for i, _ in last]!r};
+        closed = await page.evaluate(f"""(() => {{ const T = TX.layout, ids = {[i for i, _ in last]!r};
+          const g = T.parentOf(ids[0]); return T.isMerged(g) && T.shown(g) && ids.every((id) => T.parentOf(id) === g && !T.shown(id)); }})()""")
+        expect(closed, 'Merge did not make one closed violin of the two')
+        two = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.second && !c.merged).map(([c, k]) => [c.id, k]).slice(-2)')
+        await page.click(f'[data-col="{two[0][1]}"]', modifiers=['Shift'])
+        await page.mouse.click(5, 400)
+        expect(await page.evaluate('TX.picked.size') == 0, 'a click elsewhere did not let the picked violins go')
+        await page.click(f'[data-col="{two[0][1]}"]', modifiers=['Shift'])
+        await page.click(f'[data-col="{two[1][1]}"]', modifiers=['Shift'])
+        await page.click('#v-merge [data-do="parent"]')
+        await page.wait_for_timeout(300)
+        parent = await page.evaluate(f"""(() => {{ const T = TX.layout, ids = {[i for i, _ in two]!r};
           const g = T.parentOf(ids[0]); return T.isMerged(g) && ids.every((id) => T.parentOf(id) === g && T.shown(id)); }})()""")
-        expect(together, 'merging two violins did not put them under one merged violin, still shown')
+        expect(parent, 'New parent did not put a merged violin above the two, still shown')
 
         # Hovering a violin shows its × where its line meets its name.
         x, y = await page.evaluate("""(() => {
@@ -105,37 +122,25 @@ async def main():
         await page.wait_for_timeout(100)
         expect(await page.is_visible('#v-hide'), 'hovering a violin showed no ×')
 
-        # Carry one name onto another column it can merge with: they become one, and its name is up for typing.
+        # A name carried onto a violin that is not its sibling merges nothing: merging is the menu's.
         pair = await page.evaluate(f"""(() => {{
-          const ids = {COLS};
+          const ids = {COLS}, cols = TX.violins.G.p.cols;
           for (let a = ids.length - 1; a > 0; a--) for (let b = a - 1; b > 0; b--)
-            if (TX.layout.canMerge(ids[a], ids[b]) && !TX.layout.isMerged(ids[b]) && !TX.layout.isMerged(TX.layout.parentOf(ids[b]))) return [a, b, ids[b]];
+            if (cols[a].parent !== cols[b].parent && TX.layout.canMerge(ids[a], ids[b])) return [a, b];
           return null;
         }})()""")
-        if pair is None:
-            errors.append('no two violins to merge by dragging')
-        else:
-            a, b, target = pair
-            x0, y0 = await centre(page, f'[data-col="{a}"]')
-            # Onto the middle of its violin: near a column's edge, a carried name moves instead.
+        if pair is not None:
+            before = await page.evaluate('TX.layout.state().groups.length')
+            x0, y0 = await centre(page, f'[data-col="{pair[0]}"]')
             x1, y1 = await page.evaluate(f"""(() => {{ const G = TX.violins.G, s = document.getElementById('stage').getBoundingClientRect();
-              return [s.left + G.xOf({b}), s.top + G.V.y0 + 20]; }})()""")
+              return [s.left + G.xOf({pair[1]}), s.top + G.V.y0 + 20]; }})()""")
             await page.mouse.move(x0, y0)
             await page.mouse.down()
             await page.mouse.move(x1, y1, steps=12)
             expect(await page.is_visible('.lift-ghost'), 'a carried name showed nothing by the pointer')
-            await shot(page, 'phases-carry')
             await page.mouse.up()
-            await page.wait_for_timeout(400)
-            expect(await page.evaluate(f'TX.layout.isMerged(TX.layout.parentOf({target!r}))'), 'dropping a name on a violin merged nothing')
-            name = await page.query_selector('.name-edit')
-            if name is None:
-                errors.append('a violin merged by dragging was not up for naming')
-            else:
-                await name.fill('Carried together')
-                await name.press('Enter')
-                await page.wait_for_timeout(300)
-                expect('Carried together' in await page.evaluate('TX.data.columns.map((c) => c.label)'), 'naming the dragged merge did not take')
+            await page.wait_for_timeout(300)
+            expect(await page.evaluate('TX.layout.state().groups.length') == before, 'dragging a name merged violins')
 
         # Double-click a name to rename it; any violin can be renamed, and the card still names its spans.
         await page.dblclick('[data-col="1"]')
@@ -326,7 +331,7 @@ async def main():
           if (!c) return null;
           const kids = T.kids(c.id).filter((k) => T.shown(k));
           T.hide(c.id);
-          const skipped = T.skippedAbove(kids[0]).includes(c.id);
+          const skipped = T.skippedAbove(kids[0]).includes(c.id) && T.dominator(kids.slice(0, 2)) === c.id;
           T.unskip(c.id);
           const unskipped = T.shown(c.id) && kids.every((k) => T.parentOf(k) === c.id);
           T.hide(c.id);
@@ -356,6 +361,22 @@ async def main():
           return !TX.layout.isMerged(c.id) && !TX.layout.candidates(TX.ROOT, '').some((r) => r.id === c.id);
         })()""")
         expect(gone is not False, 'a hidden merged violin stayed')
+
+        # A violin's + lists its children and, apart, everything deeper, each with All, before any filter; Exclude
+        # there leaves the ticked out of that violin's time.
+        host = await page.evaluate("""(() => { const T = TX.layout;
+          const c = TX.violins.G.p.cols.find((c) => !c.root && !c.merged && !c.second && T.candidates(c.id, '').some((r) => r.deep));
+          return c ? c.id : null; })()""")
+        if host is not None:
+            await page.evaluate(f"TX.layout.expand({host!r})")
+            await page.wait_for_timeout(200)
+            await page.click(f'[data-add="{host}"]')
+            await page.wait_for_timeout(200)
+            expect(await page.is_visible('#v-add [data-all="deep"]'), 'the + list has no section of what is deeper inside')
+            await page.check('#v-add .add-section:last-child input[data-id]')
+            await page.click('#v-add [data-do="exclude"]')
+            await page.wait_for_timeout(300)
+            expect(await page.evaluate(f"TX.layout.excluded({host!r}).length") >= 1, 'Exclude in the + list excluded nothing')
 
         # A + low on the screen: its list, filtered to many rows, stays on screen.
         plus = await page.query_selector_all('[data-add]')
@@ -422,7 +443,7 @@ async def main():
         await browser.close()
     for e in errors:
         print(e, file=sys.stderr)
-    print(f'{len(STEPS) + 28} steps, {len(errors)} errors')
+    print(f'{len(STEPS) + 31} steps, {len(errors)} errors')
     return 1 if errors else 0
 
 

@@ -378,7 +378,8 @@
   // Left out of a node's time: spans inside it; put back, one at a time.
   function exclude(id, spans) {
     const list = L.except.get(id) || [];
-    for (const m of spans) if (m !== id && !list.includes(m) && inside(m, id)) list.push(m);
+    const own = L.groups.has(id) ? L.groups.get(id).members : [];
+    for (const m of spans) if (m !== id && !list.includes(m) && !own.includes(m) && inside(m, id)) list.push(m);
     const kept = list.filter((m) => !list.some((x) => x !== m && inside(m, x)));
     if (kept.length) L.except.set(id, kept); else L.except.delete(id);
   }
@@ -451,10 +452,11 @@
   // Whether two shown nodes can be one: in one tree, neither its root, nor inside the other.
   const canMerge = (x, y) => exists(x) && exists(y) && x !== y && !isRoot(x) && !isRoot(y) && treeOf(x) === treeOf(y) && !inside(x, y) && !inside(y, x);
   // Several nodes as one, under the nearest path holding them all: their spans, merged nodes picked giving theirs and
+  // going; kept, those on screen stay there, under it, else it starts closed;
   // going; a span inside another one picked goes with it. All inside one merged node, it is that one's child, and they
   // stay in it: Compute types inside Compute *. Made from a filter's every match, it keeps the filter, to take in what
   // matches when the spans are read again.
-  function merge(ids, name, match) {
+  function merge(ids, name, match, keep = true) {
     const pick = [...new Set(ids)].filter((id) => exists(id) && !isRoot(id));
     const tree = pick.length ? treeOf(pick[0]) : 1;
     const picked = pick.filter((x) => treeOf(x) === tree);
@@ -463,7 +465,7 @@
     const members = spans.filter((x) => !spans.some((y) => y !== x && inside(x, y)));
     if (members.length < 2) { add(members, members.length && tree === 2 ? ROOT2 : null); return members[0] || null; }
     // What was on screen stays there, now under the new one, open, with what was open under it.
-    const seen = new Set(members.filter((m) => shownOf(m)));
+    const seen = new Set(keep ? members.filter((m) => shownOf(m)) : []);
     for (const g of picked) if (L.groups.has(g)) absorb(g);
     relink();
     free(members, home);
@@ -501,6 +503,16 @@
     L.open.add(span);
     for (const m of seen) showUp(m);
     return span;
+  }
+  // The nearest span holding all of several nodes, when it is off screen (taken out from above them), to put back.
+  function dominator(ids) {
+    const list = ids.filter((id) => exists(id) && !isRoot(id));
+    if (list.length < 2 || list.some((id) => treeOf(id) !== treeOf(list[0]))) return null;
+    let lca = -1;
+    for (const id of list) lca = lca < 0 ? anchor(id) : common(lca, anchor(id));
+    if (lca < 0 || lca === rootPath) return null;
+    const span = treeOf(list[0]) === 2 ? copyOf(paths[lca].key) : paths[lca].key;
+    return L.skip.has(span) && !list.includes(span) ? span : null;
   }
   // Levels taken out from above a node, outermost first; one put back holds what is under it again.
   function skippedAbove(id) {
@@ -592,30 +604,31 @@
 
   // What the + of a shown node offers: its children not shown, largest first; with a filter, anything not shown
   // inside it whose name has the text, with where it is.
-  // The second tree's + offers any span of the unit, as a copy: the unit's own children, or with a filter any span in
-  // it, and its own merged nodes not shown.
+  // What a + offers, not shown: the node's children, then everything deeper under it (deep), each largest first; a
+  // filter keeps those whose name has the text. The second tree's + offers any span of the unit, as a copy, and its
+  // own merged nodes.
   function candidates(under, query) {
     const q = (query || '').trim().toLowerCase(), out = [];
     const found = (s) => s && s.toLowerCase().includes(q);
-    const offer = (k, name, trail) => { if (!shownOf(k) && (!q || found(name) || found(spanName(k)))) out.push({ id: k, label: name, where: trail.join(' › '), group: L.groups.has(k) }); };
-    const walk = (id, trail) => {
+    const offer = (k, name, trail, deep) => { if (!shownOf(k) && (!q || found(name) || found(spanName(k)))) out.push({ id: k, label: name, where: trail.join(' › '), group: L.groups.has(k), deep }); };
+    const walk = (id, trail, deep) => {
       for (const k of kidsOfNode(id)) {
-        offer(k, label(k), trail);
-        if (q) walk(k, [...trail, label(k)]);
+        offer(k, label(k), trail, deep);
+        walk(k, [...trail, label(k)], true);
       }
     };
-    const anywhere = (p, trail) => {
+    const anywhere = (p, trail, deep) => {
       for (const c of paths[p].kids) {
-        offer(copyOf(paths[c].key), label(copyOf(paths[c].key)), trail);
-        if (q) anywhere(c, [...trail, paths[c].name]);
+        offer(copyOf(paths[c].key), label(copyOf(paths[c].key)), trail, deep);
+        anywhere(c, [...trail, paths[c].name], true);
       }
     };
     if (under === ROOT2) {
-      anywhere(rootPath, []);
-      for (const k of kidsOfNode(ROOT2)) if (L.groups.has(k)) offer(k, label(k), []);
-    } else walk(under, []);
+      anywhere(rootPath, [], false);
+      for (const k of kidsOfNode(ROOT2)) if (L.groups.has(k)) offer(k, label(k), [], false);
+    } else walk(under, [], false);
     const rows = out.slice(0, 400).map((c) => Object.assign(c, shareIn(c.id, under)));
-    return rows.sort((x, y) => y.share - x.share);
+    return rows.sort((x, y) => x.deep - y.deep || y.share - x.share);
   }
 
   // For a node's card: spans anywhere in its tree to put into its time, or spans inside it to leave out, the
@@ -931,6 +944,8 @@
     // Open (opened, or with children shown), and its children not shown.
     open: (id) => isOpen(id === X.ROOT ? rootKey() : id),
     hidden: (id) => kidsOfNode(id === X.ROOT ? rootKey() : id).filter((k) => !L.shown.has(k)).length,
+    // Whether anything under it, at any depth, is off screen: what its + offers.
+    addable: (id) => { const any = (n) => kidsOfNode(n).some((k) => !L.shown.has(k) || any(k)); return any(id === X.ROOT ? rootKey() : id); },
     expand: change((id) => expand(id === X.ROOT ? rootKey() : id)),
     collapse: change((id) => collapse(id === X.ROOT ? rootKey() : id)),
     hide: change(hide),
@@ -939,6 +954,7 @@
     promotable: (id) => promotable(id),
     promote: change(promote),
     skippedAbove: (id) => skippedAbove(id),
+    dominator: (ids) => dominator(ids),
     unskip: change(unskip),
     exclude: change(exclude),
     unexclude: change(unexclude),

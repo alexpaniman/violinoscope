@@ -296,7 +296,7 @@
       out.push(`<circle cx="${n1(xOfL(Math.log10(Math.max(data.units[i].ms, 1e-3))))}" cy="${(RUG0 + RUG1) / 2}" r="3" fill="${T.surface}" stroke="${T[`m${X.slotOf(g)}`]}" stroke-width="1.5"/>`);
     }
     if (S.sel !== null) out.push(`<path d="M${n1(xOfL(Math.log10(Math.max(data.units[S.sel].ms, 1e-3))))} 0V${RUG1}" stroke="${T.sel}" stroke-width="2"/>`);
-    if (!rc.dom || rc.domKey !== X.scenarioKey()) { rc.dom = bucketShares(rc); rc.domKey = X.scenarioKey(); }
+    if (!rc.dom || rc.domKey !== X.scenarioKey()) { rc.dom = coarsen(bucketShares(rc)); rc.domKey = X.scenarioKey(); }
     const domKey = `${W}|${T.scheme}|${rc.domKey}`;
     if (!rc.domSvg || rc.domSvg.key !== domKey) rc.domSvg = { key: domKey, svg: dominanceSvg(rc, xOfL, DOM0, DOMH, W).join('') };
     out.push(rc.domSvg.svg);
@@ -380,6 +380,43 @@
     }
     return { grid, mean, neff, wide };
   }
+  // Which parts the stack shows, adding up to the whole: the first tree's leaves, but a parent in place of its children
+  // where at most one of them matters (the rest of its own time counting as one of them), and what is left small in
+  // Other, last. A part matters if it is wide somewhere or wide on average.
+  const WIDE = 0.1, BROAD = 0.05;
+  function coarsen(dom) {
+    const N1 = data.partition.length - 1, G = dom.grid.length, T = X.T, other = [];
+    const total = (ks) => { const s = new Float64Array(G); for (let j = 0; j < G; j++) for (const k of ks) s[j] += dom.mean[j][k]; return s; };
+    const matters = (ks) => { const s = total(ks); let top = 0, sum = 0; for (const v of s) { top = Math.max(top, v); sum += v; } return top >= WIDE || sum / G >= BROAD; };
+    const kidsOf = (k) => (X.kids[k] || []).filter((c) => c < N1);
+    const under = (k) => [k, ...kidsOf(k).flatMap(under)];
+    const ks = (u) => u.flatMap((part) => part.ks);
+    // Of several, those that matter, the others to Other; a split one, made of several parts, matters.
+    const keep = (units) => {
+      const kept = units.filter((u) => u.length > 1 || matters(ks(u)));
+      for (const u of units) if (!kept.includes(u)) other.push(...ks(u));
+      return kept;
+    };
+    function partsOf(k) {
+      const kids = kidsOf(k);
+      if (!kids.length) return [{ ks: [k], node: k }];
+      const units = [[{ ks: [k], node: k, rest: true }], ...kids.map(partsOf)];
+      const kept = units.filter((u) => u.length > 1 || matters(ks(u)));
+      if (kept.length <= 1) return [{ ks: under(k), node: k }];
+      return keep(units).flat();
+    }
+    const tops = data.columns.map((c, k) => k).filter((k) => k < N1 && X.parentIdx[k] < 0);
+    const shown = keep([...tops.map(partsOf), [{ ks: [N1], node: N1 }]]).flat();
+    if (other.length) shown.push({ ks: other, other: true });
+    const parts = shown.map((part) => {
+      const k = part.other ? N1 : part.node, name = k === N1 ? data.partition[N1].label : data.columns[k].label;
+      const label = part.other ? 'Other' : part.rest ? `Rest of ${name}` : name;
+      return { label, ks: part.ks, fill: part.other ? X.mix(X.partFill(N1), T.surface, 0.45) : X.partFill(k), stroke: T.parts[k] };
+    });
+    const mean = dom.mean.map((row) => Float64Array.from(parts, (part) => part.ks.reduce((a, k) => a + row[k], 0)));
+    return { grid: dom.grid, mean, neff: dom.neff, wide: dom.wide, parts };
+  }
+
   // A monotone cubic through the points (Fritsch and Carlson): smooth, and never past its neighbours; flat beyond the
   // ends.
   function monotone(xs, ys) {
@@ -407,7 +444,7 @@
   // hairline of the card between them, each named once, at the right. Where a bucket has few compilations, or none,
   // the bands are lightly veiled.
   function dominanceSvg(rc, xOfL, y0, h, W) {
-    const dom = rc.dom, parts = data.partition, out = [], T = X.T, G = dom.grid.length;
+    const dom = rc.dom, parts = dom.parts, out = [], T = X.T, G = dom.grid.length;
     const mean = new Array(G);
     for (let j = 0, last = null; j < G; j++) { if (dom.neff[j] >= 1) last = dom.mean[j]; mean[j] = last; }
     for (let j = G - 1, next = null; j >= 0; j--) { if (mean[j]) next = mean[j]; else mean[j] = next; }
@@ -420,7 +457,7 @@
       let top = '', bottom = '';
       for (let j = 0; j < G; j++) top += `${top ? 'L' : 'M'}${n1(xOfL(dom.grid[j]))} ${n1(yOf(cum[j][k]))}`;
       for (let j = G - 1; j >= 0; j--) bottom += `L${n1(xOfL(dom.grid[j]))} ${n1(yOf(cum[j][k + 1]))}`;
-      out.push(`<path class="band" data-k="${k}" d="${top}${bottom}Z" fill="${partFill(k)}" stroke="${T.surface}" stroke-width="1.2" stroke-linejoin="round"/>`);
+      out.push(`<path class="band" data-k="${k}" d="${top}${bottom}Z" fill="${parts[k].fill}" stroke="${T.surface}" stroke-width="1.2" stroke-linejoin="round"/>`);
     }
     // Few compilations: veiled.
     for (let j = 0; j < G;) {
@@ -441,8 +478,8 @@
     at[at.length - 1].ly = Math.min(at[at.length - 1].ly, y0 + h - 4);
     for (let q = at.length - 2; q >= 0; q--) at[q].ly = Math.min(at[q].ly, at[q + 1].ly - GAP);
     for (const { k, y, ly } of at) {
-      out.push(`<path d="M${n1(xb + 2)} ${n1(y)}C${n1(xb + 8)} ${n1(y)} ${n1(xb + 6)} ${n1(ly)} ${n1(xb + 12)} ${n1(ly)}" fill="none" stroke="${T.parts[k]}" stroke-width="1.2"/>`);
-      out.push(`<rect x="${n1(xb + 14)}" y="${n1(ly - 4)}" width="8" height="8" rx="2" fill="${partFill(k)}"/>`);
+      out.push(`<path d="M${n1(xb + 2)} ${n1(y)}C${n1(xb + 8)} ${n1(y)} ${n1(xb + 6)} ${n1(ly)} ${n1(xb + 12)} ${n1(ly)}" fill="none" stroke="${parts[k].stroke}" stroke-width="1.2"/>`);
+      out.push(`<rect x="${n1(xb + 14)}" y="${n1(ly - 4)}" width="8" height="8" rx="2" fill="${parts[k].fill}"/>`);
       out.push(X.txt(xb + 26, ly, X.fitText(parts[k].label, 11, 400, W - xb - 30), { base: 'central', fill: T.ink, size: 11, extra: ` class="band-label" data-k="${k}"` }));
     }
     return out;
@@ -495,15 +532,15 @@
           if (cum) {
             const v = (at.y - RC.DOM0) / RC.DOMH;
             let k = 0;
-            while (k < data.partition.length - 1 && cum[k + 1] <= v) k++;
+            while (k < RC.dom.parts.length - 1 && cum[k + 1] <= v) k++;
             hoverBand(k);
             const s = $('stage').getBoundingClientRect();
             const share = (q) => cum[q + 1] - cum[q];
-            const rest = data.partition.map((p, q) => [q, share(q)]).filter(([q, m]) => q !== k && m >= 0.02).sort((a, b2) => b2[1] - a[1]).slice(0, 2);
+            const rest = RC.dom.parts.map((p, q) => [q, share(q)]).filter(([q, m]) => q !== k && m >= 0.02).sort((a, b2) => b2[1] - a[1]).slice(0, 2);
             const near = !dom.neff[j] ? `none around ${X.fmtMs(10 ** dom.grid[j])}: drawn between its neighbours`
               : `${X.nUnits(dom.neff[j])} around ${X.fmtMs(10 ** dom.grid[j])}${dom.wide[j] ? ', few: from a wider stretch' : ''}${X.proj() ? ', if the what-if held' : ''}`;
-            X.tip([`${data.partition[k].label} · ${X.fmtPct(share(k))}`, near,
-              ...rest.map(([q, m]) => `${data.partition[q].label} ${X.fmtPct(m)}`)], e.clientX - s.left, e.clientY - s.top);
+            X.tip([`${RC.dom.parts[k].label} · ${X.fmtPct(share(k))}`, near,
+              ...rest.map(([q, m]) => `${RC.dom.parts[q].label} ${X.fmtPct(m)}`)], e.clientX - s.left, e.clientY - s.top);
           } else { hoverBand(-1); X.hideTip(); }
         } else { cross.hidden = true; hoverBand(-1); X.hideTip(); }
         return;
