@@ -120,7 +120,8 @@
       names.length === 1 ? `<button type="button" class="text-btn small" data-act="spans" title="${esc(names[0])} in the Spans tab: what calls it and what it calls">In Spans</button>` : ''];
     const title = root ? esc(col.label) : `<button type="button" class="title-edit" data-rename title="Rename it">${esc(col.label)}</button>`;
     let html = `<div class="card-top"><div class="card-id"><h3>${title}</h3>${where.length ? `<div class="crumbs">${where.join(' › ')}</div>` : ''}</div>`
-      + `<div class="card-tools">${tools.join('')}<button class="icon-btn" type="button" data-close aria-label="Close">×</button></div></div>`;
+      + `<div class="card-tools">${tools.join('')}<button class="icon-btn" type="button" data-close aria-label="Close">×</button></div></div>`
+      + totals(k, halves, root);
     if (root) {
       html += `<div class="card-row"><button type="button" class="text-btn small" data-act="reset" title="${esc(X.UNIT)} and the spans that take most of its time">Start over</button>`
         + `${X.layout.saved ? '<button type="button" class="text-btn small" data-act="saved" title="The violins this page was saved with">Back to the saved violins</button>' : ''}</div>`;
@@ -130,6 +131,20 @@
       if (col.merged || (own && own !== col.label)) html += madeOf(col.id, halves);
     }
     card.innerHTML = html;
+  }
+
+  // Its time summed over the units in view, and its share of theirs summed, per half; the root's, how many units and
+  // their time summed: where the time adds up, which medians don't say.
+  function totals(k, halves, root) {
+    const T = X.T;
+    const parts = halves.map(([hk, u]) => {
+      let all = 0, mine = 0;
+      for (const i of u) { all += data.units[i].ms; if (!root) mine += X.partMs(i, k, true); }
+      const what = root ? `${X.fmtInt(u.length)} · ${X.fmtTotal(all)}` : `${X.fmtTotal(mine)} · ${X.fmtPct(all > 0 ? mine / all : NaN)}`;
+      return `<span title="${esc(X.sideNames(hk))}">${X.glyph(hk, T[hk])}${what}</span>`;
+    });
+    const tip = root ? `How many ${X.UNIT} spans are in view, and their time summed` : `Its time summed over the ${X.UNIT} spans in view, and its share of their time summed`;
+    return `<div class="totals" title="${esc(tip)}"><span class="k">In all</span>${parts.join('')}</div>`;
   }
 
   // Runs against time when how many times its spans run differs between units: at least two counts, each in 5% of

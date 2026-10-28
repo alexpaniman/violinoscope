@@ -30,6 +30,8 @@
   X.groupName = (g) => NAMES[g] || g;
   X.fmtInt = (n) => n.toLocaleString('en-US');
   X.fmtMs = (v) => (!Number.isFinite(v) ? '–' : v >= 1000 ? `${(v / 1000).toPrecision(3)} s` : `${M.msLabel(v)} ms`);
+  // A sum over many units: minutes and hours past a minute.
+  X.fmtTotal = (ms) => (!Number.isFinite(ms) ? '–' : ms < 60000 ? X.fmtMs(ms) : ms < 3.6e6 ? `${(ms / 60000).toFixed(1)} min` : `${(ms / 3.6e6).toFixed(1)} h`);
   X.fmtUs = (ms) => (!Number.isFinite(ms) ? '–' : ms >= 1 ? X.fmtMs(ms) : ms >= 0.01 ? `${Math.round(ms * 1000)} µs` : `${Number((ms * 1000).toPrecision(2))} µs`);
   X.decade = (v) => (v >= 1000 ? `${v / 1000} s` : v >= 1 ? `${v} ms` : `${Number(v.toPrecision(1))} ms`);
   X.fmtPct = (v) => (Number.isFinite(v) ? `${M.pctLabel(v)}%` : '–');

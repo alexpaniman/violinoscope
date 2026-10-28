@@ -479,3 +479,8 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .hitpad.on-col { cursor: pointer; }
 /* The card scrolls rather than squeeze what is in it */
 .card-pop > * { flex-shrink: 0; }
+
+/* A violin's time summed over the units in view, per half */
+.totals { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.totals .k { color: var(--muted); }
+.totals span { display: inline-flex; align-items: center; gap: 5px; }

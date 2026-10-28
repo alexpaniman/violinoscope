@@ -579,7 +579,8 @@
       [k('Esc'), 'Timeline: back to where it was before the last jump in'],
       [`${k('W')} ${k('S')} · ${k('A')} ${k('D')}`, 'Flame chart and flame graph: zoom · pan'],
       [k('F'), 'All of it again; or double-click empty space'], ['Double-click', 'A span: fit it'],
-      [`${k('Shift')}+click names`, 'Phases: pick violins to merge'], ['Drag a name', 'Phases: onto another violin, merge them'],
+      [`${k('Shift')}+click names`, 'Phases: pick violins to merge or remove'], [k('Delete'), 'Phases: remove the violins picked'],
+      ['Drag a name', 'Phases: onto another violin, merge them; to the edge of a sibling, move it'],
       ['Double-click a name', 'Phases: rename it'],
       ['Paste', `A trace id or fingerprint: select its ${esc(X.UNIT)} span`], [k('Esc'), 'Close, then clear the selection'], [k('?'), 'This sheet'],
     ];
@@ -694,6 +695,7 @@
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === '?') { toggleKeys($('keys').hidden); return; }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && S.view === 'violins' && X.picked.size) { X.edit.removePicked(); e.preventDefault(); return; }
       if (S.view === 'flame' && X.flame.key(e)) { e.preventDefault(); return; }
       if (S.view === 'timeline' && (e.key === 'f' || e.key === 'F')) { X.nav.fitAll(); e.preventDefault(); return; }
       if (S.view === 'violins') {

@@ -61,6 +61,7 @@
       const act = e.target.closest('[data-do]');
       if (!act) return;
       if (act.dataset.do === 'merge') mergePicked();
+      else if (act.dataset.do === 'remove') removePicked();
       else { X.picked.clear(); syncBar(); X.violins.invalidate(); X.render(); }
     });
     bar.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('[data-name]')) { mergePicked(); e.preventDefault(); } });
@@ -165,14 +166,16 @@
     X.violins.invalidate();
     X.render();
   }
+  // Picked: removed together (Delete), or two or more merged under a name.
   function syncBar() {
     const ids = [...X.picked];
-    if (ids.length < 2) { bar.hidden = true; return; }
+    if (!ids.length) { bar.hidden = true; return; }
     const name = bar.querySelector('[data-name]');
     const keep = name && document.activeElement === name ? name.value : null;
-    bar.innerHTML = `<span>${X.fmtInt(ids.length)} violins picked</span>`
-      + `<input data-name autocomplete="off" spellcheck="false" aria-label="Name of the merged violin" value="${esc(keep !== null ? keep : X.layout.suggestName(ids))}">`
-      + '<button type="button" class="text-btn small primary" data-do="merge">Merge</button>'
+    bar.innerHTML = `<span>${ids.length === 1 ? '1 violin' : `${X.fmtInt(ids.length)} violins`} picked</span>`
+      + (ids.length > 1 ? `<input data-name autocomplete="off" spellcheck="false" aria-label="Name of the merged violin" value="${esc(keep !== null ? keep : X.layout.suggestName(ids))}">`
+        + '<button type="button" class="text-btn small primary" data-do="merge">Merge</button>' : '<span class="spacer"></span>')
+      + '<button type="button" class="text-btn small" data-do="remove" title="Remove them (Delete): their parents still count their time; merged ones go">Remove</button>'
       + '<button type="button" class="chip-x" data-do="cancel" title="Let them go (Esc)" aria-label="Let them go">×</button>';
     bar.hidden = false;
     if (keep !== null) bar.querySelector('[data-name]').focus();
@@ -182,6 +185,12 @@
     X.picked.clear();
     bar.hidden = true;
     X.layout.merge(ids, name);
+  }
+  function removePicked() {
+    const ids = [...X.picked];
+    X.picked.clear();
+    bar.hidden = true;
+    if (ids.length) X.layout.remove(ids);
   }
   function clearPicked() {
     if (!X.picked.size) return false;
@@ -198,8 +207,8 @@
   function showHide(at) {
     if (!at) { if (!hideBtn.matches(':hover')) hideBtn.hidden = true; return; }
     hideBtn.dataset.id = at.id;
-    hideBtn.title = `Hide ${at.label}: its parent still counts its time`;
-    hideBtn.setAttribute('aria-label', `Hide ${at.label}`);
+    hideBtn.title = `Remove ${at.label}: its parent still counts its time`;
+    hideBtn.setAttribute('aria-label', `Remove ${at.label}`);
     hideBtn.style.transform = `translate(${Math.round(at.x - 8)}px, ${Math.round(at.y - 17)}px)`;
     hideBtn.hidden = false;
   }
@@ -243,5 +252,5 @@
     input.select();
   }
 
-  X.edit = { init, openAdd, closeAdd, pick, clearPicked, showHide, showLift, rename, get open() { return !menu.hidden; } };
+  X.edit = { init, openAdd, closeAdd, pick, clearPicked, removePicked, showHide, showLift, rename, get open() { return !menu.hidden; } };
 })();

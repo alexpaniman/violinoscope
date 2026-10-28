@@ -38,21 +38,24 @@ nothing from outside `out/`.
 
 - **Phases:** a violin per call path, one dot per unit, in share of the unit's time or in milliseconds. It starts
   with the unit's span and the spans it calls that take a fair share of its time. Under the violins:
-  - a triangle opens a violin into the spans it calls, its larger ones, or closes it; opened, it stays open with all
-    of them hidden, its + there to add just the ones wanted;
+  - a triangle opens a violin into the spans it calls, its larger ones, or closes it; closed, what was under it waits
+    for it to open again; opened, it stays open with all of them hidden, its + there to add just the ones wanted;
   - a + after everything under a violin lists its children not shown, largest first; typed text searches every level
     inside it: add them each, or as one violin, their time together, under a name. One made from every match of the
     text keeps it, and takes in new matches when the spans are read again. A merged violin is made of spans only, and
-    is there only while it shows: hidden, or under a violin closed, it goes. Spans merged that are all inside a merged
-    violin, from its + or picked there, make its child and stay in it: Compute types inside Compute *;
+    stays until removed. Spans merged that are all inside a merged violin, from its + or picked there, make its child
+    and stay in it: Compute types inside Compute *;
   - a name dragged onto another violin merges the two, or adds it to that one when it is merged already; dragged to
     the edge of a sibling's column, it moves before or after it, with everything under it; Shift and a click on names
     picks several to merge;
   - a double-click on a name renames it, any violin, not only merged ones; a merged violin's name is followed by how
     many spans it merges;
-  - hovering a violin shows a × where its line meets its name, which hides it; its parent still counts the time;
+  - hovering a violin shows a × where its line meets its name, which removes it, its parent still counting the time;
+    removed, nothing about it or under it is kept, and added again it comes back as its spans are called; Shift and
+    a click on names picks several, to remove at once (Delete) or merge;
   - a click on its name, or anywhere along its column off the dots, opens its card: its name, to edit, and where it
     sits, with Split up (its larger spans shown, the rest behind a +) and In Spans (callers and callees) at the top;
+    its time summed over the units in view and its share of theirs, per half (the root's: how many units, their time);
     its share against the unit's time (one dot per unit); runs against time when how many times its spans run
     differs between units (one dot per unit: runs and time, with lines of equal time per run), else what the count
     always is; and, merged or renamed, the spans it is made of, with the span each runs under and its average share

@@ -199,6 +199,7 @@ async def main():
             await page.wait_for_timeout(300)
             expect(await page.is_visible('#card-pop'), 'a click by a violin opened no card')
             expect(len(await page.query_selector_all('#card-pop svg')) >= 1, 'the card shows no chart')
+            expect(await page.is_visible('#card-pop .totals'), 'the card shows no time in all')
             expect(await page.evaluate("(() => { const c = document.getElementById('card-pop'); return c.scrollHeight <= c.clientHeight + 1; })()"),
                    'the card scrolls')
             members = await page.query_selector_all('#card-pop [data-leave]')
@@ -231,6 +232,19 @@ async def main():
         })()""")
         expect(inner is not False, 'merging inside a merged violin did not make its child')
 
+        # A merged violin under a violin closed waits there, and comes back when it opens again.
+        waits = await page.evaluate("""(() => {
+          const T = TX.layout, ids = TX.violins.G.p.cols.map((c) => c.id);
+          const g = ids.find((id) => T.isMerged(id) && !T.isMerged(T.parentOf(id)) && T.parentOf(id) !== T.rootKey() && !String(T.parentOf(id)).startsWith('~'));
+          if (!g) return null;
+          const p = T.parentOf(g);
+          T.collapse(p);
+          const kept = T.isMerged(g) && !T.shown(g);
+          T.expand(p);
+          return kept && T.shown(g);
+        })()""")
+        expect(waits is not False, 'a merged violin did not survive closing and opening its parent')
+
         # A name carried to the edge of a sibling's column moves it there, with what is under it.
         order = await page.evaluate("""(() => {
           const G = TX.violins.G, top = G.p.cols.map((c, k) => [c, k]).filter(([c]) => c.parent === TX.ROOT);
@@ -247,6 +261,16 @@ async def main():
             await page.wait_for_timeout(400)
             ids = await page.evaluate(COLS)
             expect(ids.index(order['b']) < ids.index(order['a']), 'carrying a name past its sibling did not move it')
+
+        # Two violins picked with Shift, removed at once.
+        two = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.merged).map(([c, k]) => [c.id, k]).slice(-2)')
+        if len(two) == 2:
+            for _, k in two:
+                await page.click(f'[data-col="{k}"]', modifiers=['Shift'])
+            await page.click('#v-merge [data-do="remove"]')
+            await page.wait_for_timeout(300)
+            ids = await page.evaluate(COLS)
+            expect(all(i not in ids for i, _ in two), 'removing two picked violins left them')
 
         # A merged violin hidden is gone: no longer merged, offered by no + list.
         gone = await page.evaluate("""(() => {
@@ -322,7 +346,7 @@ async def main():
         await browser.close()
     for e in errors:
         print(e, file=sys.stderr)
-    print(f'{len(STEPS) + 22} steps, {len(errors)} errors')
+    print(f'{len(STEPS) + 24} steps, {len(errors)} errors')
     return 1 if errors else 0
 
 
