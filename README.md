@@ -51,15 +51,17 @@ nothing from outside `out/`.
   - a double-click on a name renames it, any violin, not only merged ones; a merged violin's name is followed by how
     many spans it merges;
   - hovering a violin shows a × where its line meets its name, which removes it, its parent still counting the time;
-    removed, nothing about it or under it is kept, and added again it comes back as its spans are called; Shift and
-    a click on names picks several, to remove at once (Delete) or merge;
+    removed, nothing about it or under it is kept, and added again it comes back as its spans are called. Open with
+    children shown, it removes just its level: they move up to its parent, and adding it back from there puts them
+    under it again. Shift and a click on names picks several, to remove at once (Delete) or merge;
   - a click on its name, or anywhere along its column off the dots, opens its card: its name, to edit, and where it
     sits, with Split up (its larger spans shown, the rest behind a +) and In Spans (callers and callees) at the top;
     its time summed over the units in view and its share of theirs, per half (the root's: how many units, their time);
     its share against the unit's time (one dot per unit); runs against time when how many times its spans run
     differs between units (one dot per unit: runs and time, with lines of equal time per run), else what the count
-    always is; and, merged or renamed, the spans it is made of, with the span each runs under and its average share
-    of the unit's time, each to take out, the list scrolling by itself.
+    always is; and what it is made of, on one line until opened: its spans, with the span each runs under and its
+    average share of the unit's time, each to take out of a merged violin, and the spans excluded from its time,
+    each to put back. Its + includes more spans, from anywhere, or excludes spans inside it from its time.
 - **Projections**, after a gap to the right, violins that cut across the tree and take nothing from it: any spans,
   from the small dashed + at the side or a name dragged onto it, merged as you like, the same span in both places if
   need be. The split of a unit's time (Parts by time) and the colours stay the tree's. A what-if factor on a violin
@@ -68,7 +70,8 @@ nothing from outside `out/`.
   The left and right halves are two sets of groups. Below them, "When it runs": each unit stretched to the same
   height, start at the top, and how often each violin is running at each point of it. A what-if factor on any violin
   projects every view.
-- **Download** (the icon at the top right): the page as one HTML file, its data inside, opening with the violins
+- **Picture** (in Phases, the icon at the top right): the violins, tree and strips as a PNG, with the title and key.
+- **Download** (the icon beside it): the page as one HTML file, its data inside, opening with the violins
   as they are; it works from disk, and downloads itself again the same way. The root's card goes back to the
   violins a page was saved with, or starts over. A viewer's own changes are kept in their browser until they open a
   page saved after them.

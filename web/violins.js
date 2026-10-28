@@ -769,6 +769,8 @@
     drawHover();
   }
 
-  X.violins = { init, render, drawHover, move, leave, click, rezoom, wheel, down, up, dbl, fit, nameAt, flash, get G() { return G; }, invalidate() { lastKey = null; },
+  // The dots drawn again now, for a picture taken in the same moment: the GPU keeps no frame once shown.
+  const redrawDots = () => { if (points) points.redraw(); };
+  X.violins = { init, render, drawHover, move, leave, click, rezoom, wheel, down, up, dbl, fit, nameAt, flash, redrawDots, get zoomed() { return Z.z > 1; }, get G() { return G; }, invalidate() { lastKey = null; },
     closeMenu, get menuOpen() { return menuId !== null; } };
 })();

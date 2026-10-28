@@ -1,6 +1,7 @@
-// The download icon: this page as one HTML file, data and all, opening with the violins as they are now. On claude.ai
-// the viewer confirms where it goes; anywhere else it downloads. The page's own scripts and styles are inside it
-// (script[data-v], style[data-v]), and its data is what it has read, so it works opened from disk too.
+// The download icon: this page as one HTML file, data and all, opening with the violins as they are now; and the
+// picture icon, in Phases: the violins as a PNG, title and key drawn in. On claude.ai the viewer confirms where a file
+// goes; anywhere else it downloads. The page's own scripts and styles are inside it (script[data-v], style[data-v]),
+// and its data is what it has read, so it works opened from disk too.
 (function () {
   'use strict';
   const X = window.TX;
@@ -12,7 +13,8 @@
   function init() {
     btn = $('download');
     btn.addEventListener('click', download);
-    const ready = () => { btn.disabled = !X.layout.ready; };
+    $('picture').addEventListener('click', () => { picture().catch(() => X.toast('Couldn’t draw the picture')); });
+    const ready = () => { btn.disabled = !X.layout.ready; $('picture').disabled = !X.layout.ready; };
     X.on('layout', ready);
     ready();
   }
@@ -36,9 +38,83 @@
     return new Blob(parts, { type: 'text/html' });
   }
 
+  const fileName = (ext) => `${(X.meta.title || X.UNIT).replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'violinoscope'}.${ext}`;
   async function download() {
     if (!X.layout.ready) return;
-    const blob = build(), name = `${(X.meta.title || X.UNIT).replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'violinoscope'}.html`;
+    await save(build(), fileName('html'));
+  }
+
+  // The figure as it shows, from the plot's top to the strips' bottom and as wide as its columns, at twice the size;
+  // above it the title and which groups each half and mark is. Its layers drawn in order: shapes, dots, the tree and
+  // labels, the strips.
+  async function picture() {
+    const G = X.violins.G;
+    if (!G || !X.layout.ready) return;
+    const view = $('violins'), box = view.getBoundingClientRect(), T = X.T, k = 2, HEAD = 38;
+    const top = X.contentTop() - 4, W = Math.round(X.violins.zoomed ? box.width : Math.min(box.width, G.END + 52)), H = Math.round(box.height - top + HEAD);
+    const canvas = document.createElement('canvas');
+    canvas.width = W * k;
+    canvas.height = H * k;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(k, k);
+    ctx.fillStyle = T.bg;
+    ctx.fillRect(0, 0, W, H);
+    const layers = ['v-under', 'v-dots', 'v-over', 'v-heat'].map((id) => $(id));
+    const images = await Promise.all(layers.map((el) => (el.tagName.toLowerCase() === 'svg' ? svgImage(el) : null)));
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, HEAD, W, H - HEAD);
+    ctx.clip();
+    X.violins.redrawDots();
+    layers.forEach((el, j) => {
+      const r = el.getBoundingClientRect();
+      ctx.drawImage(images[j] || el, r.left - box.left, r.top - box.top - top + HEAD, r.width, r.height);
+    });
+    ctx.restore();
+    key(ctx, T, W);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (blob) await save(blob, fileName('png'));
+  }
+  function svgImage(el) {
+    const r = el.getBoundingClientRect(), copy = el.cloneNode(true);
+    copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    copy.setAttribute('width', String(r.width));
+    copy.setAttribute('height', String(r.height));
+    // Span paths in its attributes hold control characters, which XML does not allow.
+    const text = new XMLSerializer().serializeToString(copy).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+    const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('svg')); };
+      img.src = url;
+    });
+  }
+  // The title, and each half's groups and each marked group by its mark, as the legend shows them.
+  function key(ctx, T, W) {
+    const font = (weight, size) => `${weight} ${size}px ${X.SANS}`;
+    ctx.fillStyle = T.ink;
+    ctx.font = font(600, 14);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(X.meta.title || X.UNIT, 16, 20);
+    let x = 16 + ctx.measureText(X.meta.title || X.UNIT).width + 24;
+    ctx.font = font(400, 12.5);
+    const item = (draw, text) => {
+      if (!text) return;
+      draw(x + 5, 20);
+      ctx.fillStyle = T.ink;
+      ctx.fillText(text, x + 15, 20);
+      x += 15 + ctx.measureText(text).width + 18;
+    };
+    for (const side of ['left', 'right']) {
+      item((cx, cy) => { ctx.fillStyle = T[side]; ctx.beginPath(); ctx.arc(cx, cy, 4.5, side === 'left' ? Math.PI / 2 : -Math.PI / 2, side === 'left' ? Math.PI * 1.5 : Math.PI / 2); ctx.fill(); }, X.sideNames(side));
+    }
+    for (const g of X.unitsInView(true).markers.keys()) {
+      item((cx, cy) => { ctx.strokeStyle = T[`m${X.slotOf(g)}`]; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx, cy - 4.5); ctx.lineTo(cx + 4.5, cy); ctx.lineTo(cx, cy + 4.5); ctx.lineTo(cx - 4.5, cy); ctx.closePath(); ctx.stroke(); }, X.groupName(g));
+    }
+  }
+
+  async function save(blob, name) {
     const claude = window.claude;
     const saver = claude && typeof claude.use === 'function' ? await claude.use('downloads').catch(() => null) : null;
     if (saver) {
@@ -56,5 +132,5 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   }
 
-  X.download = { init, build };
+  X.download = { init, build, picture };
 })();

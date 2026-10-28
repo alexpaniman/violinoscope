@@ -202,6 +202,9 @@ async def main():
             expect(await page.is_visible('#card-pop .totals'), 'the card shows no time in all')
             expect(await page.evaluate("(() => { const c = document.getElementById('card-pop'); return c.scrollHeight <= c.clientHeight + 1; })()"),
                    'the card scrolls')
+            if await page.get_attribute('#card-pop [data-made]', 'aria-expanded') != 'true':
+                await page.click('#card-pop [data-made]')
+                await page.wait_for_timeout(200)
             members = await page.query_selector_all('#card-pop [data-leave]')
             expect(len(members) >= 2, 'the card of a merged violin lists no members')
             await shot(page, 'card')
@@ -261,6 +264,56 @@ async def main():
             await page.wait_for_timeout(400)
             ids = await page.evaluate(COLS)
             expect(ids.index(order['b']) < ids.index(order['a']), 'carrying a name past its sibling did not move it')
+
+        # From a card, spans inside a violin excluded from its time: its time drops, and they are listed to put back.
+        excl = await page.evaluate("""(() => {
+          const T = TX.layout, cols = TX.violins.G.p.cols;
+          const c = cols.find((c) => !c.root && !c.merged && !c.second && T.spansFor(c.id, '', 'exclude').length);
+          if (!c) return null;
+          const k = TX.data.columnIndex.get(c.id), before = TX.data.units.reduce((a, u) => a + u.s[k], 0);
+          T.exclude(c.id, [T.spansFor(c.id, '', 'exclude')[0].id]);
+          const k2 = TX.data.columnIndex.get(c.id), after = TX.data.units.reduce((a, u) => a + u.s[k2], 0);
+          return { id: c.id, less: after < before, listed: T.excluded(c.id).length === 1 };
+        })()""")
+        if excl is None:
+            errors.append('no violin to exclude a span from')
+        else:
+            expect(excl['less'] and excl['listed'], f'excluding a span did not take: {excl}')
+            await page.evaluate(f"TX.openCard({excl['id']!r}, {{ left: 300, right: 300, top: 300, bottom: 300 }})")
+            await page.wait_for_timeout(300)
+            if await page.get_attribute('#card-pop [data-made]', 'aria-expanded') != 'true':
+                await page.click('#card-pop [data-made]')
+                await page.wait_for_timeout(200)
+            expect(await page.is_visible('#card-pop .member.out'), 'the card does not list the span excluded')
+            await page.click('#card-pop [data-made-add]')
+            await page.click('#v-add [data-mode="exclude"]')
+            await page.wait_for_timeout(200)
+            await shot(page, 'card-exclude')
+            await page.keyboard.press('Escape')
+            await page.keyboard.press('Escape')
+
+        # × on a violin open with children shown removes just its level: they move up to its parent.
+        lifted = await page.evaluate("""(() => {
+          const T = TX.layout, cols = TX.violins.G.p.cols;
+          const c = cols.find((c) => !c.root && !c.merged && T.lifts(c.id));
+          if (!c) return null;
+          const up = T.parentOf(c.id), kids = T.kids(c.id).filter((k) => T.shown(k));
+          T.hide(c.id);
+          return !T.shown(c.id) && kids.every((k) => T.shown(k) && T.parentOf(k) === up);
+        })()""")
+        expect(lifted is not False, 'removing an open violin did not move its children up')
+
+        # The violins as a picture.
+        async with page.expect_download() as info:
+            await page.click('#picture')
+        with tempfile.TemporaryDirectory() as tmp:
+            png = os.path.join(tmp, 'v.png')
+            await (await info.value).save_as(png)
+            size = os.path.getsize(png)
+            expect(size > 20000, f'the picture is too small: {size} bytes')
+            if args.shots:
+                import shutil
+                shutil.copy(png, os.path.join(args.shots, 'picture.png'))
 
         # Two violins picked with Shift, removed at once.
         two = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.merged).map(([c, k]) => [c.id, k]).slice(-2)')
@@ -346,7 +399,7 @@ async def main():
         await browser.close()
     for e in errors:
         print(e, file=sys.stderr)
-    print(f'{len(STEPS) + 24} steps, {len(errors)} errors')
+    print(f'{len(STEPS) + 27} steps, {len(errors)} errors')
     return 1 if errors else 0
 
 

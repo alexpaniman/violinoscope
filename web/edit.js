@@ -10,7 +10,8 @@
   const { $, esc, clamp } = X;
 
   let menu, bar, hideBtn, ghost;
-  let under = null, query = '', ticked = new Set(), naming = false, rows = [];
+  // Mode: null for the tree's + (what shows under it), or from a card, 'include' or 'exclude' (what its time is made of).
+  let under = null, query = '', ticked = new Set(), naming = false, rows = [], mode = null;
   X.picked = new Set();
 
   function init() {
@@ -39,9 +40,17 @@
       syncAll();
     });
     menu.addEventListener('click', (e) => {
+      const switchTo = e.target.closest('[data-mode]');
+      if (switchTo) { mode = switchTo.dataset.mode; ticked = new Set(); renderHead(); renderList(); return; }
       const act = e.target.closest('[data-do]');
       if (!act) return;
       const ids = [...ticked], at = under;
+      if (act.dataset.do === 'apply') {
+        closeAdd();
+        if (mode === 'exclude') X.layout.exclude(at, ids);
+        else { const id = X.layout.include(at, ids); if (id && id !== at) X.openCard(id, cardAt()); }
+        return;
+      }
       if (act.dataset.do === 'add') { closeAdd(); X.layout.add(ids, at); }
       else if (act.dataset.do === 'one') {
         if (ids.length < 2) { closeAdd(); X.layout.add(ids, at); return; }
@@ -83,20 +92,22 @@
   // ---------------------------------------------------------------------------------------------------------
   // The + list.
 
-  function openAdd(id, rect) {
+  // From a card, its spans: what to put into its time, or leave out of it.
+  function openAdd(id, rect, what) {
     under = id;
     query = '';
     ticked = new Set();
     naming = false;
-    const where = id === X.ROOT2 ? `any span of ${X.UNIT}` : X.layout.label(id === X.ROOT ? X.layout.rootKey() : id);
-    menu.innerHTML = `<div class="add-head"><input data-filter type="search" autocomplete="off" spellcheck="false" placeholder="Find in ${esc(where)}" aria-label="Find a span"><small class="add-scope"></small></div>`
-      + '<div class="add-list" role="listbox" aria-multiselectable="true"></div><div class="add-foot"></div>';
+    mode = what || null;
+    menu.innerHTML = '<div class="add-head"></div><div class="add-list" role="listbox" aria-multiselectable="true"></div><div class="add-foot"></div>';
+    renderHead();
     // Below the +, or above it when there is more room there; no taller than that room, so its list scrolls and
     // its buttons stay on screen as it grows.
-    const stage = $('stage').getBoundingClientRect();
+    // From a card, beside the card rather than over it.
+    const stage = $('stage').getBoundingClientRect(), card = what ? $('card-pop').getBoundingClientRect() : null;
     const below = stage.bottom - rect.bottom - 18, above = rect.top - stage.top - 18;
-    at = { rect, stage, up: below < 320 && above > below };
-    menu.style.maxHeight = `${Math.round(Math.min(440, Math.max(160, at.up ? above : below)))}px`;
+    at = { rect, stage, card, up: !card && below < 320 && above > below };
+    menu.style.maxHeight = `${Math.round(Math.min(440, card ? stage.height - 24 : Math.max(160, at.up ? above : below)))}px`;
     menu.hidden = false;
     renderList();
     menu.querySelector('[data-filter]').focus({ preventScroll: true });
@@ -104,11 +115,21 @@
   let at = null;
   function placeAdd() {
     if (!at || menu.hidden) return;
-    const { rect, stage } = at, w = menu.offsetWidth, h = menu.offsetHeight;
-    const left = clamp(rect.left - stage.left - 20, 12, stage.width - w - 12);
-    const top = clamp(at.up ? rect.top - stage.top - 6 - h : rect.bottom - stage.top + 6, 12, Math.max(12, stage.height - h - 12));
+    const { rect, stage, card } = at, w = menu.offsetWidth, h = menu.offsetHeight;
+    const right = card && card.right - stage.left + 8 + w <= stage.width - 12;
+    const left = card ? (right ? card.right - stage.left + 8 : Math.max(12, card.left - stage.left - w - 8)) : clamp(rect.left - stage.left - 20, 12, stage.width - w - 12);
+    const top = clamp(card ? rect.top - stage.top - 48 : at.up ? rect.top - stage.top - 6 - h : rect.bottom - stage.top + 6, 12, Math.max(12, stage.height - h - 12));
     menu.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
   }
+  function renderHead() {
+    const where = under === X.ROOT2 ? `any span of ${X.UNIT}` : X.layout.label(under === X.ROOT ? X.layout.rootKey() : under);
+    const find = mode === 'include' ? 'Find spans to include' : mode === 'exclude' ? `Find spans in ${where} to exclude` : `Find in ${where}`;
+    const seg = mode ? `<div class="seg add-mode" role="group" aria-label="Spans">${['include', 'exclude'].map((m) => `<button type="button" data-mode="${m}" aria-pressed="${mode === m}">${m === 'include' ? 'Include' : 'Exclude'}</button>`).join('')}</div>` : '';
+    menu.querySelector('.add-head').innerHTML = `${seg}<input data-filter type="search" autocomplete="off" spellcheck="false" placeholder="${esc(find)}" aria-label="Find a span" value="${esc(query)}"><small class="add-scope"></small>`;
+    menu.querySelector('[data-filter]').focus({ preventScroll: true });
+  }
+  // Where the card is, to open the card of what it became there.
+  const cardAt = () => { const b = $('card-pop').getBoundingClientRect(); return { left: b.left, right: b.left, top: b.top, bottom: b.top }; };
   function closeAdd() {
     if (menu.hidden) return false;
     menu.hidden = true;
@@ -116,18 +137,22 @@
     return true;
   }
   function renderList() {
-    rows = X.layout.candidates(under, query);
+    rows = mode ? X.layout.spansFor(under, query, mode) : X.layout.candidates(under, query);
     // Typed, the list looks through every level, not only the violin's own children.
-    const scope = menu.querySelector('.add-scope');
-    scope.textContent = !query.trim() ? '' : under === X.ROOT2 ? `Every level of ${X.UNIT}` : `Every level inside ${X.layout.label(under === X.ROOT ? X.layout.rootKey() : under)}`;
+    const scope = menu.querySelector('.add-scope'), typed = !!query.trim();
+    scope.textContent = mode === 'include' ? (typed ? `Any span of ${X.UNIT} not in it already` : '')
+      : mode === 'exclude' ? (typed ? 'Every level inside it' : 'Its own children; type to look deeper')
+        : !typed ? '' : under === X.ROOT2 ? `Every level of ${X.UNIT}` : `Every level inside ${X.layout.label(under === X.ROOT ? X.layout.rootKey() : under)}`;
     const list = menu.querySelector('.add-list');
     const head = query.trim() && rows.length > 1
       ? `<label class="add-row all"><input type="checkbox" data-all${rows.every((r) => ticked.has(r.id)) ? ' checked' : ''}><span class="nm">All ${X.fmtInt(rows.length)}</span></label>` : '';
     list.innerHTML = rows.length ? head + rows.map((r) => `<label class="add-row" title="${esc(r.where ? `${r.where} › ${r.label}` : r.label)}">`
       + `<input type="checkbox" data-id="${esc(r.id)}"${ticked.has(r.id) ? ' checked' : ''}>`
       + `<span class="nm">${esc(r.label)}${r.group ? `<span class="count">${X.fmtInt(X.layout.size(r.id))}</span>` : ''}${r.where ? `<small>${esc(r.where)}</small>` : ''}</span>`
-      + `<span class="pct" title="Its average share of ${esc(X.layout.label(under === X.ROOT ? X.layout.rootKey() : under))}'s time${r.seen < 0.995 ? `; present in ${X.fmtPct(r.seen)} of them` : ''}">${X.fmtPct(r.share)}${r.seen < 0.995 ? `<small>in ${X.fmtPct(r.seen)}</small>` : ''}</span></label>`).join('')
-      : `<p class="add-none">${query.trim() ? 'Nothing not shown has that in its name.' : 'Everything inside it is shown.'}</p>`;
+      + `<span class="pct" title="Its average share of ${esc(mode === 'include' ? X.UNIT : X.layout.label(under === X.ROOT ? X.layout.rootKey() : under))}'s time${r.seen < 0.995 ? `; present in ${X.fmtPct(r.seen)} of them` : ''}">${X.fmtPct(r.share)}${r.seen < 0.995 ? `<small>in ${X.fmtPct(r.seen)}</small>` : ''}</span></label>`).join('')
+      : `<p class="add-none">${mode === 'include' ? (typed ? 'No span not in it has that in its name.' : 'Type a span’s name to find it.')
+        : mode === 'exclude' ? (typed ? 'Nothing inside it has that in its name.' : 'It calls nothing to exclude.')
+          : typed ? 'Nothing not shown has that in its name.' : 'Everything inside it is shown.'}</p>`;
     renderFoot();
   }
   function syncAll() {
@@ -140,6 +165,13 @@
       foot.innerHTML = `<button type="button" class="text-btn small" data-do="back" aria-label="Back">←</button>`
         + `<input data-name autocomplete="off" spellcheck="false" aria-label="Name of the merged violin" value="${esc(X.layout.suggestName([...ticked]))}">`
         + '<button type="button" class="text-btn small primary" data-do="merge">Add</button>';
+      placeAdd();
+      return;
+    }
+    if (mode) {
+      const verb = mode === 'include' ? 'Include' : 'Exclude';
+      foot.innerHTML = `<span class="add-count">${n ? `${X.fmtInt(n)} ticked` : `Tick what to ${verb.toLowerCase()}`}</span>`
+        + `<button type="button" class="text-btn small primary" data-do="apply"${n ? '' : ' disabled'}>${verb}${n > 1 ? ` ${X.fmtInt(n)}` : ''}</button>`;
       placeAdd();
       return;
     }
@@ -207,7 +239,8 @@
   function showHide(at) {
     if (!at) { if (!hideBtn.matches(':hover')) hideBtn.hidden = true; return; }
     hideBtn.dataset.id = at.id;
-    hideBtn.title = `Remove ${at.label}: its parent still counts its time`;
+    hideBtn.title = X.layout.lifts(at.id) ? `Remove ${at.label}; what is under it moves up to ${X.layout.label(X.layout.parentOf(at.id))}`
+      : `Remove ${at.label}: its parent still counts its time`;
     hideBtn.setAttribute('aria-label', `Remove ${at.label}`);
     hideBtn.style.transform = `translate(${Math.round(at.x - 8)}px, ${Math.round(at.y - 17)}px)`;
     hideBtn.hidden = false;

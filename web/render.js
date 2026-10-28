@@ -226,6 +226,9 @@
     const n = spec.columns.length;
     const model = { spec, n, cols: [] };
     for (let c = 0; c < n; c++) {
+      // A column made, measured and seen as before is taken as it was.
+      const key = spec.cache && spec.colKey ? spec.colKey(c) : null;
+      if (key !== null && spec.cache.has(key)) { model.cols.push(spec.cache.get(key)); continue; }
       const col = { halves: {} };
       for (const [half, side] of [['left', -1], ['right', 1]]) {
         const units = spec[half];
@@ -253,6 +256,10 @@
       col.markers = (spec.markers || []).map((m) => ({ m, v: m.units.map((unit) => spec.value(unit, c)) }));
       col.occupancy = spec.panels.timeline ? { left: spec.occupancy(c, 'left'), right: spec.occupancy(c, 'right') } : null;
       model.cols.push(col);
+      if (key !== null) {
+        if (spec.cache.size > 160) spec.cache.delete(spec.cache.keys().next().value);
+        spec.cache.set(key, col);
+      }
     }
     return model;
   }

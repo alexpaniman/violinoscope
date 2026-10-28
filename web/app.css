@@ -452,9 +452,19 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .add-scope { display: block; margin: 4px 2px 0; color: var(--muted); font-size: 11.5px; }
 .add-scope:empty { display: none; }
 .made { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
-.card-pop > .made { flex-shrink: 1; min-height: 96px; }
-.made-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-right: 28px; }
-.made-head .sub { color: var(--muted); font-size: 11.5px; }
+.card-pop > .made.open { flex-shrink: 1; min-height: 96px; }
+.made-head { display: flex; align-items: center; gap: 8px; }
+.made-head .sub { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+.made-toggle { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 0; font: inherit; color: var(--ink); cursor: pointer; }
+.made-toggle svg { color: var(--muted); transition: transform .15s; }
+.made.open .made-toggle svg { transform: rotate(90deg); }
+.made-toggle .section-title { margin: 0; }
+.made-toggle .n { color: var(--muted); font-size: 12px; }
+.made:not(.open) .made-head [data-made-add] { margin-left: auto; }
+.quiet-btn.small { width: 22px; height: 22px; font-size: 15px; line-height: 1; }
+.member.out .nm { color: var(--muted); }
+.member .tag { color: var(--muted); font-size: 11px; }
+.add-mode { margin-bottom: 8px; }
 .section-title .n { color: var(--muted); font-weight: 400; margin-left: 4px; }
 .members { display: flex; flex-direction: column; gap: 1px; overflow: auto; min-height: 0; max-height: 260px; }
 .member { display: grid; grid-template-columns: minmax(0, 1fr) auto 22px; align-items: center; gap: 6px; padding: 2px 0 2px 6px; font-size: 12.5px; }

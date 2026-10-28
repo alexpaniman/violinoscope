@@ -236,7 +236,7 @@
     return occCache.get(key);
   };
 
-  const prepared = new Map();
+  const prepared = new Map(), colCache = new Map();
   X.prepareKey = (mode, linear) => [mode, linear, X.layout.version, X.viewKey(), X.scenarioKey()].join('|');
   X.prepare = (mode, linear) => {
     const key = X.prepareKey(mode, linear);
@@ -258,12 +258,15 @@
     const scale = scaleFor(mode, linear, top);
     scale.above = above;
     const markers = [...view.markers].map(([g, units]) => ({ g, units, shape: 'o', key: `m${X.slotOf(g)}` }));
+    // Columns kept between layouts, by what each is made of, the measure, the scale and what is in view; with a
+    // what-if, each column's projected time depends on the others, so only within one layout.
+    const keyOf = (prefix) => (c) => `${prefix}|${cols[c].root ? 'root' : X.layout.sig(cols[c].id)}|${mode}|${linear}|${vk}|${scale.lo}|${scale.hi}|${proj ? `${X.scenarioKey()}|${X.layout.version}` : ''}`;
     const spec = {
-      columns: cols, value, scale, left: view.left, right: view.right, markers, seed: 0, panels: { timeline: true },
+      columns: cols, value, scale, left: view.left, right: view.right, markers, seed: 0, panels: { timeline: true }, cache: colCache, colKey: keyOf('m'),
       occupancy: (c, half) => (cols[c].root ? null : X.occupancyOf(cols[c].base, half === 'left' ? view.left : view.right, `${vk}|${half}`)),
     };
     const model = R.prepareViolins(spec);
-    const ghost = proj ? R.prepareViolins(Object.assign({}, spec, { value: X.valueFn(cols, mode, true), markers: [], panels: { timeline: false } })) : null;
+    const ghost = proj ? R.prepareViolins(Object.assign({}, spec, { value: X.valueFn(cols, mode, true), markers: [], panels: { timeline: false }, colKey: keyOf('g') })) : null;
     const P = { key, cols, scale, model, ghost, view, vk, mode };
     if (prepared.size > 8) prepared.delete(prepared.keys().next().value);
     prepared.set(key, P);

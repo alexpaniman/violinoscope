@@ -26,6 +26,11 @@
       if (unit) { const i = Number(unit.dataset.unit); if (S.sel === i) X.go('timeline'); else { X.select(i); renderCard(); } return; }
       const out = e.target.closest('[data-leave]');
       if (out) { X.layout.leave(out.dataset.leave, S.card); return; }
+      const back = e.target.closest('[data-unexclude]');
+      if (back) { X.layout.unexclude(S.card, back.dataset.unexclude); return; }
+      if (e.target.closest('[data-made]')) { madeOpen = !madeOpen; renderCard(); return; }
+      const more = e.target.closest('[data-made-add]');
+      if (more) { X.edit.openAdd(S.card, more.getBoundingClientRect(), 'include'); return; }
       const part = e.target.closest('[data-open-part]');
       if (part) { const b = card.getBoundingClientRect(); openCard(part.dataset.openPart, { left: b.left, right: b.right, top: b.top, bottom: b.top }); return; }
       const act = e.target.closest('[data-act], button[data-rename]');
@@ -126,9 +131,7 @@
       html += `<div class="card-row"><button type="button" class="text-btn small" data-act="reset" title="${esc(X.UNIT)} and the spans that take most of its time">Start over</button>`
         + `${X.layout.saved ? '<button type="button" class="text-btn small" data-act="saved" title="The violins this page was saved with">Back to the saved violins</button>' : ''}</div>`;
     } else {
-      html += shareScatter(k, halves) + runsOf(k, halves, col);
-      const own = X.layout.spanName(col.id);
-      if (col.merged || (own && own !== col.label)) html += madeOf(col.id, halves);
+      html += shareScatter(k, halves) + runsOf(k, halves, col) + madeOf(col.id, halves);
     }
     card.innerHTML = html;
   }
@@ -163,23 +166,34 @@
     return `<p class="runs-line"><b>Runs</b> ${how}: ${n} ${what(n)}${each}</p>`;
   }
 
-  // Its spans: each with the span it runs under and its average share of the unit's time, largest first; × takes one
-  // out of a merged violin. Long, the list scrolls by itself.
+  // What its time is made of, on one line until opened: its spans, each with the span it runs under and its average
+  // share of the unit's time, largest first, × taking one out of a merged violin; and the spans left out of it, each
+  // to put back. Its + includes or excludes more. Long, the list scrolls by itself.
+  let madeOpen = false;
   function madeOf(id, halves) {
     const units = halves.flatMap(([, u]) => u), merged = X.layout.isMerged(id);
-    const list = X.layout.members(id).map((m) => {
+    const share = (m) => {
       const ms = X.layout.msOf(m);
       let sum = 0;
       for (const i of units) sum += ms[i] / data.units[i].ms;
-      return [m, units.length ? sum / units.length : 0];
-    }).sort((a, b) => b[1] - a[1]);
-    const rows = list.map(([m, share]) => `<div class="member"><span class="nm">${esc(X.layout.spanName(m) || X.layout.label(m))}`
-      + `${X.layout.under(m) ? `<small>in ${esc(X.layout.under(m))}</small>` : ''}</span>`
-      + (merged ? `<span class="pct">${X.fmtPct(share)}</span><button type="button" class="chip-x" data-leave="${esc(m)}" title="Take it out of ${esc(X.layout.label(id))}" aria-label="Take it out">×</button>` : '')
-      + '</div>');
-    const head = merged ? `<span class="sub" title="Each span's share of ${esc(X.UNIT)} time, averaged over the ${esc(X.UNIT)} spans in view">average share</span>` : '';
-    return `<div class="made"><div class="made-head"><p class="section-title">Made of${merged ? ` <span class="n">${X.fmtInt(list.length)} spans</span>` : ''}</p>${head}</div>`
-      + `<div class="members">${rows.join('')}</div></div>`;
+      return units.length ? sum / units.length : 0;
+    };
+    const members = X.layout.members(id), out = X.layout.excluded(id);
+    const count = `${X.fmtInt(members.length)} ${members.length === 1 ? 'span' : 'spans'}${out.length ? ` · ${X.fmtInt(out.length)} excluded` : ''}`;
+    const name = (m) => `<span class="nm">${esc(X.layout.spanName(m) || X.layout.label(m))}${X.layout.under(m) ? `<small>in ${esc(X.layout.under(m))}</small>` : ''}</span>`;
+    let list = '';
+    if (madeOpen) {
+      const rows = members.map((m) => [m, share(m)]).sort((a, b) => b[1] - a[1]).map(([m, v]) => `<div class="member">${name(m)}<span class="pct">${X.fmtPct(v)}</span>`
+        + (merged ? `<button type="button" class="chip-x" data-leave="${esc(m)}" title="Take it out of ${esc(X.layout.label(id))}" aria-label="Take it out">×</button>` : '<span></span>') + '</div>');
+      const left = out.map((m) => `<div class="member out">${name(m)}<span class="tag">excluded</span>`
+        + `<button type="button" class="chip-x" data-unexclude="${esc(m)}" title="Count its time in ${esc(X.layout.label(id))} again" aria-label="Include it again">↩</button></div>`);
+      list = `<div class="members">${rows.join('')}${left.join('')}</div>`;
+    }
+    const chevron = '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l3.5 3L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return `<div class="made${madeOpen ? ' open' : ''}"><div class="made-head">`
+      + `<button type="button" class="made-toggle" data-made aria-expanded="${madeOpen}">${chevron}<span class="section-title">Made of</span><span class="n">${count}</span></button>`
+      + `${madeOpen ? `<span class="sub" title="Each span's share of ${esc(X.UNIT)} time, averaged over the ${esc(X.UNIT)} spans in view">average share</span>` : ''}`
+      + `<button type="button" class="quiet-btn small" data-made-add title="Include more spans in it, or exclude spans inside it" aria-label="Include or exclude spans">+</button></div>${list}</div>`;
   }
 
   // Its share against the unit's time, both halves, one dot per unit: whether it is what makes long units long.

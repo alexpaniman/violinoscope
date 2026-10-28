@@ -112,7 +112,9 @@
   // called. Top2: the copies put at the top of the second tree. A merged node can sit inside another (its parent), its
   // spans all inside it.
   // Order: children the viewer put in an order of their own, by parent; the rest follow, in the order they run.
-  const L = { shown: new Set(), groups: new Map(), names: new Map(), top2: new Set(), open: new Set(), order: new Map(), next: 1 };
+  // Except: spans left out of a node's time, by node. Skip: paths taken out from between their parent and their
+  // children, which show under the parent instead.
+  const L = { shown: new Set(), groups: new Map(), names: new Map(), top2: new Set(), open: new Set(), order: new Map(), except: new Map(), skip: new Set(), next: 1 };
   let memberOf = new Map(), in2 = new Set();
   const T2 = '\u0002', ROOT2 = X.ROOT2;
 
@@ -175,6 +177,10 @@
   // second tree: a copy at its top, or under its parent's copy; a merged node under the copy of its anchor when that is
   // there, else at the top. Null: not in either tree.
   function parentOf(id) {
+    const up = callParent(id);
+    return up !== null && L.skip.has(up) ? parentOf(up) : up;
+  }
+  function callParent(id) {
     if (memberOf.has(id)) return memberOf.get(id);
     if (isPath(id)) { const p = paths[pathByKey.get(id)].parent; return p >= 0 ? paths[p].key : null; }
     if (isCopy(id)) {
@@ -242,6 +248,13 @@
     return out;
   }
   function intervals(i, id) {
+    const iv = covered(i, id), out = L.except.get(id);
+    if (!out || !out.length || !iv.length) return iv;
+    const less = [];
+    for (const m of out) less.push(...covered(i, m));
+    return subtract(iv, mergeFlat(less));
+  }
+  function covered(i, id) {
     const U = units[i];
     if (pathOf(id) >= 0) {
       const j = entry(i, pathOf(id));
@@ -260,7 +273,7 @@
       return out;
     }
     const all = [];
-    for (const m of L.groups.get(id).members) all.push(...intervals(i, m));
+    for (const m of L.groups.get(id).members) all.push(...covered(i, m));
     return mergeFlat(all);
   }
   const lengthOf = (iv) => { let s = 0; for (let k = 0; k < iv.length; k += 2) s += iv[k + 1] - iv[k]; return s; };
@@ -272,9 +285,10 @@
   // Paths and the rest keep their times; a merged node's are worked out again when its members change.
   const msCache = new Map();
   function msOf(id) {
-    const key = L.groups.has(id) ? `${id}|${L.groups.get(id).members.join(SEP)}` : isCopy(id) ? id.slice(1) : id;
+    const less = (L.except.get(id) || []).join(SEP);
+    const key = `${L.groups.has(id) ? `${id}|${L.groups.get(id).members.join(SEP)}` : isCopy(id) ? id.slice(1) : id}|${less}`;
     if (!msCache.has(key)) {
-      const out = new Float64Array(X.NU), p = pathOf(id);
+      const out = new Float64Array(X.NU), p = less ? -1 : pathOf(id);
       for (let i = 0; i < X.NU; i++) {
         if (p < 0) { out[i] = lengthOf(intervals(i, id)) / 1000; continue; }
         const U = units[i], j = entry(i, p);
@@ -329,6 +343,7 @@
   // belong again, not shown, and so do the merged nodes inside it. Its members are always spans.
   function drop(g) {
     unshow(g);
+    L.except.delete(g);
     L.names.delete(g);
     L.order.delete(g);
     for (const list of L.order.values()) { const k = list.indexOf(g); if (k >= 0) list.splice(k, 1); }
@@ -345,16 +360,46 @@
       if (gone) relink();
     }
   }
-  // Removed: its parent still counts it; put at the top of the second tree, it leaves it; merged, it goes.
+  // Removed: its parent still counts it; put at the top of the second tree, it leaves it; merged, it goes. A span
+  // open with children shown leaves just its level: they move up to its parent, which holds them as it held it.
+  const lifts = (id) => !L.groups.has(id) && pathOf(id) >= 0 && isOpen(id) && kidsOfNode(id).some((k) => L.shown.has(k));
   function hide(id) {
+    if (lifts(id)) {
+      L.skip.add(id);
+      L.shown.delete(id); L.open.delete(id); L.names.delete(id); L.except.delete(id);
+      relink();
+      return;
+    }
     unshow(id, true);
+    L.except.delete(id);
     if (L.groups.has(id)) { L.groups.delete(id); relink(); }
     if (L.top2.delete(id)) relink();
+  }
+  // Left out of a node's time: spans inside it; put back, one at a time.
+  function exclude(id, spans) {
+    const list = L.except.get(id) || [];
+    for (const m of spans) if (m !== id && !list.includes(m) && inside(m, id)) list.push(m);
+    const kept = list.filter((m) => !list.some((x) => x !== m && inside(m, x)));
+    if (kept.length) L.except.set(id, kept); else L.except.delete(id);
+  }
+  function unexclude(id, span) {
+    const list = (L.except.get(id) || []).filter((m) => m !== span);
+    if (list.length) L.except.set(id, list); else L.except.delete(id);
+  }
+  // Spans into a node's time: into a merged one; a span becomes a merged one of it and them, its name kept.
+  function include(id, spans) {
+    if (L.groups.has(id)) { for (const m of spans) join(m, id); return id; }
+    const name = label(id), less = L.except.get(id);
+    const g = merge([id, ...spans], name);
+    if (g && less && L.groups.has(g)) L.except.set(g, less.slice());
+    return g;
   }
   // Shown, with whatever lies between it and the node it was added under; a copy added at the top of the second tree
   // goes there, unless it is in it already.
   function add(ids, under) {
     for (const id of ids) if (under === ROOT2 && isCopy(id) && !in2.has(id.slice(1))) L.top2.add(id);
+    // Added back where it was taken out from between, it holds its children again.
+    for (const id of ids) L.skip.delete(id);
     relink();
     for (const id of ids) showUp(id, under);
   }
@@ -530,6 +575,26 @@
     return rows.sort((x, y) => y.share - x.share);
   }
 
+  // For a node's card: spans anywhere in its tree to put into its time, or spans inside it to leave out, the
+  // filter typed; untyped, its own children for leaving out, nothing to put in.
+  function spansFor(id, query, mode) {
+    const q = (query || '').trim().toLowerCase(), out = [], tree = treeOf(id), less = L.except.get(id) || [];
+    const found = (s) => s && s.toLowerCase().includes(q);
+    const idOf = (p) => (tree === 2 ? copyOf(paths[p].key) : paths[p].key);
+    const walk = (p, trail) => {
+      for (const c of paths[p].kids) {
+        const k = idOf(c), name = paths[c].name, within = inside(k, id) && k !== id;
+        const fits = mode === 'exclude' ? within && !less.includes(k) && !(L.groups.has(id) && L.groups.get(id).members.includes(k))
+          : !within && k !== id && !inside(id, k);
+        if (fits && (q ? found(name) : spansOf(id).includes(idOf(p)))) out.push({ id: k, label: name, where: trail.join(' › '), group: false });
+        if (q || mode === 'exclude') walk(c, [...trail, name]);
+      }
+    };
+    if (q || mode === 'exclude') walk(rootPath, []);
+    const rows = out.slice(0, 400).map((c) => Object.assign(c, shareIn(c.id, mode === 'exclude' ? id : rootKey())));
+    return rows.sort((x, y) => y.share - x.share);
+  }
+
   // ---------------------------------------------------------------------------------------------------------
   // Applying what is shown: the columns, each unit's time in them, and each span's column.
 
@@ -565,6 +630,35 @@
     return out;
   }
 
+  // Per node, what every unit has of it: its intervals, share, frames on the grid and count of spans; kept while the
+  // node is made the same, so a change works out only the columns it changes.
+  const sigOf = (id) => `${id}|${L.groups.has(id) ? L.groups.get(id).members.join(SEP) : ''}|${(L.except.get(id) || []).join(SEP)}`;
+  const nodeCache = new Map();
+  function nodeData(id) {
+    const key = sigOf(id);
+    let d = nodeCache.get(key);
+    if (d) { nodeCache.delete(key); nodeCache.set(key, d); return d; }
+    d = { iv: new Array(X.NU), s: new Float64Array(X.NU), f: new Array(X.NU), c: new Int32Array(X.NU) };
+    for (let i = 0; i < X.NU; i++) {
+      const total = units[i].L, iv = intervals(i, id);
+      d.iv[i] = iv; d.s[i] = lengthOf(iv) / total; d.f[i] = frames(iv, total); d.c[i] = count(i, id);
+    }
+    nodeCache.set(key, d);
+    if (nodeCache.size > 64) nodeCache.delete(nodeCache.keys().next().value);
+    return d;
+  }
+  // Two lists of intervals in order, apart from each other, as one.
+  function unite(a, b) {
+    const out = [];
+    let i = 0, j = 0;
+    while (i < a.length || j < b.length) {
+      let x, y;
+      if (j >= b.length || (i < a.length && a[i] <= b[j])) { x = a[i]; y = a[i + 1]; i += 2; } else { x = b[j]; y = b[j + 1]; j += 2; }
+      if (out.length && x <= out[out.length - 1]) out[out.length - 1] = Math.max(out[out.length - 1], y);
+      else out.push(x, y);
+    }
+    return out;
+  }
   // Length of what two lists of disjoint intervals in order have in common; what a list leaves of [0, total).
   function overlap(a, b) {
     let i = 0, j = 0, len = 0;
@@ -614,15 +708,14 @@
     const prio = order(0, N1), prio2 = order(N1, NC);
     X.countFor = new Map();
     const repeats = new Uint8Array(NC);
+    const made = cols.map((col) => nodeData(col.id));
     for (let i = 0; i < X.NU; i++) {
       const u = data.units[i], total = units[i].L;
       const s = new Float64Array(NC), fr = new Array(NC), c = new Int32Array(NC), p = new Float64Array(N1 + 1), own = new Float64Array(NC);
       const iv = new Array(NC), piece = new Array(NC);
       for (let k = 0; k < NC; k++) {
-        iv[k] = intervals(i, cols[k].id);
-        s[k] = lengthOf(iv[k]) / total;
-        fr[k] = frames(iv[k], total);
-        c[k] = count(i, cols[k].id);
+        const d = made[k];
+        iv[k] = d.iv[i]; s[k] = d.s[i]; fr[k] = d.f[i]; c[k] = d.c[i];
         if (c[k] > 1) repeats[k] = 1;
       }
       // Each column's own time in its tree: what deeper columns of that tree don't count.
@@ -631,7 +724,7 @@
         for (const k of list) {
           piece[k] = subtract(iv[k], taken);
           own[k] = lengthOf(piece[k]) / total;
-          taken = mergeFlat(taken.concat(piece[k]));
+          taken = unite(taken, piece[k]);
         }
         return taken;
       };
@@ -680,13 +773,13 @@
   const saved = () => window.EXPLORER_LAYOUT || null;
   const savedAt = () => (saved() ? saved().saved : null);
   function state() {
-    return { v: 2, shown: [...L.shown], open: [...L.open], order: [...L.order], next: L.next, names: [...L.names], top2: [...L.top2],
+    return { v: 2, shown: [...L.shown], open: [...L.open], order: [...L.order], except: [...L.except], skip: [...L.skip], next: L.next, names: [...L.names], top2: [...L.top2],
       groups: [...L.groups].map(([id, d]) => [id, d.label, d.members,
         Object.assign({}, d.tree === 2 ? { tree: 2 } : {}, d.match ? { match: d.match } : {}, d.parent ? { parent: d.parent } : {})]) };
   }
   // A layout from anywhere: what no longer exists is left out, and a merged node left with one member goes.
   function load(s) {
-    L.shown = new Set(); L.groups = new Map(); L.names = new Map(); L.top2 = new Set(); L.open = new Set(); L.order = new Map(); L.next = 1;
+    L.shown = new Set(); L.groups = new Map(); L.names = new Map(); L.top2 = new Set(); L.open = new Set(); L.order = new Map(); L.except = new Map(); L.skip = new Set(); L.next = 1;
     if (!s) return false;
     const groups = new Map((s.groups || []).map(([id, name, members, more]) => [id, Object.assign({ label: name, members }, more || {})]));
     for (let changed = true; changed;) {
@@ -708,7 +801,9 @@
     for (const [id, name] of s.names || []) if (spanName(id) && name) L.names.set(id, name);
     for (const id of s.top2 || []) if (isCopy(id)) L.top2.add(id);
     for (const [p, list] of s.order || []) L.order.set(p, list);
+    for (const id of s.skip || []) if (pathOf(id) >= 0) L.skip.add(id);
     relink();
+    for (const [id, list] of s.except || []) if (exists(id)) { const ok = list.filter((m) => pathOf(m) >= 0); if (ok.length) L.except.set(id, ok); }
     for (const id of s.shown || []) if (exists(id)) L.shown.add(id);
     for (const id of s.open || []) if (exists(id)) L.open.add(id);
     // Saved before closing kept what was under a node: every node with a child shown was open.
@@ -767,6 +862,8 @@
     progress: () => [X.chunksLoaded(), X.chunkCount],
     rootKey: () => (ready ? rootKey() : null),
     label, spanName, inside, parentOf, canMerge, treeOf,
+    // What a node is made of, as a key: the same while its time is.
+    sig: sigOf,
     // The span a path runs under, by name.
     under: (id) => { const p = pathOf(id); return p >= 0 && paths[p].parent >= 0 ? paths[paths[p].parent].name : ''; },
     // The span names a node's paths have, each once.
@@ -794,6 +891,13 @@
     expand: change((id) => expand(id === X.ROOT ? rootKey() : id)),
     collapse: change((id) => collapse(id === X.ROOT ? rootKey() : id)),
     hide: change(hide),
+    // Whether removing it leaves its children, moved up to its parent.
+    lifts: (id) => lifts(id),
+    exclude: change(exclude),
+    unexclude: change(unexclude),
+    include: change(include),
+    excluded: (id) => (L.except.get(id) || []).slice(),
+    spansFor,
     // Several at once.
     remove: change((ids) => { for (const id of ids) if (exists(id)) hide(id); }),
     add: change((ids, under) => add(ids, under === X.ROOT ? rootKey() : under)),
