@@ -25,7 +25,7 @@
       const unit = e.target.closest('[data-unit]');
       if (unit) { const i = Number(unit.dataset.unit); if (S.sel === i) X.go('timeline'); else { X.select(i); renderCard(); } return; }
       const out = e.target.closest('[data-leave]');
-      if (out) { X.layout.leave(out.dataset.leave); return; }
+      if (out) { X.layout.leave(out.dataset.leave, S.card); return; }
       const part = e.target.closest('[data-open-part]');
       if (part) { const b = card.getBoundingClientRect(); openCard(part.dataset.openPart, { left: b.left, right: b.right, top: b.top, bottom: b.top }); return; }
       const act = e.target.closest('[data-act], button[data-rename]');

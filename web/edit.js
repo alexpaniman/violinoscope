@@ -205,12 +205,12 @@
   }
 
   // A carried name by the pointer, and what dropping it does there.
-  function showLift(name, px, py, onto) {
+  function showLift(name, px, py, onto, say) {
     if (name === null) { ghost.hidden = true; return; }
-    const what = onto === null ? 'Drop it on another violin to merge them' : onto === X.ROOT2 ? 'Copy it to Projections'
-      : `${X.layout.isMerged(onto) ? 'Add to' : 'Merge with'} ${X.layout.label(onto)}`;
+    const what = say || (onto === null ? 'Drop it on another violin to merge them, or by a sibling to move it' : onto === X.ROOT2 ? 'Copy it to Projections'
+      : `${X.layout.isMerged(onto) ? 'Add to' : 'Merge with'} ${X.layout.label(onto)}`);
     ghost.innerHTML = `<b>${esc(name)}</b><span>${esc(what)}</span>`;
-    ghost.classList.toggle('off', onto === null);
+    ghost.classList.toggle('off', onto === null && !say);
     ghost.style.transform = `translate(${Math.round(px + 14)}px, ${Math.round(py + 12)}px)`;
     ghost.hidden = false;
   }

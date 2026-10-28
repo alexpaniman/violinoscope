@@ -211,6 +211,43 @@ async def main():
             expect('Named in its card' in await page.evaluate('TX.data.columns.map((c) => c.label)'), 'renaming in the card did not take')
             await page.keyboard.press('Escape')
 
+        # A violin opened stays open with all its children hidden, its + there to add just the ones wanted.
+        stays = await page.evaluate("""(() => {
+          const T = TX.layout, c = TX.violins.G.p.cols.find((c) => !c.root && !c.merged && T.kids(c.id).length > 1);
+          if (!c) return null;
+          T.expand(c.id);
+          for (const k of T.kids(c.id)) if (T.shown(k)) T.hide(k);
+          return T.open(c.id) && !!document.querySelector(`[data-add="${CSS.escape(c.id)}"]`);
+        })()""")
+        expect(stays is not False, 'a violin with its children hidden closed, or lost its +')
+
+        # Spans merged inside a merged violin make its child, and stay in it.
+        inner = await page.evaluate("""(() => {
+          const T = TX.layout, ids = TX.violins.G.p.cols.map((c) => c.id);
+          const g = ids.find((id) => T.isMerged(id) && T.members(id).length >= 3);
+          if (!g) return null;
+          const two = T.members(g).slice(0, 2), id = T.merge(two, 'Inner');
+          return T.parentOf(id) === g && two.every((m) => T.members(g).includes(m));
+        })()""")
+        expect(inner is not False, 'merging inside a merged violin did not make its child')
+
+        # A name carried to the edge of a sibling's column moves it there, with what is under it.
+        order = await page.evaluate("""(() => {
+          const G = TX.violins.G, top = G.p.cols.map((c, k) => [c, k]).filter(([c]) => c.parent === TX.ROOT);
+          if (top.length < 2) return null;
+          const [a, b] = [top[0][1], top[1][1]], s = document.getElementById('stage').getBoundingClientRect();
+          return { a: G.p.cols[a].id, b: G.p.cols[b].id, x: s.left + G.xOf(b) + G.colW * 0.4, y: s.top + G.V.y0 + 20 };
+        })()""")
+        if order:
+            x0, y0 = await centre(page, f'[data-col="{await page.evaluate(f"TX.violins.G.p.cols.findIndex((c) => c.id === {order['a']!r})")}"]')
+            await page.mouse.move(x0, y0)
+            await page.mouse.down()
+            await page.mouse.move(order['x'], order['y'], steps=12)
+            await page.mouse.up()
+            await page.wait_for_timeout(400)
+            ids = await page.evaluate(COLS)
+            expect(ids.index(order['b']) < ids.index(order['a']), 'carrying a name past its sibling did not move it')
+
         # A merged violin hidden is gone: no longer merged, offered by no + list.
         gone = await page.evaluate("""(() => {
           const c = TX.violins.G.p.cols.find((c) => c.merged && !c.second);
@@ -285,7 +322,7 @@ async def main():
         await browser.close()
     for e in errors:
         print(e, file=sys.stderr)
-    print(f'{len(STEPS) + 19} steps, {len(errors)} errors')
+    print(f'{len(STEPS) + 22} steps, {len(errors)} errors')
     return 1 if errors else 0
 
 

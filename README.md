@@ -38,13 +38,16 @@ nothing from outside `out/`.
 
 - **Phases:** a violin per call path, one dot per unit, in share of the unit's time or in milliseconds. It starts
   with the unit's span and the spans it calls that take a fair share of its time. Under the violins:
-  - a triangle opens a violin into the spans it calls, its larger ones, or closes it;
+  - a triangle opens a violin into the spans it calls, its larger ones, or closes it; opened, it stays open with all
+    of them hidden, its + there to add just the ones wanted;
   - a + after everything under a violin lists its children not shown, largest first; typed text searches every level
     inside it: add them each, or as one violin, their time together, under a name. One made from every match of the
-    text keeps it, and takes in new matches when the spans are read again. A merged violin is made of spans only, never
-    of other merged violins, and is there only while it shows: hidden, or under a violin closed, it goes;
-  - a name dragged onto another violin merges the two, or adds it to that one when it is merged already; Shift and a
-    click on names picks several to merge;
+    text keeps it, and takes in new matches when the spans are read again. A merged violin is made of spans only, and
+    is there only while it shows: hidden, or under a violin closed, it goes. Spans merged that are all inside a merged
+    violin, from its + or picked there, make its child and stay in it: Compute types inside Compute *;
+  - a name dragged onto another violin merges the two, or adds it to that one when it is merged already; dragged to
+    the edge of a sibling's column, it moves before or after it, with everything under it; Shift and a click on names
+    picks several to merge;
   - a double-click on a name renames it, any violin, not only merged ones; a merged violin's name is followed by how
     many spans it merges;
   - hovering a violin shows a × where its line meets its name, which hides it; its parent still counts the time;

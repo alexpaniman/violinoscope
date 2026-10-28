@@ -72,7 +72,9 @@
     const bare = (c) => p.cols[c].root && S.mode === 'share';
     const visKids = p.cols.map((col) => p.cols.map((_, j) => j).filter((j) => p.cols[j].parent === col.id));
     // A column with children not shown has a + at the end of those it shows.
-    const more = p.cols.map((col, c) => visKids[c].length > 0 && X.layout.hidden(col.id) > 0);
+    // Open with none of them shown too: its + is how to add just the ones wanted.
+    const open = p.cols.map((col, c) => visKids[c].length > 0 || (!col.root && X.layout.open(col.id)));
+    const more = p.cols.map((col, c) => open[c] && X.layout.hidden(col.id) > 0);
     // A merged violin's name is followed by how many spans it merges, small and muted.
     const counts = p.cols.map((col) => (col.merged ? String(X.layout.size(col.id)) : ''));
     const countW = counts.map((t) => (t ? X.textWidth(t, COUNT, 400) + 4 : 0));
@@ -236,7 +238,7 @@
         lines += `M${n1(xOf(c) + 7)} ${n1(y)}H${n1(more[c] ? plusX(c) - 6 : xOf(last) - 4)}`;
         if (!more[c]) lines += `Q${n1(xOf(last))} ${n1(y)} ${n1(xOf(last))} ${n1(y + 4)}`;
         for (const j of ch) lines += `M${n1(xOf(j))} ${n1(j === last && !more[c] ? y + 4 : y)}V${n1(nodeY(depth[j]) - (isParent[j] ? 6 : 0))}`;
-      }
+      } else if (more[c]) lines += `M${n1(xOf(c) + 7)} ${n1(y)}H${n1(plusX(c) - 6)}`;
       lines += `M${n1(xOf(c))} ${n1(y + (isParent[c] ? 5 : 0))}V${n1(TR.y0 + labelY - 2)}`;
     });
     o.push(`<path d="${lines}" fill="none" stroke="${T.line}"/>`);
@@ -245,10 +247,9 @@
       const x = xOf(c), y = nodeY(depth[c]), picked = X.picked.has(col.id);
       if (col.root) o.push(`<circle cx="${n1(x)}" cy="${n1(y)}" r="3.5" fill="${T.muted}"/>`);
       else if (isParent[c]) {
-        const open = visKids[c].length > 0;
-        const tri = open ? `M${n1(x - 4.5)} ${n1(y - 2.5)}L${n1(x + 4.5)} ${n1(y - 2.5)}L${n1(x)} ${n1(y + 3)}Z`
+        const tri = open[c] ? `M${n1(x - 4.5)} ${n1(y - 2.5)}L${n1(x + 4.5)} ${n1(y - 2.5)}L${n1(x)} ${n1(y + 3)}Z`
           : `M${n1(x - 2.5)} ${n1(y - 4.5)}L${n1(x + 3)} ${n1(y)}L${n1(x - 2.5)} ${n1(y + 4.5)}Z`;
-        o.push(`<g class="hit" data-open="${esc(col.id)}"><title>${open ? 'Close' : 'Open'} ${esc(col.label)}</title><rect x="${n1(x - 11)}" y="${n1(y - 8)}" width="22" height="16" fill="transparent"/><path d="${tri}" fill="${open ? T.muted : T.ink}"/></g>`);
+        o.push(`<g class="hit" data-open="${esc(col.id)}"><title>${open[c] ? 'Close' : 'Open'} ${esc(col.label)}</title><rect x="${n1(x - 11)}" y="${n1(y - 8)}" width="22" height="16" fill="transparent"/><path d="${tri}" fill="${open[c] ? T.muted : T.ink}"/></g>`);
       } else o.push(`<circle cx="${n1(x)}" cy="${n1(y)}" r="2" fill="${T.line}"/>`);
       if (more[c]) {
         const px = plusX(c);
@@ -281,7 +282,7 @@
     if (glide) for (const el of [under, over]) { el.classList.remove('fade'); void el.getBoundingClientRect(); el.classList.add('fade'); }
     points.resize(W, H, view(W, H));
     points.set(pos, rgba, size, { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 }, glide);
-    G = { W, H, n, two, colW, xOf, V, TR, TL, MD, yOfU, p, pts, where, half, labelY, lens, END, deg, pad: { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 } };
+    G = { W, H, n, two, colW, xOf, ends, V, TR, TL, MD, yOfU, p, pts, where, half, labelY, lens, END, deg, pad: { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 } };
     placeLayers();
     drawHeat();
     drawHover();
@@ -350,7 +351,15 @@
       ctx.globalAlpha = 1;
     };
     if (S.card) { const c = G.p.cols.findIndex((col) => col.id === S.card); if (c >= 0) tint(c, 0.06); }
-    if (lift && lift.moved) { tint(lift.c, 0.05); if (lift.to !== null && lift.to >= 0) tint(lift.to, 0.14); }
+    if (lift && lift.moved) {
+      tint(lift.c, 0.05);
+      if (lift.to !== null && lift.to >= 0) tint(lift.to, 0.14);
+      if (lift.move) {
+        const { to, after } = lift.move, x = after ? G.xOf(G.ends[to]) + G.colW / 2 : G.xOf(to) - G.colW / 2;
+        ctx.fillStyle = T.sel;
+        ctx.fillRect(x - 1, G.V.y0 - 8, 2, G.TR.y0 + G.labelY - G.V.y0 + 8);
+      }
+    }
     if (lit) {
       const c = G.p.cols.findIndex((col) => col.id === lit.id);
       if (c >= 0) tint(c, 0.18 * Math.max(0, 1 - (performance.now() - lit.t) / 900));
@@ -667,7 +676,8 @@
     root.classList.remove('panning');
   }
   // A name carried onto another column merges the two: into it when it is merged already, else as a new merged violin
-  // under the nearest span holding both, named at once. Columns it can't merge with take nothing.
+  // under the nearest span holding both, named at once. Columns it can't merge with take nothing. Carried to the edge
+  // of a sibling's column, it moves before or after it.
   let lift = null;
   function carry(e, px, py) {
     const dx = px - lift.px, dy = py - lift.py;
@@ -683,11 +693,15 @@
     const [lx, ly] = toLayer(px, py), from = G.p.cols[lift.c];
     const el = e.target.closest && e.target.closest('[data-col]');
     const c = el ? Number(el.dataset.col) : colAt(lx, ly), onto = c !== null ? G.p.cols[c] : null;
+    // Near the edge of a sibling's column, before or after it, its subtree with it; else onto the column, merged.
+    const edge = onto && c !== lift.c && onto.parent === from.parent && Math.abs(lx - G.xOf(c)) > G.colW * 0.25;
+    lift.move = edge ? { to: c, after: lx > G.xOf(c) } : null;
     // From the first tree onto the second, or onto the + that starts it: a copy at its top.
     const start = !!(e.target.closest && e.target.closest(`[data-add="${X.ROOT2}"]`));
-    lift.copy = !from.second && (start || !!(onto && onto.second));
-    lift.to = lift.copy ? (onto && onto.second ? c : -1) : onto && X.layout.canMerge(from.id, onto.id) ? c : null;
-    X.edit.showLift(from.label, px, py, lift.to === null ? null : lift.copy ? X.ROOT2 : onto.id);
+    lift.copy = !edge && !from.second && (start || !!(onto && onto.second));
+    lift.to = edge ? null : lift.copy ? (onto && onto.second ? c : -1) : onto && X.layout.canMerge(from.id, onto.id) ? c : null;
+    X.edit.showLift(from.label, px, py, lift.to === null ? null : lift.copy ? X.ROOT2 : onto.id,
+      edge ? `Move ${lift.move.after ? 'after' : 'before'} ${onto.label}` : null);
     X.schedule(drawHover);
   }
   function letGo(drop) {
@@ -698,6 +712,7 @@
     if (!l.moved) return;
     dragged = true;
     X.schedule(drawHover);
+    if (drop && l.move) { const a = G.p.cols[l.c].id; X.layout.move(a, G.p.cols[l.move.to].id, l.move.after); flash(a); return; }
     if (!drop || l.to === null) return;
     const a = G.p.cols[l.c].id;
     if (l.copy) { flash(X.layout.copyOver(a)); return; }
