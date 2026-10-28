@@ -291,8 +291,8 @@
     const swatch = (r) => (r.async
       ? `<i class="async" style="border-color:${r.part >= 0 ? T.cols[r.part] : T.line}" title="Asynchronous: on its own track, beside its parent"></i>`
       : `<i style="background:${r.part >= 0 ? T.cols[r.part] : T.unowned}"></i>`);
+    // The selected unit's own name and time are in its chip already.
     const scope = `<b>${esc(X.nUnits(units.length))}</b><span>${X.fmtMs(all)} in all</span>`
-      + (one ? `<span class="one"><b>${esc(u1.l)}</b> ${X.fmtMs(u1.ms)}</span>` : '')
       + (note ? `<span class="note">${note}</span>` : '');
     // In the tree, the waterfall's buttons beside "Span": every node shut, a level less, a level more, every node open.
     const fold = (to, label, d) => `<button type="button" data-level="${to}" title="${label}" aria-label="${label}"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;

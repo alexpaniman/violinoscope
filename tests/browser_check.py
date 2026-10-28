@@ -68,6 +68,9 @@ async def main():
         await page.evaluate('localStorage.clear()')
         await page.reload()
         await page.wait_for_function(READY, timeout=60000)
+        # From the unit's span and its larger children, whatever the page was saved with.
+        await page.evaluate('TX.layout.fresh()')
+        await page.wait_for_timeout(300)
         count = lambda: page.evaluate('TX.violins.G.p.cols.length')
 
         # Open a violin, add what a + offers, then merge two violins picked with Shift.
@@ -104,13 +107,13 @@ async def main():
         pair = await page.evaluate(f"""(() => {{
           const ids = {COLS};
           for (let a = ids.length - 1; a > 0; a--) for (let b = a - 1; b > 0; b--)
-            if (TX.layout.canMerge(ids[a], ids[b]) && !TX.layout.isMerged(ids[b])) return [a, b, ids[a]];
+            if (TX.layout.canMerge(ids[a], ids[b]) && !TX.layout.isMerged(ids[b])) return [a, b, ids[b]];
           return null;
         }})()""")
         if pair is None:
             errors.append('no two violins to merge by dragging')
         else:
-            a, b, moved = pair
+            a, b, target = pair
             x0, y0 = await centre(page, f'[data-col="{a}"]')
             x1, y1 = await centre(page, f'[data-col="{b}"]')
             await page.mouse.move(x0, y0)
@@ -120,7 +123,7 @@ async def main():
             await shot(page, 'phases-carry')
             await page.mouse.up()
             await page.wait_for_timeout(400)
-            expect(await page.evaluate(f'TX.layout.isMerged(TX.layout.parentOf({moved!r}))'), 'dropping a name on a violin merged nothing')
+            expect(await page.evaluate(f'TX.layout.isMerged(TX.layout.parentOf({target!r}))'), 'dropping a name on a violin merged nothing')
             name = await page.query_selector('.name-edit')
             if name is None:
                 errors.append('a violin merged by dragging was not up for naming')
@@ -182,8 +185,8 @@ async def main():
         expect(ok, 'a what-if across both trees gave times that make no sense')
         await shot(page, 'phases-built')
 
-        # The card of a merged violin, opened by a click by its violin, off the dots: its charts, the units that spend
-        # most in it, what it is made of; its name edited in place; a click on a unit selects it.
+        # The card of a merged violin, opened by a click by its violin, off the dots: its charts and what it is made of,
+        # the card itself never scrolling; its name edited in place.
         merged = await page.evaluate('TX.violins.G.p.cols.findIndex((c) => c.merged && !c.second)')
         if merged < 0:
             errors.append('no merged violin to open a card for')
@@ -196,7 +199,8 @@ async def main():
             await page.wait_for_timeout(300)
             expect(await page.is_visible('#card-pop'), 'a click by a violin opened no card')
             expect(len(await page.query_selector_all('#card-pop svg')) >= 1, 'the card shows no chart')
-            expect(await page.is_visible('#card-pop .top-unit'), 'the card lists no units')
+            expect(await page.evaluate("(() => { const c = document.getElementById('card-pop'); return c.scrollHeight <= c.clientHeight + 1; })()"),
+                   'the card scrolls')
             members = await page.query_selector_all('#card-pop [data-leave]')
             expect(len(members) >= 2, 'the card of a merged violin lists no members')
             await shot(page, 'card')
@@ -205,11 +209,16 @@ async def main():
             await page.keyboard.press('Enter')
             await page.wait_for_timeout(300)
             expect('Named in its card' in await page.evaluate('TX.data.columns.map((c) => c.label)'), 'renaming in the card did not take')
-            await page.click('#card-pop .top-unit')
-            await page.wait_for_timeout(200)
-            expect(await page.evaluate('TX.S.sel !== null'), 'clicking a unit in the card selected nothing')
             await page.keyboard.press('Escape')
-            await page.keyboard.press('Escape')
+
+        # A merged violin hidden is gone: no longer merged, offered by no + list.
+        gone = await page.evaluate("""(() => {
+          const c = TX.violins.G.p.cols.find((c) => c.merged && !c.second);
+          if (!c) return null;
+          TX.layout.hide(c.id);
+          return !TX.layout.isMerged(c.id) && !TX.layout.candidates(TX.ROOT, '').some((r) => r.id === c.id);
+        })()""")
+        expect(gone is not False, 'a hidden merged violin stayed')
 
         # A + low on the screen: its list, filtered to many rows, stays on screen.
         plus = await page.query_selector_all('[data-add]')
@@ -248,6 +257,20 @@ async def main():
             await page.evaluate(js)
             await page.wait_for_timeout(400)
             await shot(page, name)
+            # In the Timeline, dragging across the strip at the top shows just that stretch.
+            if name == 'timeline-waterfall':
+                box = await (await page.query_selector('#overview-canvas')).bounding_box()
+                before = await page.evaluate('TX.nav.win().slice()')
+                y = box['y'] + box['height'] / 2
+                await page.mouse.move(box['x'] + box['width'] * 0.3, y)
+                await page.mouse.down()
+                await page.mouse.move(box['x'] + box['width'] * 0.5, y, steps=8)
+                await page.mouse.up()
+                await page.wait_for_timeout(500)
+                after = await page.evaluate('TX.nav.win().slice()')
+                expect(after[1] - after[0] < (before[1] - before[0]) * 0.5, f'dragging across the strip did not narrow the view: {before} -> {after}')
+                await shot(page, 'timeline-picked')
+                expect(not await page.is_visible('[data-nav="back"]'), 'the Back button is still there')
         # Pick the heaviest span name in the table, then look at its callers and callees.
         await page.evaluate("TX.go('profile', 'table')")
         await page.wait_for_timeout(300)
@@ -262,7 +285,7 @@ async def main():
         await browser.close()
     for e in errors:
         print(e, file=sys.stderr)
-    print(f'{len(STEPS) + 17} steps, {len(errors)} errors')
+    print(f'{len(STEPS) + 19} steps, {len(errors)} errors')
     return 1 if errors else 0
 
 

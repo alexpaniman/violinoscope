@@ -153,7 +153,7 @@
     const all = query.trim() && rows.length > 1 && rows.every((r) => ticked.has(r.id)) && ticked.size === rows.length;
     const at = under;
     closeAdd();
-    X.layout.merge(ids, input ? input.value : '', null, all ? { text: query.trim(), under: at === X.ROOT ? X.layout.rootKey() : at } : null);
+    X.layout.merge(ids, input ? input.value : '', all ? { text: query.trim(), under: at === X.ROOT ? X.layout.rootKey() : at } : null);
   }
 
   // ---------------------------------------------------------------------------------------------------------

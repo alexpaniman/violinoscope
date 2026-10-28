@@ -41,19 +41,19 @@ nothing from outside `out/`.
   - a triangle opens a violin into the spans it calls, its larger ones, or closes it;
   - a + after everything under a violin lists its children not shown, largest first; typed text searches every level
     inside it: add them each, or as one violin, their time together, under a name. One made from every match of the
-    text keeps it, and takes in new matches when the spans are read again; opened, a merged violin whose spans repeat
-    names opens into those names first;
+    text keeps it, and takes in new matches when the spans are read again. A merged violin is made of spans only, never
+    of other merged violins, and is there only while it shows: hidden, or under a violin closed, it goes;
   - a name dragged onto another violin merges the two, or adds it to that one when it is merged already; Shift and a
     click on names picks several to merge;
   - a double-click on a name renames it, any violin, not only merged ones; a merged violin's name is followed by how
     many spans it merges;
   - hovering a violin shows a × where its line meets its name, which hides it; its parent still counts the time;
-  - a click on its name, or anywhere along its column off the dots, opens its card: what it is, with its name to edit;
+  - a click on its name, or anywhere along its column off the dots, opens its card: its name, to edit, and where it
+    sits, with Split up (its larger spans shown, the rest behind a +) and In Spans (callers and callees) at the top;
     its share against the unit's time (one dot per unit); runs against time when how many times its spans run
     differs between units (one dot per unit: runs and time, with lines of equal time per run), else what the count
-    always is; the units that spend most in it (a click selects one, another opens the Timeline); what a merged violin
-    is made of, each part to take out; and splitting it up, its larger members shown and the rest behind a +, or
-    finding its span in the Spans tab.
+    always is; and, merged or renamed, the spans it is made of, with the span each runs under and its average share
+    of the unit's time, each to take out, the list scrolling by itself.
 - **Projections**, after a gap to the right, violins that cut across the tree and take nothing from it: any spans,
   from the small dashed + at the side or a name dragged onto it, merged as you like, the same span in both places if
   need be. The split of a unit's time (Parts by time) and the colours stay the tree's. A what-if factor on a violin
@@ -67,7 +67,7 @@ nothing from outside `out/`.
   violins a page was saved with, or starts over. A viewer's own changes are kept in their browser until they open a
   page saved after them.
 - **Timeline:** the units in view laid out in time, each run on its own clock, as a flame chart or as a waterfall
-  with a row per span.
+  with a row per span. Dragging across the strip at the top shows that stretch; Esc goes back, All shows everything.
 - **Spans:** a table of span names or call paths with self and total time, the merged flame graph of the
   selection, and the callers and callees of a picked span.
 

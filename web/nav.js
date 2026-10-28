@@ -141,11 +141,9 @@
       }
     }
     const [d0, d1] = current(), a = xOf(d0), b = xOf(d1);
-    // Back and All, while zoomed in on time.
-    const zoomed = !heavy() && (a > 0.5 || b < w - 0.5), nav = $('ov-nav');
-    nav.hidden = !zoomed && !(back.length && !heavy());
-    nav.querySelector('[data-nav="back"]').disabled = !back.length;
-    nav.querySelector('[data-nav="all"]').disabled = !zoomed;
+    // All, while zoomed in on time; Esc goes back to where it was before.
+    const zoomed = !heavy() && (a > 0.5 || b < w - 0.5);
+    $('ov-nav').hidden = !zoomed;
     ctx.fillStyle = T.bg;
     ctx.globalAlpha = 0.62;
     ctx.fillRect(0, 0, Math.max(0, a), h);
@@ -166,9 +164,10 @@
       const r = canvas.getBoundingClientRect(), [a0, b0] = range();
       return { d: a0 + clamp((e.clientX - r.left) / r.width, 0, 1) * (b0 - a0), px: (b0 - a0) / r.width };
     };
+    // Dragging picks a new stretch, as in other tools; while zoomed in, dragging an edge of the stretch moves it.
     canvas.addEventListener('pointerdown', (e) => {
-      const p = at(e), w = current(), near = 6 * p.px;
-      const which = Math.abs(p.d - w[0]) <= near ? 'a' : Math.abs(p.d - w[1]) <= near ? 'b' : p.d > w[0] && p.d < w[1] ? 'move' : 'new';
+      const [a0, b0] = range(), p = at(e), w = current(), near = 6 * p.px, whole = w[0] <= a0 + p.px && w[1] >= b0 - p.px;
+      const which = whole ? 'new' : Math.abs(p.d - w[0]) <= near ? 'a' : Math.abs(p.d - w[1]) <= near ? 'b' : 'new';
       drag = { which, d: p.d, win: w.slice() };
       canvas.setPointerCapture(e.pointerId);
     });
@@ -177,16 +176,11 @@
       const p = at(e), dd = p.d - drag.d;
       if (drag.which === 'a') move(Math.min(p.d, drag.win[1] - p.px), drag.win[1]);
       else if (drag.which === 'b') move(drag.win[0], Math.max(p.d, drag.win[0] + p.px));
-      else if (drag.which === 'move') move(drag.win[0] + dd, drag.win[1] + dd);
       else if (Math.abs(dd) > 2 * p.px) move(Math.min(drag.d, p.d), Math.max(drag.d, p.d));
     });
     canvas.addEventListener('pointerup', () => { drag = null; });
     canvas.addEventListener('dblclick', () => { if (heavy()) X.flame.setHeavyWindow(0, X.flame.heavyExtent(), true); else X.nav.fitAll(); });
-    $('ov-nav').addEventListener('click', (e) => {
-      const b = e.target.closest('[data-nav]');
-      if (b && b.dataset.nav === 'back') X.nav.back();
-      else if (b) X.nav.fitAll();
-    });
+    $('ov-nav').addEventListener('click', (e) => { if (e.target.closest('[data-nav]')) X.nav.fitAll(); });
     X.on('chunk', () => { if (shown()) draw(); });
   };
 })();

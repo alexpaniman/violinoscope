@@ -289,31 +289,32 @@
 
   function descendants(id, out = []) { for (const k of kidsOfNode(id)) { out.push(k); descendants(k, out); } return out; }
   function collapse(id) { for (const d of descendants(id)) L.shown.delete(d); }
-  // Opening a node shows its children that take a fair share of its time; with none, the largest. A merged node
-  // whose spans repeat names opens into those names first.
-  function expand(id) {
-    if (L.groups.has(id)) byName(id);
-    for (const k of largest(kidsOfNode(id), id)) L.shown.add(k);
-  }
+  // Opening a node shows its children that take a fair share of its time; with none, the largest.
+  function expand(id) { for (const k of largest(kidsOfNode(id), id)) L.shown.add(k); }
   function largest(list, of) {
     const kids = list.map((k) => [k, shareIn(k, of).share]).sort((x, y) => y[1] - x[1]);
     const big = kids.filter(([, s]) => s >= BIG).slice(0, MAX_OPEN);
     return (big.length ? big : kids.slice(0, 1)).map(([k]) => k);
   }
-  function byName(g) {
-    const d = L.groups.get(g), named = new Map();
-    for (const m of d.members) if (pathOf(m) >= 0) { const n = spanName(m); (named.get(n) || named.set(n, []).get(n)).push(m); }
-    if (named.size < 2 || ![...named.values()].some((list) => list.length > 1)) return;
-    for (const [n, list] of named) {
-      if (list.length < 2) continue;
-      const id = `g${L.next++}`;
-      L.groups.set(id, { label: n, members: list, tree: d.tree });
-      d.members = d.members.filter((m) => !list.includes(m)).concat(id);
-    }
-    relink();
+  // A merged node is there only while it shows: hidden, or under a node closed, it goes, and its members are where
+  // they belong again, not shown. Its members are always spans, never merged nodes.
+  function drop(g) {
+    collapse(g);
+    L.shown.delete(g);
+    L.groups.delete(g);
   }
-  // Hidden: its parent still counts it; put at the top of the second tree, it leaves it.
-  function hide(id) { collapse(id); L.shown.delete(id); if (L.top2.delete(id)) relink(); }
+  function prune() {
+    let gone = false;
+    for (const g of [...L.groups.keys()]) if (!shownOf(g)) { drop(g); gone = true; }
+    if (gone) relink();
+  }
+  // Hidden: its parent still counts it; put at the top of the second tree, it leaves it; merged, it goes.
+  function hide(id) {
+    collapse(id);
+    L.shown.delete(id);
+    if (L.groups.has(id)) { L.groups.delete(id); relink(); }
+    if (L.top2.delete(id)) relink();
+  }
   // Shown, with whatever lies between it and the node it was added under; a copy added at the top of the second tree
   // goes there, unless it is in it already.
   function add(ids, under) {
@@ -322,71 +323,73 @@
     for (const id of ids) for (let k = id; k !== null && k !== under && !isRoot(k); k = parentOf(k)) L.shown.add(k);
   }
   const showUp = (id) => { for (let k = id; k !== null && !isRoot(k); k = parentOf(k)) L.shown.add(k); };
-  // Whether two shown nodes can be one: in one tree, neither its root, nor inside the other.
-  const canMerge = (x, y) => exists(x) && exists(y) && x !== y && !isRoot(x) && !isRoot(y) && treeOf(x) === treeOf(y) && !inside(x, y) && !inside(y, x);
-  // Several nodes as one, under the nearest path holding them all; a node inside another one picked goes with it.
-  // Members of one merged node stay in it, as the new one; else the new one takes the place of `at`, when given.
-  // Made from a filter's every match, it keeps the filter, to take in what matches when the spans are read again.
-  function merge(ids, name, at, match) {
-    const pick = [...new Set(ids)].filter((id) => exists(id) && !isRoot(id));
-    const tree = pick.length ? treeOf(pick[0]) : 1;
-    const members = pick.filter((x) => treeOf(x) === tree && !pick.some((y) => y !== x && inside(x, y)));
-    if (members.length < 2) { add(members, members.length && tree === 2 ? ROOT2 : null); return members[0] || null; }
-    const from = new Set(members.map((m) => memberOf.get(m) || null));
-    const home = at ? memberOf.get(at) || null : from.size === 1 ? [...from][0] : null;
-    for (const m of members) {
+  // A node's spans: its own, or a merged node's members.
+  const spansOf = (id) => (L.groups.has(id) ? L.groups.get(id).members.slice() : [id]);
+  // Spans out of the merged nodes they are in; one left with fewer than two goes.
+  function free(list) {
+    for (const m of list) {
       const g = memberOf.get(m);
-      if (g) L.groups.get(g).members = L.groups.get(g).members.filter((x) => x !== m);
+      if (g && L.groups.has(g)) L.groups.get(g).members = L.groups.get(g).members.filter((x) => x !== m);
       L.top2.delete(m);
     }
+    for (const [g, d] of [...L.groups]) if (d.members.length < 2) drop(g);
+  }
+  // Whether two shown nodes can be one: in one tree, neither its root, nor inside the other.
+  const canMerge = (x, y) => exists(x) && exists(y) && x !== y && !isRoot(x) && !isRoot(y) && treeOf(x) === treeOf(y) && !inside(x, y) && !inside(y, x);
+  // Several nodes as one, under the nearest path holding them all: their spans, merged nodes picked giving theirs and
+  // going; a span inside another one picked goes with it. Made from a filter's every match, it keeps the filter, to
+  // take in what matches when the spans are read again.
+  function merge(ids, name, match) {
+    const pick = [...new Set(ids)].filter((id) => exists(id) && !isRoot(id));
+    const tree = pick.length ? treeOf(pick[0]) : 1;
+    const picked = pick.filter((x) => treeOf(x) === tree);
+    const spans = [...new Set(picked.flatMap(spansOf))];
+    const members = spans.filter((x) => !spans.some((y) => y !== x && inside(x, y)));
+    if (members.length < 2) { add(members, members.length && tree === 2 ? ROOT2 : null); return members[0] || null; }
+    for (const g of picked) if (L.groups.has(g)) drop(g);
+    relink();
+    free(members);
     const id = `g${L.next++}`;
     L.groups.set(id, Object.assign({ label: name || suggestName(members), members }, tree === 2 ? { tree } : {}, match ? { match } : {}));
-    if (home) L.groups.get(home).members.push(id);
     relink();
-    for (const g of [...from, home]) if (g && L.groups.has(g) && L.groups.get(g).members.length < 2) ungroup(g);
     for (const m of members) hide(m);
     showUp(id);
     return id;
   }
-  // A node into a merged one, which stays where it is, open or not as it was.
+  // A node into a merged one, which stays where it is, open or not as it was: its spans, a merged node going.
   function join(id, into) {
     if (!L.groups.has(into) || !canMerge(id, into)) return null;
-    const was = memberOf.get(id), d = L.groups.get(into);
-    if (was) L.groups.get(was).members = L.groups.get(was).members.filter((x) => x !== id);
-    L.top2.delete(id);
+    const d = L.groups.get(into), spans = spansOf(id).filter((m) => !d.members.some((x) => inside(m, x)));
+    if (L.groups.has(id)) drop(id);
+    free(spans);
+    if (!L.groups.has(into)) return null;
     const open = d.members.some((m) => L.shown.has(m));
-    d.members.push(id);
+    d.members.push(...spans);
     relink();
-    if (was && L.groups.has(was) && L.groups.get(was).members.length < 2) ungroup(was);
-    if (open) L.shown.add(id); else hide(id);
+    for (const m of spans) if (open) L.shown.add(m); else hide(m);
     showUp(into);
     return into;
   }
-  // A member out of its merged node: back where it belongs, shown; the merged node goes when one member is left.
+  // A span out of its merged node: back where it belongs, shown; the merged node goes when one span is left.
   function leave(id) {
     const g = memberOf.get(id);
     if (!g) return;
-    const d = L.groups.get(g);
-    d.members = d.members.filter((m) => m !== id);
+    free([id]);
     relink();
     if (isCopy(id) && parentOf(id) === null) { L.top2.add(id); relink(); }
-    if (d.members.length < 2) ungroup(g);
     showUp(id);
   }
-  // A merged node split up: inside another merged node, its members join that one; else each goes where it belongs,
-  // a copy left nowhere to the top of the second tree. Shown, it leaves its larger members shown, as opening it would,
-  // and the rest behind the + of where they go.
+  // A merged node split up: its spans go where they belong, a copy left nowhere to the top of the second tree. Shown,
+  // it leaves its larger spans shown, as opening it would, and the rest behind the + of where they go.
   function ungroup(id) {
     const d = L.groups.get(id);
     if (!d) return;
-    const was = shownOf(id), outer = memberOf.get(id), keep = was ? largest(d.members, id) : [];
-    L.groups.delete(id);
-    L.shown.delete(id);
-    if (outer) { const o = L.groups.get(outer); o.members = o.members.filter((m) => m !== id).concat(d.members); }
+    const keep = shownOf(id) ? largest(d.members, id) : [];
+    drop(id);
     relink();
     for (const m of d.members) if (isCopy(m) && parentOf(m) === null) L.top2.add(m);
     relink();
-    for (const m of keep) L.shown.add(m);
+    for (const m of keep) showUp(m);
   }
   // A node of the first tree copied to the top of the second: a path as its copy, a merged node with its members.
   function copyOver(id) {
@@ -618,6 +621,11 @@
         if (ok.length < 2) { groups.delete(id); changed = true; }
       }
     }
+    // Saved when merged nodes could hold merged nodes: their spans instead, the inner ones gone.
+    const leaves = (id) => groups.get(id).members.flatMap((m) => (groups.has(m) ? leaves(m) : [m]));
+    const inner = new Set([...groups.values()].flatMap((d) => d.members.filter((m) => groups.has(m))));
+    for (const [id, d] of groups) d.members = [...new Set(leaves(id))];
+    for (const id of inner) groups.delete(id);
     L.groups = groups;
     for (const id of groups.keys()) L.next = Math.max(L.next, Number(id.slice(1)) + 1 || 1);
     L.next = Math.max(L.next, s.next || 1);
@@ -625,6 +633,7 @@
     for (const id of s.top2 || []) if (isCopy(id)) L.top2.add(id);
     relink();
     for (const id of s.shown || []) if (exists(id)) L.shown.add(id);
+    prune();
     rematch();
     return L.shown.size > 0;
   }
@@ -670,7 +679,7 @@
 
   // ---------------------------------------------------------------------------------------------------------
 
-  function change(f) { return (...args) => { const r = f(...args); relink(); apply(); X.render(); return r; }; }
+  function change(f) { return (...args) => { const r = f(...args); relink(); prune(); apply(); X.render(); return r; }; }
 
   X.layout = {
     get ready() { return ready; },
@@ -678,6 +687,8 @@
     progress: () => [X.chunksLoaded(), X.chunkCount],
     rootKey: () => (ready ? rootKey() : null),
     label, spanName, inside, parentOf, canMerge, treeOf,
+    // The span a path runs under, by name.
+    under: (id) => { const p = pathOf(id); return p >= 0 && paths[p].parent >= 0 ? paths[paths[p].parent].name : ''; },
     // The span names a node's paths have, each once.
     spanNames: (id) => {
       const out = new Set();
@@ -693,7 +704,8 @@
     kids: (id) => kidsOfNode(id === X.ROOT ? rootKey() : id),
     shown: (id) => shownOf(id === X.ROOT ? rootKey() : id),
     isMerged: (id) => L.groups.has(id),
-    members: (id) => (L.groups.has(id) ? L.groups.get(id).members.slice() : []),
+    // A merged node's spans; a path or the rest, itself.
+    members: (id) => (L.groups.has(id) ? L.groups.get(id).members.slice() : exists(id) ? [id] : []),
     // A node's time in every unit, in ms.
     msOf,
     // Children shown, children there are, and the ones not shown.
@@ -711,6 +723,8 @@
     rename: change(rename),
     suggestName: (ids) => suggestName(ids),
     reset: change(reset),
+    // Back to the unit's span and its larger children, whatever the page was saved with.
+    fresh: change(fresh),
     // What is shown, as data, to save into a page; and the layout saved into this one.
     state,
     get saved() { return saved(); },

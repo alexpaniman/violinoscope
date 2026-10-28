@@ -667,7 +667,7 @@
     root.classList.remove('panning');
   }
   // A name carried onto another column merges the two: into it when it is merged already, else as a new merged violin
-  // where the other was, named at once. Columns it can't merge with take nothing.
+  // under the nearest span holding both, named at once. Columns it can't merge with take nothing.
   let lift = null;
   function carry(e, px, py) {
     const dx = px - lift.px, dy = py - lift.py;
@@ -704,7 +704,7 @@
     const b = G.p.cols[l.to].id;
     X.picked.delete(a); X.picked.delete(b);
     if (X.layout.isMerged(b)) { flash(X.layout.join(a, b)); return; }
-    const id = X.layout.merge([a, b], '', b);
+    const id = X.layout.merge([a, b], '');
     flash(id);
     requestAnimationFrame(() => X.edit.rename(id));
   }

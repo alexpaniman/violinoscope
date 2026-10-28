@@ -32,7 +32,8 @@
       if (!act) return;
       const id = S.card;
       if (act.dataset.act === 'hide') { closeCard(); X.layout.hide(id); }
-      else if (act.dataset.act === 'reset') { closeCard(); X.layout.reset(); }
+      else if (act.dataset.act === 'reset') { closeCard(); X.layout.fresh(); }
+      else if (act.dataset.act === 'saved') { closeCard(); X.layout.reset(); }
       else if (act.dataset.act === 'spans') { const name = X.layout.spanNames(id)[0]; closeCard(); X.spans.pick(name); X.go('profile', 'callers'); }
       else if (act.dataset.act === 'split') { closeCard(); X.layout.ungroup(id); }
       else if (act.dataset.act === 'rename' || act.dataset.rename !== undefined) {
@@ -98,9 +99,9 @@
     X.violins.drawHover();
   }
 
-  // What it is and where it sits, its name to edit; its share against the unit's time; its runs against its time, or
-  // what they always are; the units that spend most in it; what a merged violin is made of; and splitting it up,
-  // finding its span in the Spans tab, or for the root, starting over.
+  // Its name to edit and where it sits, with what can be done to it at the top: split up, find its span in Spans, or
+  // for the root, start over. Then its share against the unit's time; its runs against its time, or what they always
+  // are; and what it is made of, its spans, scrolling by itself, when merged or renamed.
   function renderCard() {
     if (S.card === null) return;
     const root = S.card === X.ROOT, k = root ? -1 : data.columnIndex.get(S.card);
@@ -110,25 +111,24 @@
     const halves = [['left', v.left], ['right', v.right]].filter(([, u]) => u.length);
     const crumbs = [];
     for (let p = root ? -1 : X.parentIdx[k]; p >= 0; p = X.parentIdx[p]) crumbs.unshift(p);
-    const time = (i) => (root ? data.units[i].ms : X.partMs(i, k, true));
-    const kind = [];
-    if (!root && col.merged) kind.push(`Merged: ${X.fmtInt(X.layout.size(col.id))} spans`);
-    const own = root ? null : X.layout.spanName(col.id);
-    if (own && own !== col.label) kind.push(`Span: ${esc(own)}`);
-    if (!root && col.second) kind.push('In Projections');
-    const title = root ? esc(col.label) : `<button type="button" class="title-edit" data-rename title="Rename it">${esc(col.label)}</button>`;
-    let html = `<div class="card-top"><div><h3>${title}</h3>${kind.length ? `<div class="span-name">${kind.join(' · ')}</div>` : ''}`
-      + `${crumbs.length ? `<div class="crumbs">${crumbs.map((p) => `<button type="button" data-open-part="${esc(data.columns[p].id)}">${esc(data.columns[p].label)}</button>`).join(' › ')}</div>` : ''}</div>`
-      + '<button class="icon-btn" type="button" data-close aria-label="Close">×</button></div>';
-    if (!root) html += shareScatter(k, halves) + runsOf(k, halves, col);
-    html += topUnits(k, halves, time);
-    if (!root && col.merged) html += membersOf(col.id, halves);
+    const where = (!root && col.second ? ['<span>Projections</span>'] : [])
+      .concat(crumbs.map((p) => `<button type="button" data-open-part="${esc(data.columns[p].id)}">${esc(data.columns[p].label)}</button>`));
     // Its one span name, also when merged from spans of one name: what calls it and what it calls, in Spans.
     const names = root ? [] : X.layout.spanNames(col.id);
-    const acts = root ? [`<button type="button" class="btn small" data-act="reset" title="${X.layout.saved ? 'The violins this page was saved with' : `${esc(X.UNIT)} and the spans that take most of its time`}">${X.layout.saved ? 'Back to the saved violins' : 'Start over'}</button>`]
-      : [col.merged ? '<button type="button" class="btn small" data-act="split" title="Its larger members on their own again; the rest behind the + of where they go">Split up</button>' : '',
-        names.length === 1 ? `<button type="button" class="btn small" data-act="spans" title="${esc(names[0])} in the Spans tab: what calls it and what it calls">In Spans</button>` : ''].filter(Boolean);
-    if (acts.length) html += `<div class="card-actions">${acts.join('')}</div>`;
+    const tools = root ? [] : [
+      col.merged ? '<button type="button" class="text-btn small" data-act="split" title="Its larger spans on their own again; the rest behind the + of where they go">Split up</button>' : '',
+      names.length === 1 ? `<button type="button" class="text-btn small" data-act="spans" title="${esc(names[0])} in the Spans tab: what calls it and what it calls">In Spans</button>` : ''];
+    const title = root ? esc(col.label) : `<button type="button" class="title-edit" data-rename title="Rename it">${esc(col.label)}</button>`;
+    let html = `<div class="card-top"><div class="card-id"><h3>${title}</h3>${where.length ? `<div class="crumbs">${where.join(' › ')}</div>` : ''}</div>`
+      + `<div class="card-tools">${tools.join('')}<button class="icon-btn" type="button" data-close aria-label="Close">×</button></div></div>`;
+    if (root) {
+      html += `<div class="card-row"><button type="button" class="text-btn small" data-act="reset" title="${esc(X.UNIT)} and the spans that take most of its time">Start over</button>`
+        + `${X.layout.saved ? '<button type="button" class="text-btn small" data-act="saved" title="The violins this page was saved with">Back to the saved violins</button>' : ''}</div>`;
+    } else {
+      html += shareScatter(k, halves) + runsOf(k, halves, col);
+      const own = X.layout.spanName(col.id);
+      if (col.merged || (own && own !== col.label)) html += madeOf(col.id, halves);
+    }
     card.innerHTML = html;
   }
 
@@ -148,33 +148,23 @@
     return `<p class="runs-line"><b>Runs</b> ${how}: ${n} ${what(n)}${each}</p>`;
   }
 
-  // The units in view that spend the most in it: a click selects one, a click on the selected one opens the Timeline.
-  function topUnits(k, halves, time) {
-    const all = halves.flatMap(([, u]) => u).map((i) => [i, time(i)]).filter(([, ms]) => ms > 0).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    if (!all.length) return '';
-    const T = X.T;
-    const rows = all.map(([i, ms]) => {
-      const u = data.units[i], side = X.sideKey(u.g), sel = S.sel === i;
-      const share = k < 0 ? '' : X.fmtPct(u.s[k]);
-      return `<button type="button" class="top-unit${sel ? ' sel' : ''}" data-unit="${i}" title="${esc(`${u.l}, ${X.groupName(u.g)}: ${sel ? 'open it in the Timeline' : 'select it everywhere; click again for the Timeline'}`)}">`
-        + `${X.glyph(side === 'left' || side === 'right' ? side : 'marker', T[side])}<span class="nm">${esc(u.l)} <small>${esc(X.groupName(u.g))}</small></span>`
-        + `<span class="ms">${X.fmtMs(ms)}${share ? ` <small>${share}</small>` : ''}</span></button>`;
-    });
-    return `<div><p class="section-title">${k < 0 ? 'Longest' : 'Most time in it'}</p><div class="top-units">${rows.join('')}</div></div>`;
-  }
-
-  // A merged violin's members, largest first, each with its median share of the unit; × takes one out.
-  function membersOf(id, halves) {
-    const units = halves.flatMap(([, u]) => u);
+  // Its spans: each with the span it runs under and its average share of the unit's time, largest first; × takes one
+  // out of a merged violin. Long, the list scrolls by itself.
+  function madeOf(id, halves) {
+    const units = halves.flatMap(([, u]) => u), merged = X.layout.isMerged(id);
     const list = X.layout.members(id).map((m) => {
       const ms = X.layout.msOf(m);
-      return [m, X.median(units.map((i) => ms[i] / data.units[i].ms))];
+      let sum = 0;
+      for (const i of units) sum += ms[i] / data.units[i].ms;
+      return [m, units.length ? sum / units.length : 0];
     }).sort((a, b) => b[1] - a[1]);
-    const SHOW = 12;
-    const rows = list.slice(0, SHOW).map(([m, share]) => `<div class="member"><span class="nm">${esc(X.layout.label(m))}${X.layout.isMerged(m) ? `<span class="count">${X.fmtInt(X.layout.size(m))}</span>` : ''}</span>`
-      + `<span class="pct">${X.fmtPct(share)}</span><button type="button" class="chip-x" data-leave="${esc(m)}" title="Take it out of ${esc(X.layout.label(id))}" aria-label="Take it out">×</button></div>`);
-    const more = list.length > SHOW ? `<div class="member more">and ${X.fmtInt(list.length - SHOW)} more</div>` : '';
-    return `<div><p class="section-title">Made of <span class="sub">median share</span></p><div class="members">${rows.join('')}${more}</div></div>`;
+    const rows = list.map(([m, share]) => `<div class="member"><span class="nm">${esc(X.layout.spanName(m) || X.layout.label(m))}`
+      + `${X.layout.under(m) ? `<small>in ${esc(X.layout.under(m))}</small>` : ''}</span>`
+      + (merged ? `<span class="pct">${X.fmtPct(share)}</span><button type="button" class="chip-x" data-leave="${esc(m)}" title="Take it out of ${esc(X.layout.label(id))}" aria-label="Take it out">×</button>` : '')
+      + '</div>');
+    const head = merged ? `<span class="sub" title="Each span's share of ${esc(X.UNIT)} time, averaged over the ${esc(X.UNIT)} spans in view">average share</span>` : '';
+    return `<div class="made"><div class="made-head"><p class="section-title">Made of${merged ? ` <span class="n">${X.fmtInt(list.length)} spans</span>` : ''}</p>${head}</div>`
+      + `<div class="members">${rows.join('')}</div></div>`;
   }
 
   // Its share against the unit's time, both halves, one dot per unit: whether it is what makes long units long.
