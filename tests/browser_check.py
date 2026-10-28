@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Opens a generated explorer in headless Chromium, builds violins (opens one, adds from a +, merges two picked, drags
-a name onto another, renames one), shares them (a link, and saving into the page as on claude.ai, with a stand-in for
-claude.ai), goes through every tab and mode, and fails on any console or page error or a change that did not take.
+a name onto another, renames one, fills the second tree, sets a what-if in both trees), opens a card, shares them (a
+link, and saving into the page as on claude.ai, with a stand-in for claude.ai), goes through every tab and mode, and
+fails on any console or page error or a change that did not take.
 Needs Playwright for Python and its Chromium; tools/with-browser.sh sets up the environment.
 
   browser_check.py OUT_DIR [--shots DIR]
@@ -26,6 +27,7 @@ STEPS = [
     ('spans-flame', "TX.go('profile', 'flame')"),
 ]
 READY = 'window.TX && TX.layout.ready && TX.violins.G'
+TWO = '~two'
 COLS = 'TX.violins.G.p.cols.map((c) => c.id)'
 # claude.ai as a page saving itself sees it: the artifact can publish files, and the viewer can edit.
 STAND_IN = """
@@ -83,11 +85,10 @@ async def main():
             await page.click('#v-add [data-do="add"]')
             await page.wait_for_timeout(300)
             expect(await count() == n + 1, 'adding from the + list added no violin')
-        labels = await page.query_selector_all('[data-col]')
+        last = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.second).map(([, k]) => k).slice(-2)')
         n = await count()
-        await labels[-1].click(modifiers=['Shift'])
-        labels = await page.query_selector_all('[data-col]')
-        await labels[-2].click(modifiers=['Shift'])
+        await page.click(f'[data-col="{last[1]}"]', modifiers=['Shift'])
+        await page.click(f'[data-col="{last[0]}"]', modifiers=['Shift'])
         await page.click('#v-merge [data-do="merge"]')
         await page.wait_for_timeout(300)
         expect(await count() < n, 'merging two violins left them apart')
@@ -142,7 +143,63 @@ async def main():
             await name.press('Enter')
             await page.wait_for_timeout(300)
             expect(await page.evaluate('TX.violins.G.p.cols[1].label') == 'Renamed here', 'renaming a violin did not take')
+
+        # The second tree: spans added from its own +, two of them as one; a name of the first tree carried onto it is
+        # copied there. It takes nothing from the first tree's split of each unit's time.
+        second = lambda: page.evaluate('TX.data.columns.filter((c) => c.second).length')
+        await page.click(f'[data-add="{TWO}"]')
+        await page.check('#v-add input[data-id]')
+        await page.click('#v-add [data-do="add"]')
+        await page.wait_for_timeout(300)
+        expect(await second() == 1, 'adding to the second tree added no violin there')
+        await page.click(f'[data-add="{TWO}"]')
+        boxes = await page.query_selector_all('#v-add input[data-id]')
+        for box in boxes[:2]:
+            await box.check()
+        await page.click('#v-add [data-do="one"]')
+        await page.fill('#v-add [data-name]', 'Two as one')
+        await page.keyboard.press('Enter')
+        await page.wait_for_timeout(300)
+        expect('Two as one' in await page.evaluate('TX.data.columns.filter((c) => c.second).map((c) => c.label)'), 'merging in the second tree did not take')
+        n = await second()
+        x0, y0 = await centre(page, '[data-col="1"]')
+        x1, y1 = await centre(page, f'[data-col="{await page.evaluate(f"TX.violins.G.p.cols.findIndex((c) => c.id === {TWO!r})")}"]')
+        await page.mouse.move(x0, y0)
+        await page.mouse.down()
+        await page.mouse.move(x1, y1, steps=12)
+        await page.mouse.up()
+        await page.wait_for_timeout(400)
+        expect(await second() == n + 1, 'carrying a name onto the second tree copied nothing')
+        expect(await page.evaluate('TX.data.units.every((u) => Math.abs(u.p.reduce((a, b) => a + b, 0) - 1) < 1e-6)'),
+               "the second tree changed the first tree's split of unit time")
+        # A what-if on a violin of each tree: both apply where they meet, and nothing goes negative or undefined.
+        ok = await page.evaluate("""(() => {
+          const cols = TX.data.columns, a = cols.findIndex((c) => !c.second), b = cols.findIndex((c) => c.second);
+          TX.setFactor(cols[a].id, 0.5); TX.setFactor(cols[b].id, 0);
+          const fine = TX.data.units.every((u, i) => { const t = TX.totalMs(i, false); return Number.isFinite(t) && t > 0 && t <= u.ms + 1e-6; });
+          const less = TX.data.units.some((u, i) => TX.totalMs(i, false) < u.ms - 1e-6);
+          TX.setFactor(cols[a].id, 1); TX.setFactor(cols[b].id, 1);
+          return fine && less;
+        })()""")
+        expect(ok, 'a what-if across both trees gave times that make no sense')
         await shot(page, 'phases-built')
+
+        # The card of a merged violin: the units that spend most in it, its members; taking one out keeps the rest.
+        merged = await page.evaluate('TX.violins.G.p.cols.findIndex((c) => c.merged && !c.second)')
+        if merged < 0:
+            errors.append('no merged violin to open a card for')
+        else:
+            await page.click(f'[data-col="{merged}"]')
+            await page.wait_for_timeout(500)
+            expect(await page.is_visible('#card-pop .top-unit'), 'the card lists no units')
+            members = await page.query_selector_all('#card-pop [data-leave]')
+            expect(len(members) >= 2, 'the card of a merged violin lists no members')
+            await shot(page, 'card')
+            await page.click('#card-pop .top-unit')
+            await page.wait_for_timeout(200)
+            expect(await page.evaluate('TX.S.sel !== null'), 'clicking a unit in the card selected nothing')
+            await page.keyboard.press('Escape')
+            await page.keyboard.press('Escape')
 
         # Save for everyone, as on claude.ai; another viewer opening the page starts with what was saved.
         layout = await page.evaluate(COLS)
@@ -195,7 +252,7 @@ async def main():
         await browser.close()
     for e in errors:
         print(e, file=sys.stderr)
-    print(f'{len(STEPS) + 10} steps, {len(errors)} errors')
+    print(f'{len(STEPS) + 16} steps, {len(errors)} errors')
     return 1 if errors else 0
 
 

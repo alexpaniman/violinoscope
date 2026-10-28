@@ -39,13 +39,23 @@ nothing from outside `out/`.
 - **Phases:** a violin per call path, one dot per unit, in share of the unit's time or in milliseconds. It starts
   with the unit's span and the spans it calls that take a fair share of its time. Under the violins:
   - a triangle opens a violin into the spans it calls, its larger ones, or closes it;
-  - a + at the end of a violin's children lists what is not shown, largest first, with a filter over everything
-    inside it: add them each, or as one violin, their time together, under a name;
+  - a + after everything under a violin lists its children not shown, largest first; typed text searches every level
+    inside it: add them each, or as one violin, their time together, under a name. One made from every match of the
+    text keeps it, and takes in new matches when the spans are read again; opened, a merged violin whose spans repeat
+    names opens into those names first;
   - a name dragged onto another violin merges the two, or adds it to that one when it is merged already; Shift and a
     click on names picks several to merge;
   - a double-click on a name renames it, any violin, not only merged ones;
   - hovering a violin shows a × where its line meets its name, which hides it; its parent still counts the time;
-  - a click on a name opens its card, with its numbers, and hiding, renaming or splitting up a merged violin.
+  - a click on a name opens its card: what it is, its time, own time (what the violins under it don't count) and how
+    often it occurs, in each half; runs against time when its spans run more than once in a unit (one dot per unit:
+    how many runs, how much time, with lines of equal time per run), else its share against the unit's time; the five
+    units that spend most in it (a click selects one, another opens the Timeline); a merged violin's members, each to
+    take out; and hiding, renaming, splitting up, or finding its span in the Spans tab.
+- **Projections**, a second tree to the right, for violins that cut across the first: any spans, from its own + or a
+  name dragged onto it, merged as you like, the same span in both trees if need be. It takes nothing from the first
+  tree: the split of a unit's time (Parts by time) and the colours stay the first tree's. A what-if factor on a
+  violin of each tree applies, multiplied, where both own the time.
 
   The left and right halves are two sets of groups. Below them, "When it runs": each unit stretched to the same
   height, start at the top, and how often each violin is running at each point of it. A what-if factor on any violin

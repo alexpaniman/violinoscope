@@ -337,14 +337,14 @@
   function bucketShares(rc) {
     const P = data.partition.length, NB = rc.NB, at = (l) => clamp(Math.floor((l - rc.lo) / (rc.hi - rc.lo) * NB), 0, NB - 1);
     const sum = Array.from({ length: NB }, () => new Float64Array(P)), n = new Float64Array(NB), logs = new Float64Array(NB);
-    // With a what-if, each column's own time takes its factor, and each unit sits at the time it would take.
+    // With a what-if, each column's own time takes its factors, and each unit sits at the time it would take.
     const proj = X.proj();
     const row = new Float64Array(P);
     for (const i of rc.all.left.concat(rc.all.right)) {
       const u = data.units[i];
       let total = 0;
       for (let p = 0; p < P; p++) {
-        row[p] = u.p[p] * (proj && p < X.NC ? proj.eff[p] : 1);
+        row[p] = proj ? proj.own[i * proj.P + p] : u.p[p];
         total += row[p];
       }
       const l = Math.log10(Math.max(proj ? X.totalMs(i, false) : u.ms, 1e-3)), b = at(l);

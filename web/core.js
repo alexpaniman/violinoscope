@@ -139,7 +139,9 @@
 
   // ---------------------------------------------------------------------------------------------------------
   // What-if: a factor on any column scales its own time and everything inside it; nested factors multiply. A column's
-  // own time is the part of the unit's time it counts (u.p), so overlapping columns save nothing twice.
+  // own time is the part of the unit's time it counts in its tree (u.o), so overlapping columns of one tree save
+  // nothing twice. Where a column of the second tree owns time the first tree's column owns too (u.x), both factors
+  // apply, multiplied.
 
   let proj = null;
   X.scenarioOn = () => data.columns.some((c) => S.factors.has(c.id) && S.factors.get(c.id) !== 1);
@@ -152,21 +154,34 @@
       for (let p = k; p >= 0; p = X.parentIdx[p]) f *= S.factors.has(data.columns[p].id) ? S.factors.get(data.columns[p].id) : 1;
       eff[k] = f;
     }
-    const total = new Float64Array(X.NU), col = new Float64Array(X.NU * NC), save = new Float64Array(NC);
+    // N1: the first tree's columns; parts: the split of the unit's time, those and what none of them counts.
+    const N1 = data.partition.length - 1, P = N1 + 1;
+    const total = new Float64Array(X.NU), col = new Float64Array(X.NU * NC), own = new Float64Array(X.NU * P), save = new Float64Array(NC);
     data.units.forEach((u, i) => {
-      let all = 0;
-      for (let k = 0; k < NC; k++) {
-        save[k] = u.p[k] * u.ms * (1 - eff[k]);
-        all += save[k];
+      // Shares of the unit saved: by each column's own time, and under no violin.
+      let all = 0, under = 0;
+      for (let k = 0; k < NC; k++) save[k] = k < N1 ? u.p[k] * (1 - eff[k]) : 0;
+      for (let k = 0; k < N1; k++) all += save[k];
+      if (u.x) {
+        for (let q = 0; q < u.x.length; q += 3) {
+          const k = u.x[q], j = u.x[q + 1], sh = u.x[q + 2], first = k >= 0 ? eff[k] : 1;
+          // The second factor on what the first one left.
+          const more = sh * first * (1 - eff[j]);
+          if (k >= 0) save[k] += more; else under += more;
+          save[j] += sh * (1 - first * eff[j]);
+          all += more;
+        }
       }
-      total[i] = Math.max(1e-3, u.ms - all);
+      total[i] = Math.max(1e-3, u.ms * (1 - all));
       for (let k = 0; k < NC; k++) {
         let s = 0;
         for (let d = k; d <= X.subEnd[k]; d++) s += save[d];
-        col[i * NC + k] = Math.max(0, u.s[k] * u.ms - s);
+        col[i * NC + k] = Math.max(0, (u.s[k] - s) * u.ms);
       }
+      for (let k = 0; k < N1; k++) own[i * P + k] = Math.max(0, u.p[k] - save[k]);
+      own[i * P + N1] = Math.max(0, u.p[N1] - under);
     });
-    proj = { total, col, eff };
+    proj = { total, col, eff, own, P };
   };
   X.proj = () => proj;
   X.partMs = (i, k, measured) => (proj && !measured ? proj.col[i * X.NC + k] : data.units[i].s[k] * data.units[i].ms);
@@ -176,10 +191,21 @@
   // Columns, scales and prepared violins. Both measures show the same columns, so switching keeps them in place.
 
   // The violins' columns: the unit's own span, the root the others branch from, then every column shown.
+  // After them, the second tree's root, with nothing of its own to show, and its columns; while it is empty, its root
+  // alone, to start it from.
   X.ROOT = '_all';
-  X.columnsFor = () => [{ id: X.ROOT, label: X.UNIT, parent: null, base: -1, root: true }]
-    .concat(data.columns.map((c, k) => ({ id: c.id, label: c.label, parent: c.parent, base: k, merged: c.merged })));
-  X.colMs = (i, col, measured) => (col.root ? X.totalMs(i, measured) : X.partMs(i, col.base, measured));
+  X.ROOT2 = '~two';
+  X.columnsFor = () => {
+    const cols = [{ id: X.ROOT, label: X.UNIT, parent: null, base: -1, root: true }];
+    const two = { id: X.ROOT2, label: 'Projections', parent: null, base: -1, root: true, blank: true, second: true };
+    data.columns.forEach((c, k) => {
+      if (c.second && !cols.includes(two)) cols.push(two);
+      cols.push({ id: c.id, label: c.label, parent: c.parent, base: k, merged: c.merged, second: c.second });
+    });
+    if (!cols.includes(two)) cols.push(two);
+    return cols;
+  };
+  X.colMs = (i, col, measured) => (col.blank ? NaN : col.root ? X.totalMs(i, measured) : X.partMs(i, col.base, measured));
 
   const clamp = X.clamp;
   function scaleFor(mode, linear, top) {
@@ -226,7 +252,7 @@
     let top = 1, above = 0;
     if (mode === 'ms') {
       const all = [];
-      for (const i of view.left.concat(view.right)) for (let c = 0; c < cols.length; c++) all.push(value(i, c));
+      for (const i of view.left.concat(view.right)) for (let c = 0; c < cols.length; c++) if (!cols[c].blank) all.push(value(i, c));
       const sorted = Float64Array.from(all).sort();
       top = Math.max(1, sorted[sorted.length - 1] || 1);
       if (linear) {
@@ -280,7 +306,7 @@
       return list[Math.min(list.length - 1, X.depthIdx[k] + 1 + (sib % 2))];
     });
     // The split of a unit's time: a column's own share in its colour, what no column counts in grey.
-    t.parts = data.partition.map((p, k) => (k < t.cols.length ? t.cols[k] : shades.other[2]));
+    t.parts = data.partition.map((p, k) => (k < data.partition.length - 1 ? t.cols[k] : shades.other[2]));
     t.unowned = t.scheme === 'dark' ? '#3a3f47' : '#d9dde3';
     X.T = t;
     return t;

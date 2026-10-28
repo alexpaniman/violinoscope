@@ -41,10 +41,10 @@
     menu.addEventListener('click', (e) => {
       const act = e.target.closest('[data-do]');
       if (!act) return;
-      const ids = [...ticked];
-      if (act.dataset.do === 'add') { closeAdd(); X.layout.add(ids, under); }
+      const ids = [...ticked], at = under;
+      if (act.dataset.do === 'add') { closeAdd(); X.layout.add(ids, at); }
       else if (act.dataset.do === 'one') {
-        if (ids.length < 2) { closeAdd(); X.layout.add(ids, under); return; }
+        if (ids.length < 2) { closeAdd(); X.layout.add(ids, at); return; }
         naming = true;
         renderFoot();
         const input = menu.querySelector('[data-name]');
@@ -86,7 +86,8 @@
     query = '';
     ticked = new Set();
     naming = false;
-    menu.innerHTML = `<div class="add-head"><input data-filter type="search" autocomplete="off" spellcheck="false" placeholder="Find inside ${esc(X.layout.label(id === X.ROOT ? X.layout.rootKey() : id))}" aria-label="Find a span"></div>`
+    const where = id === X.ROOT2 ? `any span of ${X.UNIT}` : X.layout.label(id === X.ROOT ? X.layout.rootKey() : id);
+    menu.innerHTML = `<div class="add-head"><input data-filter type="search" autocomplete="off" spellcheck="false" placeholder="Find in ${esc(where)}" aria-label="Find a span"><small class="add-scope"></small></div>`
       + '<div class="add-list" role="listbox" aria-multiselectable="true"></div><div class="add-foot"></div>';
     menu.hidden = false;
     renderList();
@@ -105,6 +106,9 @@
   }
   function renderList() {
     rows = X.layout.candidates(under, query);
+    // Typed, the list looks through every level, not only the violin's own children.
+    const scope = menu.querySelector('.add-scope');
+    scope.textContent = !query.trim() ? '' : under === X.ROOT2 ? `Every level of ${X.UNIT}` : `Every level inside ${X.layout.label(under === X.ROOT ? X.layout.rootKey() : under)}`;
     const list = menu.querySelector('.add-list');
     const head = query.trim() && rows.length > 1
       ? `<label class="add-row all"><input type="checkbox" data-all${rows.every((r) => ticked.has(r.id)) ? ' checked' : ''}><span class="nm">All ${X.fmtInt(rows.length)}</span></label>` : '';
@@ -131,10 +135,13 @@
       + `<button type="button" class="text-btn small" data-do="add"${n ? '' : ' disabled'}>Add${n > 1 ? ` ${X.fmtInt(n)}` : ''}</button>`
       + `<button type="button" class="text-btn small" data-do="one"${n > 1 ? '' : ' disabled'} title="Add them as one violin: their time together">Add as one</button>`;
   }
+  // Every match of a typed filter, merged, keeps the filter: spans read again that match it join.
   function mergeTicked() {
     const input = menu.querySelector('[data-name]'), ids = [...ticked];
+    const all = query.trim() && rows.length > 1 && rows.every((r) => ticked.has(r.id)) && ticked.size === rows.length;
+    const at = under;
     closeAdd();
-    X.layout.merge(ids, input ? input.value : '');
+    X.layout.merge(ids, input ? input.value : '', null, all ? { text: query.trim(), under: at === X.ROOT ? X.layout.rootKey() : at } : null);
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -188,7 +195,7 @@
   // A carried name by the pointer, and what dropping it does there.
   function showLift(name, px, py, onto) {
     if (name === null) { ghost.hidden = true; return; }
-    const what = onto === null ? 'Drop it on another violin to merge them'
+    const what = onto === null ? 'Drop it on another violin to merge them' : onto === X.ROOT2 ? 'Copy it to Projections'
       : `${X.layout.isMerged(onto) ? 'Add to' : 'Merge with'} ${X.layout.label(onto)}`;
     ghost.innerHTML = `<b>${esc(name)}</b><span>${esc(what)}</span>`;
     ghost.classList.toggle('off', onto === null);

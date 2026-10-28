@@ -3,10 +3,12 @@
 // whichever nodes the viewer opened, added or merged; a node's time in a unit is the time its spans cover there,
 // overlaps counted once, cut to the unit. A merged node is several nodes as one: its time is theirs together, and it
 // sits under the nearest path that holds them all. "Not under any span" is the unit's time that none of the spans it
-// calls covers. What is shown is kept in the browser, for each kind of unit.
+// calls covers. A second tree, Projections, holds violins that cut across the first and take nothing from it.
 //
-// From what is shown come the columns every view uses (data.columns), each unit's time in them (u.s, u.f, u.c), the
-// split of each unit's time among them, deepest first (u.p, data.partition), and which column each span counts toward.
+// From what is shown come the columns every view uses (data.columns, the first tree's then the second's), each unit's
+// time in them (u.s, u.f, u.c), each column's own time in its tree, deepest first (u.o), the split of each unit's time
+// in the first tree (u.p, data.partition), where the two trees' own times meet (u.x), and which column of the first
+// tree each span counts toward.
 (function () {
   'use strict';
   const X = window.TX, data = X.data, meta = X.meta;
@@ -100,31 +102,44 @@
   }
 
   // ---------------------------------------------------------------------------------------------------------
-  // Nodes: paths by their key, merged nodes as g1, g2, …, and the rest.
+  // Nodes: paths by their key, merged nodes as g1, g2, …, and the rest. A second tree, under its own root (X.ROOT2),
+  // holds violins that take nothing from the first: copies of paths (their key after T2), put at its top or merged
+  // there, with every path under them; merged nodes of its own; the same span can be in both trees.
 
-  // Names: what the viewer called a path or the rest, when not what its spans are called.
-  const L = { shown: new Set(), groups: new Map(), names: new Map(), next: 1 };
-  let memberOf = new Map();
+  // Names: what the viewer called a path, its copy or the rest, when not what its spans are called. Top2: the copies
+  // put at the top of the second tree.
+  const L = { shown: new Set(), groups: new Map(), names: new Map(), top2: new Set(), next: 1 };
+  let memberOf = new Map(), in2 = new Set();
+  const T2 = '\u0002', ROOT2 = X.ROOT2;
 
   const isPath = (id) => pathByKey.has(id);
-  const exists = (id) => isPath(id) || L.groups.has(id) || id === REST;
+  const isCopy = (id) => typeof id === 'string' && id[0] === T2 && pathByKey.has(id.slice(1));
+  const copyOf = (key) => T2 + key;
+  // A path or its copy: the path; else -1.
+  const pathOf = (id) => (isPath(id) ? pathByKey.get(id) : isCopy(id) ? pathByKey.get(id.slice(1)) : -1);
+  const exists = (id) => isPath(id) || isCopy(id) || L.groups.has(id) || id === REST;
   const rootKey = () => paths[rootPath].key;
+  const isRoot = (id) => id === rootKey() || id === ROOT2;
+  const treeOf = (id) => (id === ROOT2 || isCopy(id) || (L.groups.has(id) && L.groups.get(id).tree === 2) ? 2 : 1);
   function spanName(id) {
-    if (isPath(id)) return paths[pathByKey.get(id)].name;
+    const p = pathOf(id);
+    if (p >= 0) return paths[p].name;
     if (id === REST) return 'Not under any span';
     return null;
   }
   function label(id) {
     if (L.names.has(id)) return L.names.get(id);
     if (L.groups.has(id)) return L.groups.get(id).label;
+    if (id === ROOT2) return 'Projections';
     return spanName(id) || id;
   }
 
   // The path a node hangs from: a path its own; a merged node the nearest path holding all its members; the rest
   // the root. Its depth in the call tree, for which of two overlapping nodes counts a moment: the deeper.
   function anchor(id) {
-    if (isPath(id)) return pathByKey.get(id);
-    if (id === REST) return rootPath;
+    const p = pathOf(id);
+    if (p >= 0) return p;
+    if (id === REST || id === ROOT2) return rootPath;
     let lca = -1;
     for (const m of L.groups.get(id).members) lca = lca < 0 ? anchor(m) : common(lca, anchor(m));
     return lca;
@@ -136,47 +151,66 @@
     return p;
   }
   function callDepth(id) {
-    if (isPath(id)) return paths[pathByKey.get(id)].depth;
+    const p = pathOf(id);
+    if (p >= 0) return paths[p].depth;
     if (id === REST) return 1;
     return Math.min(...L.groups.get(id).members.map(callDepth));
   }
-  // Whether node x lies inside node y: under one of y's paths, or one of its members.
+  // Whether node x lies inside node y, in the same tree: under one of y's paths, or one of its members.
   function inside(x, y) {
     if (x === y) return true;
+    if (treeOf(x) !== treeOf(y)) return false;
     if (L.groups.has(y)) return L.groups.get(y).members.some((m) => inside(x, m));
     if (y === REST || x === REST) return false;
-    const py = pathByKey.get(y);
+    const py = pathOf(y);
     for (let p = anchor(x); p >= 0; p = paths[p].parent) if (p === py) return x !== y;
     return false;
   }
 
-  // Where a node shows: in the merged node it is part of, or under its path's parent, or under its anchor.
+  // Where a node shows: in the merged node it is part of, or under its path's parent, or under its anchor. In the
+  // second tree: a copy at its top, or under its parent's copy; a merged node under the copy of its anchor when that is
+  // there, else at the top. Null: not in either tree.
   function parentOf(id) {
     if (memberOf.has(id)) return memberOf.get(id);
     if (isPath(id)) { const p = paths[pathByKey.get(id)].parent; return p >= 0 ? paths[p].key : null; }
+    if (isCopy(id)) {
+      if (L.top2.has(id)) return ROOT2;
+      const p = paths[pathOf(id)].parent;
+      return p >= 0 && in2.has(paths[p].key) ? copyOf(paths[p].key) : null;
+    }
     if (id === REST) return rootKey();
-    return paths[anchor(id)].key;
+    if (!L.groups.has(id)) return null;
+    const a = paths[anchor(id)].key;
+    if (L.groups.get(id).tree !== 2) return a;
+    return in2.has(a) ? copyOf(a) : ROOT2;
   }
   // Every node's children, shown or not; built again whenever what is merged changes.
   let kidsOf = new Map();
   function relink() {
     memberOf = new Map();
     for (const [g, d] of L.groups) for (const m of d.members) memberOf.set(m, g);
+    // The paths in the second tree: those put there or merged there, and every path under them.
+    in2 = new Set();
+    const grow = (p) => { if (in2.has(paths[p].key)) return; in2.add(paths[p].key); for (const q of paths[p].kids) grow(q); };
+    for (const id of L.top2) grow(pathOf(id));
+    for (const d of L.groups.values()) if (d.tree === 2) for (const m of d.members) if (isCopy(m)) grow(pathOf(m));
     kidsOf = new Map();
     const add = (id) => { const p = parentOf(id); if (p !== null) (kidsOf.get(p) || kidsOf.set(p, []).get(p)).push(id); };
     for (const P of paths) if (P.id !== rootPath) add(P.key);
+    for (const key of in2) add(copyOf(key));
     for (const g of L.groups.keys()) add(g);
     add(REST);
     for (const list of kidsOf.values()) list.sort((x, y) => startOf(x) - startOf(y));
   }
   // When a node usually starts in a unit, as a share of it, so children read in the order they run.
   function startOf(id) {
-    if (isPath(id)) { const P = paths[pathByKey.get(id)]; return P.n ? P.start / P.n : 1; }
+    const p = pathOf(id);
+    if (p >= 0) { const P = paths[p]; return P.n ? P.start / P.n : 1; }
     if (id === REST) return 2;
     return Math.min(...L.groups.get(id).members.map(startOf));
   }
   const kidsOfNode = (id) => kidsOf.get(id) || [];
-  function shownOf(id) { return id === rootKey() || (L.shown.has(id) && shownOf(parentOf(id))); }
+  function shownOf(id) { return isRoot(id) || (id !== null && L.shown.has(id) && shownOf(parentOf(id))); }
 
   // ---------------------------------------------------------------------------------------------------------
   // Time: a node's merged intervals in a unit, and its time in every unit, in ms.
@@ -194,8 +228,8 @@
   }
   function intervals(i, id) {
     const U = units[i];
-    if (isPath(id)) {
-      const j = entry(i, pathByKey.get(id));
+    if (pathOf(id) >= 0) {
+      const j = entry(i, pathOf(id));
       if (j < 0) return [];
       const out = [];
       for (let k = U.off[j]; k < U.off[j + 1]; k++) out.push(U.a[k], U.b[k]);
@@ -216,16 +250,16 @@
   }
   const lengthOf = (iv) => { let s = 0; for (let k = 0; k < iv.length; k += 2) s += iv[k + 1] - iv[k]; return s; };
   function count(i, id) {
-    if (isPath(id)) { const j = entry(i, pathByKey.get(id)); return j < 0 ? 0 : units[i].cnt[j]; }
+    if (pathOf(id) >= 0) { const j = entry(i, pathOf(id)); return j < 0 ? 0 : units[i].cnt[j]; }
     if (id === REST) return 0;
     return L.groups.get(id).members.reduce((s, m) => s + count(i, m), 0);
   }
   // Paths and the rest keep their times; a merged node's are worked out again when its members change.
   const msCache = new Map();
   function msOf(id) {
-    const key = L.groups.has(id) ? `${id}|${L.groups.get(id).members.join(SEP)}` : id;
+    const key = L.groups.has(id) ? `${id}|${L.groups.get(id).members.join(SEP)}` : isCopy(id) ? id.slice(1) : id;
     if (!msCache.has(key)) {
-      const out = new Float64Array(X.NU), p = isPath(id) ? pathByKey.get(id) : -1;
+      const out = new Float64Array(X.NU), p = pathOf(id);
       for (let i = 0; i < X.NU; i++) {
         if (p < 0) { out[i] = lengthOf(intervals(i, id)) / 1000; continue; }
         const U = units[i], j = entry(i, p);
@@ -238,7 +272,7 @@
   }
   // A child's average share of its parent's time, over the units that have the parent; and in how many it occurs.
   function shareIn(id, parent) {
-    const c = msOf(id), p = parent === rootKey() ? null : msOf(parent);
+    const c = msOf(id), p = isRoot(parent) ? null : msOf(parent);
     let sum = 0, n = 0, seen = 0;
     for (let i = 0; i < X.NU; i++) {
       const total = p ? p[i] : units[i].L / 1000;
@@ -255,39 +289,60 @@
 
   function descendants(id, out = []) { for (const k of kidsOfNode(id)) { out.push(k); descendants(k, out); } return out; }
   function collapse(id) { for (const d of descendants(id)) L.shown.delete(d); }
-  // Opening a node shows its children that take a fair share of its time; with none, the largest.
+  // Opening a node shows its children that take a fair share of its time; with none, the largest. A merged node
+  // whose spans repeat names opens into those names first.
   function expand(id) {
+    if (L.groups.has(id)) byName(id);
     const kids = kidsOfNode(id).map((k) => [k, shareIn(k, id).share]).sort((x, y) => y[1] - x[1]);
     const big = kids.filter(([, s]) => s >= BIG).slice(0, MAX_OPEN);
     for (const [k] of big.length ? big : kids.slice(0, 1)) L.shown.add(k);
   }
-  function hide(id) { collapse(id); L.shown.delete(id); }
-  // Shown, with whatever lies between it and the node it was added under.
-  function add(ids, under) {
-    for (const id of ids) for (let k = id; k !== null && k !== under && k !== rootKey(); k = parentOf(k)) L.shown.add(k);
+  function byName(g) {
+    const d = L.groups.get(g), named = new Map();
+    for (const m of d.members) if (pathOf(m) >= 0) { const n = spanName(m); (named.get(n) || named.set(n, []).get(n)).push(m); }
+    if (named.size < 2 || ![...named.values()].some((list) => list.length > 1)) return;
+    for (const [n, list] of named) {
+      if (list.length < 2) continue;
+      const id = `g${L.next++}`;
+      L.groups.set(id, { label: n, members: list, tree: d.tree });
+      d.members = d.members.filter((m) => !list.includes(m)).concat(id);
+    }
+    relink();
   }
-  // Whether two shown nodes can be one: neither the root, nor inside the other.
-  const canMerge = (x, y) => exists(x) && exists(y) && x !== y && x !== rootKey() && y !== rootKey() && !inside(x, y) && !inside(y, x);
+  // Hidden: its parent still counts it; put at the top of the second tree, it leaves it.
+  function hide(id) { collapse(id); L.shown.delete(id); if (L.top2.delete(id)) relink(); }
+  // Shown, with whatever lies between it and the node it was added under; a copy added at the top of the second tree
+  // goes there, unless it is in it already.
+  function add(ids, under) {
+    for (const id of ids) if (under === ROOT2 && isCopy(id) && !in2.has(id.slice(1))) L.top2.add(id);
+    relink();
+    for (const id of ids) for (let k = id; k !== null && k !== under && !isRoot(k); k = parentOf(k)) L.shown.add(k);
+  }
+  const showUp = (id) => { for (let k = id; k !== null && !isRoot(k); k = parentOf(k)) L.shown.add(k); };
+  // Whether two shown nodes can be one: in one tree, neither its root, nor inside the other.
+  const canMerge = (x, y) => exists(x) && exists(y) && x !== y && !isRoot(x) && !isRoot(y) && treeOf(x) === treeOf(y) && !inside(x, y) && !inside(y, x);
   // Several nodes as one, under the nearest path holding them all; a node inside another one picked goes with it.
   // Members of one merged node stay in it, as the new one; else the new one takes the place of `at`, when given.
-  function merge(ids, name, at) {
-    const pick = [...new Set(ids)].filter((id) => exists(id) && id !== rootKey());
-    const members = pick.filter((x) => !pick.some((y) => y !== x && inside(x, y)));
-    if (members.length < 2) { add(members, null); return members[0] || null; }
+  // Made from a filter's every match, it keeps the filter, to take in what matches when the spans are read again.
+  function merge(ids, name, at, match) {
+    const pick = [...new Set(ids)].filter((id) => exists(id) && !isRoot(id));
+    const tree = pick.length ? treeOf(pick[0]) : 1;
+    const members = pick.filter((x) => treeOf(x) === tree && !pick.some((y) => y !== x && inside(x, y)));
+    if (members.length < 2) { add(members, members.length && tree === 2 ? ROOT2 : null); return members[0] || null; }
     const from = new Set(members.map((m) => memberOf.get(m) || null));
     const home = at ? memberOf.get(at) || null : from.size === 1 ? [...from][0] : null;
     for (const m of members) {
       const g = memberOf.get(m);
       if (g) L.groups.get(g).members = L.groups.get(g).members.filter((x) => x !== m);
+      L.top2.delete(m);
     }
     const id = `g${L.next++}`;
-    L.groups.set(id, { label: name || suggestName(members), members });
+    L.groups.set(id, Object.assign({ label: name || suggestName(members), members }, tree === 2 ? { tree } : {}, match ? { match } : {}));
     if (home) L.groups.get(home).members.push(id);
     relink();
     for (const g of [...from, home]) if (g && L.groups.has(g) && L.groups.get(g).members.length < 2) ungroup(g);
     for (const m of members) hide(m);
-    L.shown.add(id);
-    for (let k = parentOf(id); k !== null && k !== rootKey(); k = parentOf(k)) L.shown.add(k);
+    showUp(id);
     return id;
   }
   // A node into a merged one, which stays where it is, open or not as it was.
@@ -295,23 +350,59 @@
     if (!L.groups.has(into) || !canMerge(id, into)) return null;
     const was = memberOf.get(id), d = L.groups.get(into);
     if (was) L.groups.get(was).members = L.groups.get(was).members.filter((x) => x !== id);
+    L.top2.delete(id);
     const open = d.members.some((m) => L.shown.has(m));
     d.members.push(id);
     relink();
     if (was && L.groups.has(was) && L.groups.get(was).members.length < 2) ungroup(was);
     if (open) L.shown.add(id); else hide(id);
-    L.shown.add(into);
-    for (let k = parentOf(into); k !== null && k !== rootKey(); k = parentOf(k)) L.shown.add(k);
+    showUp(into);
     return into;
   }
+  // A member out of its merged node: back where it belongs, shown; the merged node goes when one member is left.
+  function leave(id) {
+    const g = memberOf.get(id);
+    if (!g) return;
+    const d = L.groups.get(g);
+    d.members = d.members.filter((m) => m !== id);
+    relink();
+    if (isCopy(id) && parentOf(id) === null) { L.top2.add(id); relink(); }
+    if (d.members.length < 2) ungroup(g);
+    showUp(id);
+  }
+  // A merged node split up: inside another merged node, its members join that one; else each goes where it belongs,
+  // a copy left nowhere to the top of the second tree.
   function ungroup(id) {
     const d = L.groups.get(id);
     if (!d) return;
-    const was = shownOf(id);
+    const was = shownOf(id), outer = memberOf.get(id);
     L.groups.delete(id);
     L.shown.delete(id);
+    if (outer) { const o = L.groups.get(outer); o.members = o.members.filter((m) => m !== id).concat(d.members); }
+    relink();
+    for (const m of d.members) if (isCopy(m) && parentOf(m) === null) L.top2.add(m);
     relink();
     if (was) for (const m of d.members) L.shown.add(m);
+  }
+  // A node of the first tree copied to the top of the second: a path as its copy, a merged node with its members.
+  function copyOver(id) {
+    const dup = (x) => {
+      if (isPath(x)) { if (L.names.has(x)) L.names.set(copyOf(x), L.names.get(x)); return copyOf(x); }
+      if (!L.groups.has(x)) return null;
+      const members = L.groups.get(x).members.map(dup).filter(Boolean);
+      if (members.length < 2) return members[0] || null;
+      const g = `g${L.next++}`;
+      L.groups.set(g, { label: L.groups.get(x).label, members, tree: 2 });
+      return g;
+    };
+    if (treeOf(id) !== 1 || isRoot(id)) return null;
+    const c = dup(id);
+    if (c === null) return null;
+    if (isCopy(c) && !in2.has(c.slice(1))) L.top2.add(c);
+    relink();
+    if (L.groups.has(c)) for (const m of L.groups.get(c).members) hide(m);
+    showUp(c);
+    return c;
   }
   // Any node can be renamed; a path or the rest given back its spans' name, or none, is called that again.
   function rename(id, name) {
@@ -331,16 +422,28 @@
 
   // What the + of a shown node offers: its children not shown, largest first; with a filter, anything not shown
   // inside it whose name has the text, with where it is.
+  // The second tree's + offers any span of the unit, as a copy: the unit's own children, or with a filter any span in
+  // it, and its own merged nodes not shown.
   function candidates(under, query) {
     const q = (query || '').trim().toLowerCase(), out = [];
+    const found = (s) => s && s.toLowerCase().includes(q);
+    const offer = (k, name, trail) => { if (!shownOf(k) && (!q || found(name) || found(spanName(k)))) out.push({ id: k, label: name, where: trail.join(' › '), group: L.groups.has(k) }); };
     const walk = (id, trail) => {
       for (const k of kidsOfNode(id)) {
-        const shown = shownOf(k), name = label(k), found = (s) => s && s.toLowerCase().includes(q);
-        if (!shown && (!q || found(name) || found(spanName(k)))) out.push({ id: k, label: name, where: trail.join(' › '), group: L.groups.has(k) });
-        if (q) walk(k, [...trail, name]);
+        offer(k, label(k), trail);
+        if (q) walk(k, [...trail, label(k)]);
       }
     };
-    walk(under, []);
+    const anywhere = (p, trail) => {
+      for (const c of paths[p].kids) {
+        offer(copyOf(paths[c].key), label(copyOf(paths[c].key)), trail);
+        if (q) anywhere(c, [...trail, paths[c].name]);
+      }
+    };
+    if (under === ROOT2) {
+      anywhere(rootPath, []);
+      for (const k of kidsOfNode(ROOT2)) if (L.groups.has(k)) offer(k, label(k), []);
+    } else walk(under, []);
     const rows = out.slice(0, 400).map((c) => Object.assign(c, shareIn(c.id, under)));
     return rows.sort((x, y) => y.share - x.share);
   }
@@ -380,33 +483,59 @@
     return out;
   }
 
+  // Length of what two lists of disjoint intervals in order have in common; what a list leaves of [0, total).
+  function overlap(a, b) {
+    let i = 0, j = 0, len = 0;
+    while (i < a.length && j < b.length) {
+      const lo = Math.max(a[i], b[j]), hi = Math.min(a[i + 1], b[j + 1]);
+      if (hi > lo) len += hi - lo;
+      if (a[i + 1] < b[j + 1]) i += 2; else j += 2;
+    }
+    return len;
+  }
+  function outside(taken, total) {
+    const out = [];
+    let at = 0;
+    for (let k = 0; k < taken.length; k += 2) { if (taken[k] > at) out.push(at, taken[k]); at = Math.max(at, taken[k + 1]); }
+    if (at < total) out.push(at, total);
+    return out;
+  }
+
   function apply() {
     const root = rootKey(), cols = [];
-    const walk = (id, depth) => {
+    const walk = (id, depth, tree) => {
       for (const k of kidsOfNode(id)) {
         if (!L.shown.has(k)) continue;
-        cols.push({ id: k, label: label(k), parent: id === root ? X.ROOT : id, depth, merged: L.groups.has(k) });
-        walk(k, depth + 1);
+        cols.push({ id: k, label: label(k), parent: id === root ? X.ROOT : id, depth, merged: L.groups.has(k), tree });
+        walk(k, depth + 1, tree);
       }
     };
-    walk(root, 1);
-    // Colours by the top-level column a column is under: the first FAMILIES in order, the rest in grey.
+    walk(root, 1, 1);
+    const N1 = cols.length;
+    walk(ROOT2, 1, 2);
+    // Colours by the top-level column a column is under: the first FAMILIES in order, the rest, and the second tree, in
+    // grey.
     let top = 0, family = 'other';
     for (const c of cols) {
-      if (c.depth === 1) family = c.id === REST || top >= FAMILIES ? 'other' : `f${top++}`;
+      if (c.depth === 1) family = c.id === REST || c.tree === 2 || top >= FAMILIES ? 'other' : `f${top++}`;
       c.family = family;
     }
     const NC = cols.length, at = new Map(cols.map((c, k) => [c.id, k]));
-    data.columns = cols.map(({ id, label: l, parent, merged }) => ({ id, label: l, parent, merged }));
-    data.partition = cols.map((c) => ({ id: c.id, label: c.label, family: c.family, from: [c.id] }))
+    data.columns = cols.map(({ id, label: l, parent, merged, tree }) => ({ id, label: l, parent, merged, second: tree === 2 }));
+    // The split of a unit's time is the first tree's; the second takes nothing from it.
+    data.partition = cols.slice(0, N1).map((c) => ({ id: c.id, label: c.label, family: c.family, from: [c.id] }))
       .concat([{ id: '~none', label: 'Under no violin', family: 'other', from: [] }]);
-    // Which column counts a moment covered by several: the deepest shown, then the deepest in the call tree.
-    const prio = cols.map((c, k) => k).sort((x, y) => cols[y].depth - cols[x].depth || callDepth(cols[y].id) - callDepth(cols[x].id));
+    // Which column counts a moment covered by several, in each tree: the deepest shown, then the deepest in the call
+    // tree.
+    const order = (a, b) => Array.from({ length: b - a }, (_, k) => a + k)
+      .sort((x, y) => cols[y].depth - cols[x].depth || callDepth(cols[y].id) - callDepth(cols[x].id));
+    const prio = order(0, N1), prio2 = order(N1, NC);
     X.countFor = new Map();
     const repeats = new Uint8Array(NC);
     for (let i = 0; i < X.NU; i++) {
       const u = data.units[i], total = units[i].L;
-      const s = new Float64Array(NC), fr = new Array(NC), c = new Int32Array(NC), p = new Float64Array(NC + 1), iv = new Array(NC);
+      const s = new Float64Array(NC), fr = new Array(NC), c = new Int32Array(NC), p = new Float64Array(N1 + 1), own = new Float64Array(NC);
+      const iv = new Array(NC), piece = new Array(NC);
       for (let k = 0; k < NC; k++) {
         iv[k] = intervals(i, cols[k].id);
         s[k] = lengthOf(iv[k]) / total;
@@ -414,18 +543,37 @@
         c[k] = count(i, cols[k].id);
         if (c[k] > 1) repeats[k] = 1;
       }
-      let taken = [], owned = 0;
-      for (const k of prio) {
-        const piece = subtract(iv[k], taken);
-        p[k] = lengthOf(piece) / total;
-        owned += p[k];
-        taken = mergeFlat(taken.concat(piece));
+      // Each column's own time in its tree: what deeper columns of that tree don't count.
+      const split = (list) => {
+        let taken = [];
+        for (const k of list) {
+          piece[k] = subtract(iv[k], taken);
+          own[k] = lengthOf(piece[k]) / total;
+          taken = mergeFlat(taken.concat(piece[k]));
+        }
+        return taken;
+      };
+      const none = outside(split(prio), total);
+      for (let k = 0; k < N1; k++) p[k] = own[k];
+      p[N1] = lengthOf(none) / total;
+      // Where the second tree's own times meet the first's (k = -1: under no violin there), for the what-if.
+      let x = null;
+      if (N1 < NC) {
+        split(prio2);
+        const cells = [];
+        for (let j = N1; j < NC; j++) {
+          if (!piece[j].length) continue;
+          for (let k = -1; k < N1; k++) {
+            const len = overlap(piece[j], k < 0 ? none : piece[k]);
+            if (len > 0) cells.push(k, j, len / total);
+          }
+        }
+        x = Float64Array.from(cells);
       }
-      p[NC] = Math.max(0, 1 - owned);
-      u.s = s; u.f = fr; u.c = c; u.p = p;
+      u.s = s; u.f = fr; u.c = c; u.p = p; u.o = own; u.x = x;
     }
     repeats.forEach((r, k) => { if (r) X.countFor.set(k, k); });
-    // Each path's column: its own, or that of the nearest merged node or path above it that is shown.
+    // Each path's column in the first tree: its own, or that of the nearest merged node or path above it that is shown.
     ownerOf = new Int32Array(paths.length).fill(-1);
     for (const P of paths) {
       let found = -1;
@@ -450,17 +598,18 @@
   const saved = () => window.EXPLORER_LAYOUT || null;
   const savedAt = () => (saved() ? saved().saved : null);
   function state() {
-    return { shown: [...L.shown], next: L.next, groups: [...L.groups].map(([id, d]) => [id, d.label, d.members]), names: [...L.names] };
+    return { shown: [...L.shown], next: L.next, names: [...L.names], top2: [...L.top2],
+      groups: [...L.groups].map(([id, d]) => [id, d.label, d.members, Object.assign({}, d.tree === 2 ? { tree: 2 } : {}, d.match ? { match: d.match } : {})]) };
   }
   // A layout from anywhere: what no longer exists is left out, and a merged node left with one member goes.
   function load(s) {
-    L.shown = new Set(); L.groups = new Map(); L.names = new Map(); L.next = 1;
+    L.shown = new Set(); L.groups = new Map(); L.names = new Map(); L.top2 = new Set(); L.next = 1;
     if (!s) return false;
-    const groups = new Map((s.groups || []).map(([id, name, members]) => [id, { label: name, members }]));
+    const groups = new Map((s.groups || []).map(([id, name, members, more]) => [id, Object.assign({ label: name, members }, more || {})]));
     for (let changed = true; changed;) {
       changed = false;
       for (const [id, d] of groups) {
-        const ok = d.members.filter((m) => isPath(m) || m === REST || groups.has(m));
+        const ok = d.members.filter((m) => isPath(m) || isCopy(m) || m === REST || groups.has(m));
         if (ok.length !== d.members.length) { d.members = ok; changed = true; }
         if (ok.length < 2) { groups.delete(id); changed = true; }
       }
@@ -469,9 +618,24 @@
     for (const id of groups.keys()) L.next = Math.max(L.next, Number(id.slice(1)) + 1 || 1);
     L.next = Math.max(L.next, s.next || 1);
     for (const [id, name] of s.names || []) if (spanName(id) && name) L.names.set(id, name);
+    for (const id of s.top2 || []) if (isCopy(id)) L.top2.add(id);
     relink();
     for (const id of s.shown || []) if (exists(id)) L.shown.add(id);
+    rematch();
     return L.shown.size > 0;
+  }
+  // Merged nodes made from a filter's every match take in what matches it now and is in no other: spans read again
+  // may have it in new places.
+  function rematch() {
+    for (const [id, d] of L.groups) {
+      if (!d.match) continue;
+      const under = d.match.under === ROOT2 || exists(d.match.under) ? d.match.under : d.tree === 2 ? ROOT2 : rootKey();
+      const more = candidates(under, d.match.text).map((c) => c.id)
+        .filter((m) => pathOf(m) >= 0 && !memberOf.has(m) && !d.members.some((x) => inside(m, x) || inside(x, m)));
+      if (!more.length) continue;
+      d.members.push(...more.filter((m) => !more.some((y) => y !== m && inside(m, y))));
+      relink();
+    }
   }
   function fresh() { load(null); relink(); expand(rootKey()); }
   // Back to where everyone starts.
@@ -544,12 +708,18 @@
     get version() { return version; },
     progress: () => [X.chunksLoaded(), X.chunkCount],
     rootKey: () => (ready ? rootKey() : null),
-    label, spanName, inside, parentOf, canMerge,
+    label, spanName, inside, parentOf, canMerge, treeOf,
+    // How many spans a node has: one path, or a merged node's paths.
+    size: (id) => { const n = (x) => (L.groups.has(x) ? L.groups.get(x).members.reduce((t, m) => t + n(m), 0) : 1); return n(id); },
+    // Whether the second tree has anything in it.
+    get second() { return kidsOfNode(ROOT2).length > 0; },
     candidates: (under, query) => candidates(under === X.ROOT ? rootKey() : under, query),
     kids: (id) => kidsOfNode(id === X.ROOT ? rootKey() : id),
     shown: (id) => shownOf(id === X.ROOT ? rootKey() : id),
     isMerged: (id) => L.groups.has(id),
     members: (id) => (L.groups.has(id) ? L.groups.get(id).members.slice() : []),
+    // A node's time in every unit, in ms.
+    msOf,
     // Children shown, children there are, and the ones not shown.
     open: (id) => kidsOfNode(id === X.ROOT ? rootKey() : id).some((k) => L.shown.has(k)),
     hidden: (id) => kidsOfNode(id === X.ROOT ? rootKey() : id).filter((k) => !L.shown.has(k)).length,
@@ -559,6 +729,8 @@
     add: change((ids, under) => add(ids, under === X.ROOT ? rootKey() : under)),
     merge: change(merge),
     join: change(join),
+    leave: change(leave),
+    copyOver: change(copyOver),
     ungroup: change(ungroup),
     rename: change(rename),
     suggestName: (ids) => suggestName(ids),
@@ -567,7 +739,7 @@
     state, link,
     get saved() { return saved(); },
     savedAs(doc) { window.EXPLORER_LAYOUT = doc; save(); },
-    // The column a span counts toward, by its unit and row.
+    // The column a span counts toward in the first tree, by its unit and row.
     partOfRow: (i, r) => (ready && units[i] ? ownerOf[units[i].rowPath[r]] : -1),
     partOfPath: (p) => (ready ? ownerOf[p] : -1),
     // Per path in a unit: the path, how many spans, their summed and self time in µs, for the spans table.
