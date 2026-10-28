@@ -44,6 +44,14 @@
       if (e.target.closest('canvas, button, input, label')) return;
       if (S.name !== null) pick(null);
     });
+    // Typing keeps the rows whose name has it; Escape clears it first.
+    root.addEventListener('input', (e) => { if (e.target.matches('[data-find]')) { S.spansQuery = e.target.value; render(); } });
+    root.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !e.target.matches('[data-find]') || !e.target.value) return;
+      S.spansQuery = '';
+      render();
+      e.stopPropagation();
+    });
   }
 
   // A name picked, or let go; its callers and callees go with it.
@@ -186,40 +194,46 @@
     };
   };
 
-  // The tree's rows in order, open nodes' children after them, each with which of its ancestors were last.
-  function treeRows(tree, one) {
+  // The tree's rows in order, open nodes' children after them, each with which of its ancestors were last. Found: the
+  // paths whose name has q and those above them, all open; the ones above only to show where they are.
+  function treeRows(tree, one, q) {
     const { nodes, roots } = tree, cmp = compare(), out = [];
+    const hit = (k) => nodes[k].name.toLowerCase().includes(q);
+    const below = q ? new Uint8Array(nodes.length) : null;
+    const mark = (k) => { let any = false; for (const c of nodes[k].kids.values()) if (mark(c) || hit(c)) any = true; below[k] = any ? 1 : 0; return any; };
+    if (q) [0, ...roots].forEach(mark);
     const rowOf = (k) => {
       const nd = nodes[k];
       return { k, name: nd.name, part: nd.part, async: nd.async, path: nd.path, kids: nd.kids.size,
+        open: q ? below[k] === 1 : isOpen(nd), context: q ? !hit(k) : false,
         self: Math.max(0, nd.dur - nd.inner), total: nd.dur, n: nd.n,
         one: one && one.dur[k] > 0 ? { self: Math.max(0, one.dur[k] - one.inner[k]), total: one.dur[k] } : null };
     };
     const visit = (list, lasts) => {
-      const rs = list.map(rowOf).sort(cmp);
+      const rs = (q ? list.filter((k) => below[k] || hit(k)) : list).map(rowOf).sort(cmp);
       rs.forEach((r, j) => {
         r.lasts = [...lasts, j === rs.length - 1];
         out.push(r);
-        if (r.kids && isOpen(nodes[r.k])) visit([...nodes[r.k].kids.values()], r.lasts);
+        if (r.kids && r.open) visit([...nodes[r.k].kids.values()], r.lasts);
       });
     };
     visit([...nodes[0].kids.values(), ...roots.flatMap((q) => [...nodes[q].kids.values()])], []);
     return out;
   }
   // The tree's lines beside a row: through for each ancestor with more below it, and into the row itself; then the
-  // arrow that opens or shuts it.
-  function guide(r, T) {
-    const d = r.lasts.length - 1, w = d * INDENT + 14, h = 30, m = h / 2, open = r.kids && isOpen(treeCache.nodes[r.k]);
+  // arrow that opens or shuts it, but while finding, when the tree is open just to the paths found.
+  function guide(r, T, finding) {
+    const d = r.lasts.length - 1, w = d * INDENT + 14, h = 30, m = h / 2, open = r.kids && r.open;
     let p = '';
     for (let l = 1; l < d; l++) if (!r.lasts[l]) p += `M${(l - 1) * INDENT + 7.5} 0V${h}`;
     if (d > 0) {
       const x = (d - 1) * INDENT + 7.5;
       p += `M${x} 0V${r.lasts[d] ? m : h}M${x} ${m}H${x + 6}`;
     }
-    const arrow = !r.kids ? '' : open ? `M${d * INDENT + 3} ${m - 2}l4 4l4 -4` : `M${d * INDENT + 5} ${m - 4}l4 4l-4 4`;
+    const arrow = !r.kids || finding ? '' : open ? `M${d * INDENT + 3} ${m - 2}l4 4l4 -4` : `M${d * INDENT + 5} ${m - 4}l4 4l-4 4`;
     return `<svg class="guide" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${p}" stroke="${T.line}" fill="none"/>`
       + (arrow ? `<path d="${arrow}" fill="none" stroke="${T.muted}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` : '') + '</svg>'
-      + (r.kids ? `<button type="button" class="twist" data-twist="${esc(r.path)}" style="left:${d * INDENT}px" aria-label="${open ? 'Shut' : 'Open'}" aria-expanded="${open}"></button>` : '');
+      + (r.kids && !finding ? `<button type="button" class="twist" data-twist="${esc(r.path)}" style="left:${d * INDENT}px" aria-label="${open ? 'Shut' : 'Open'}" aria-expanded="${open}"></button>` : '');
   }
 
   function render() {
@@ -232,20 +246,20 @@
       return;
     }
     if (S.spansMode === 'callers') { renderCallers(); return; }
-    const tree = S.tableTree;
+    const tree = S.tableTree, q = (S.spansQuery || '').trim().toLowerCase();
     // Narrow, the part's name goes: its colour stays beside the span's.
     const compact = root.clientWidth < (S.sel !== null ? 1260 : 980);
-    const key = `${tree}|${X.viewKey()}|${S.sel}|${S.sort.key}|${S.sort.dir}|${S.name}|${S.namePath}|${X.T.scheme}|${compact}|${root.clientWidth}|${X.layout.version}|${X.chunksLoaded()}|${tree ? `${S.treeLevel}|${[...S.treeOpen].join()}` : ''}`;
+    const key = `${tree}|${X.viewKey()}|${S.sel}|${S.sort.key}|${S.sort.dir}|${S.name}|${S.namePath}|${X.T.scheme}|${compact}|${root.clientWidth}|${X.layout.version}|${X.chunksLoaded()}|${tree ? `${S.treeLevel}|${[...S.treeOpen].join()}` : ''}|${q}`;
     if (key === lastKey) return;
     lastKey = key;
     const scrollTop = root.scrollTop;
     const one = S.sel !== null, units = X.allInView(), T = X.T;
     partial = false;
 
-    let rows, note = '';
+    let rows, note = '', found = 0;
     if (tree) {
       const t = callTree(units);
-      rows = treeRows(t, one ? ownTimes(t, S.sel) : null);
+      rows = treeRows(t, one ? ownTimes(t, S.sel) : null, q);
       if (t.loaded < t.all) { partial = true; note = `spans of ${X.fmtInt(t.loaded)} of ${X.nUnits(t.all)} in so far`; }
     } else {
       rows = aggregate(units, `${X.viewKey()}|${X.layout.version}`).slice();
@@ -268,6 +282,7 @@
       }
       if (ln.loaded < ln.all) { partial = true; note = `callers and callees from ${X.fmtInt(ln.loaded)} of ${X.nUnits(ln.all)} so far`; }
       rows.sort(compare());
+      if (q) { found = rows.length; rows = rows.filter((r) => r.name.toLowerCase().includes(q)); }
     }
 
     let all = 0;
@@ -292,8 +307,11 @@
       ? `<i class="async" style="border-color:${r.part >= 0 ? T.cols[r.part] : T.line}" title="Asynchronous: on its own track, beside its parent"></i>`
       : `<i style="background:${r.part >= 0 ? T.cols[r.part] : T.unowned}"></i>`);
     // The selected unit's own name and time are in its chip already.
+    const matched = q ? rows.filter((r) => !r.context).length : 0;
     const scope = `<b>${esc(X.nUnits(units.length))}</b><span>${X.fmtMs(all)} in all</span>`
-      + (note ? `<span class="note">${note}</span>` : '');
+      + (note ? `<span class="note">${note}</span>` : '')
+      + (q ? `<span class="found">${tree ? `${X.fmtInt(matched)} ${matched === 1 ? 'path' : 'paths'}` : `${X.fmtInt(matched)} of ${X.fmtInt(found)} names`}</span>` : '')
+      + `<input class="spans-find" data-find type="search" autocomplete="off" spellcheck="false" placeholder="Find a span" aria-label="Find a span" value="${esc(S.spansQuery || '')}">`;
     // In the tree, the waterfall's buttons beside "Span": every node shut, a level less, a level more, every node open.
     const fold = (to, label, d) => `<button type="button" data-level="${to}" title="${label}" aria-label="${label}"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
     const folds = '<span class="tl-folds" role="group" aria-label="Open or shut the tree">'
@@ -306,15 +324,19 @@
       + (one ? `${th('oneSelf', `${esc(u1.l)} self`, 'num mine')}${th('oneTotal', `${esc(u1.l)} total`, 'num mine')}` : '');
     const table = `<table class="spans-table${compact ? ' compact' : ''}${tree ? ' tree' : ''}"><thead><tr>${head}</tr></thead><tbody>`
       // The row picked strongly; in the tree, the name's other paths lightly.
-      + rows.map((r) => `<tr data-name="${esc(r.name)}"${tree ? ` data-path="${esc(r.path)}"` : ''}${S.name !== r.name ? ''
+      + rows.map((r) => `<tr data-name="${esc(r.name)}"${tree ? ` data-path="${esc(r.path)}"` : ''}${S.name !== r.name ? (r.context ? ' class="context"' : '')
         : !tree || !S.namePath || S.namePath === r.path ? ' class="here"' : ' class="on"'}>`
-        + `<td class="name">${tree ? `<div class="cell">${guide(r, T)}` : ''}${swatch(r)}<span class="nm"${r.part >= 0 ? ` title="${esc(data.columns[r.part].label)}"` : ''}>${esc(r.name)}</span>${glyphs(r)}${tree ? '</div>' : ''}</td>`
+        + `<td class="name">${tree ? `<div class="cell">${guide(r, T, !!q)}` : ''}${swatch(r)}<span class="nm"${r.part >= 0 ? ` title="${esc(data.columns[r.part].label)}"` : ''}>${esc(r.name)}</span>${glyphs(r)}${tree ? '</div>' : ''}</td>`
         + `<td class="part"${(r.partList || []).length > 1 ? ` title="${esc(r.partList.map((p) => data.columns[p].label).join(', '))}"` : ''}>${esc((r.partList || (r.part >= 0 ? [r.part] : [])).map((p) => data.columns[p].label).join(', '))}</td>`
         + `${time(r.self, maxSelf)}${time(r.total, maxTotal)}<td class="num count">${X.fmtInt(r.n)}</td>`
         + (tree ? '' : `<td class="num count">${X.fmtInt(r.callers)}</td><td class="num count">${X.fmtInt(r.callees)}</td>`)
         + `${one ? oneTime(r.one && r.one.self, maxOneSelf) + oneTime(r.one && r.one.total, maxOneTotal) : ''}</tr>`).join('')
       + '</tbody></table>';
-    body.innerHTML = `<div class="spans-wrap"><div class="spans-scope">${scope}</div>${table}</div>`;
+    // Typing in the filter goes on in the new one.
+    const typing = document.activeElement && document.activeElement.matches('[data-find]') ? document.activeElement.selectionStart : null;
+    body.innerHTML = `<div class="spans-wrap"><div class="spans-scope">${scope}</div>${table}`
+      + (q && !rows.length ? `<p class="spans-none">No span is called anything with “${esc(S.spansQuery.trim())}” in it.</p>` : '') + '</div>';
+    if (typing !== null) { const f = body.querySelector('[data-find]'); f.focus(); f.setSelectionRange(typing, typing); }
     root.scrollTop = scrollTop;
   }
 

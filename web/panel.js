@@ -192,10 +192,12 @@
     const name = (m) => `<span class="nm">${esc(X.layout.spanName(m) || X.layout.label(m))}${X.layout.under(m) ? `<small>in ${esc(X.layout.under(m))}</small>` : ''}</span>`;
     let list = '';
     if (madeOpen) {
+      // Quiet buttons that show with the row under the pointer: take a span out, or count an excluded one again.
+      const icon = (d) => `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
       const rows = members.map((m) => [m, share(m)]).sort((a, b) => b[1] - a[1]).map(([m, v]) => `<div class="member">${name(m)}<span class="pct">${X.fmtPct(v)}</span>`
-        + (merged ? `<button type="button" class="chip-x" data-leave="${esc(m)}" title="Take it out of ${esc(X.layout.label(id))}" aria-label="Take it out">×</button>` : '<span></span>') + '</div>');
+        + (merged ? `<button type="button" class="quiet-btn small" data-leave="${esc(m)}" title="Take it out of ${esc(X.layout.label(id))}" aria-label="Take it out">${icon('M4 4l6 6M10 4l-6 6')}</button>` : '<span></span>') + '</div>');
       const left = out.map((m) => `<div class="member out">${name(m)}<span class="tag">excluded</span>`
-        + `<button type="button" class="chip-x" data-unexclude="${esc(m)}" title="Count its time in ${esc(X.layout.label(id))} again" aria-label="Include it again">↩</button></div>`);
+        + `<button type="button" class="quiet-btn small" data-unexclude="${esc(m)}" title="Count its time in ${esc(X.layout.label(id))} again" aria-label="Include it again">${icon('M5.5 3 3 5.5 5.5 8M3 5.5h5a3 3 0 0 1 0 6H6.5')}</button></div>`);
       list = `<div class="members">${rows.join('')}${left.join('')}</div>`;
     }
     const chevron = '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l3.5 3L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';

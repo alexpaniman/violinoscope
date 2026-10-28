@@ -216,6 +216,15 @@ async def main():
                 await page.wait_for_timeout(200)
             members = await page.query_selector_all('#card-pop [data-leave]')
             expect(len(members) >= 2, 'the card of a merged violin lists no members')
+            # A row's button shows under the pointer, whole, inside the card.
+            await page.hover('#card-pop .member')
+            await page.wait_for_timeout(100)
+            fits = await page.evaluate("""(() => {
+              const el = document.querySelector('#card-pop .member [data-leave]'), b = el.getBoundingClientRect();
+              const c = document.querySelector('#card-pop .members').getBoundingClientRect();
+              return getComputedStyle(el).opacity === '1' && b.left >= c.left && b.right <= c.right + 0.5 && b.width >= 20;
+            })()""")
+            expect(fits, "a member's button is not whole inside the card under the pointer")
             await shot(page, 'card')
             await page.click('#card-pop [data-rename]')
             await page.fill('#card-pop [data-rename]', 'Named in its card')
@@ -456,6 +465,35 @@ async def main():
         if row is None:
             errors.append('no rows in the spans table')
         else:
+            # Typing keeps the names that have it, in the list and in the tree, where the paths to them show too; the
+            # box keeps its focus as the rows change.
+            name = await row.get_attribute('data-name')
+            part = name[1:4].lower()
+            await page.click('#spans-body [data-find]')
+            await page.keyboard.type(part)
+            await page.wait_for_timeout(200)
+            found = await page.evaluate(f"""(() => {{
+              const names = [...document.querySelectorAll('#spans-body tr[data-name]')].map((tr) => tr.dataset.name);
+              return {{ n: names.length, all: names.every((n) => n.toLowerCase().includes({part!r})),
+                focus: document.activeElement.matches('[data-find]') }};
+            }})()""")
+            expect(found['n'] > 0 and found['all'] and found['focus'], f'finding "{part}" in the spans list did not work: {found}')
+            await page.evaluate("document.querySelector('[data-tree=true]').click()")
+            await page.wait_for_timeout(300)
+            tree = await page.evaluate(f"""(() => {{
+              const rows = [...document.querySelectorAll('#spans-body tr[data-name]')];
+              const hits = rows.filter((tr) => !tr.classList.contains('context'));
+              return {{ n: rows.length, hits: hits.length, all: hits.every((tr) => tr.dataset.name.toLowerCase().includes({part!r})) }};
+            }})()""")
+            expect(tree['hits'] > 0 and tree['all'], f'finding "{part}" in the spans tree did not work: {tree}')
+            await shot(page, 'spans-find')
+            await page.focus('#spans-body [data-find]')
+            await page.keyboard.press('Escape')
+            await page.wait_for_timeout(200)
+            expect(await page.evaluate("TX.S.spansQuery") == '', 'Escape did not clear the spans filter')
+            await page.evaluate("document.querySelector('[data-tree=false]').click()")
+            await page.wait_for_timeout(200)
+            row = await page.query_selector('#spans-body tr[data-name]')
             await row.click()
             await page.evaluate("TX.go('profile', 'callers')")
             await page.wait_for_timeout(400)

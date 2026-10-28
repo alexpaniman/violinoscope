@@ -85,7 +85,7 @@
     tab: 'violins', tl: 'chart', prof: 'table', view: 'violins', mode: 'share', linear: false, flame: 'time',
     side: {}, range: null, factors: new Map(),
     sel: null, card: null, hover: null, hoverCol: null, search: '', matches: null,
-    sort: { key: 'self', dir: -1 }, tlSort: { key: 'ms', dir: -1 }, name: null, namePath: null, spansMode: 'table', tableTree: false, treeOpen: new Map(), treeLevel: 2,
+    sort: { key: 'self', dir: -1 }, tlSort: { key: 'ms', dir: -1 }, name: null, namePath: null, spansMode: 'table', tableTree: false, spansQuery: '', treeOpen: new Map(), treeLevel: 2,
   };
   const slot = new Map();
   {
