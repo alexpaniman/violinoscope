@@ -9,6 +9,8 @@ node tests/layout_check.js
 
 The model checks include interval conservation, transfers, nested merges, exclusions, inherited async flows, exact undo and 5,000 random edits.
 
+They also exercise a 75-part projection across 1,500 units. Run `CHECK_PERFORMANCE=1 node tests/layout_check.js` to enforce a three-second budget for adding and first opening it on a development machine.
+
 For browser checks, install Playwright and Chromium in your Python environment:
 
 ```sh

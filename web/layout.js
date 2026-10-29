@@ -254,7 +254,7 @@
   function relink() {
     parentCache = new Map();
     const key = JSON.stringify([[...L.groups].map(([g, d]) => [g, d.members, d.tree, d.parent]), [...L.parents], [...L.except], [...L.top2]]);
-    if (key !== definitionKey) { definitionKey = key; definitionVersion++; msCache.clear(); nodeCache.clear(); }
+    if (key !== definitionKey) { definitionKey = key; definitionVersion++; coverageCache.clear(); msCache.clear(); nodeCache.clear(); }
     // Where a span shows: in the deepest merged node it is in.
     memberOf = new Map();
     const level = (g) => { let n = 0; for (let q = L.groups.get(g).parent; q && L.groups.has(q); q = L.groups.get(q).parent) n++; return n; };
@@ -323,17 +323,24 @@
     for (const m of L.groups.get(id)?.members || []) iv = unite(iv, raw(i, m));
     return iv;
   }
+  // Ownership and exclusions depend on the layout, not the compilation. Resolve them once; a large merged
+  // projection must not walk all its members' ancestry again for every unit when it is added or opened.
+  const coverageCache = new Map();
+  function coverageOf(id) {
+    if (coverageCache.has(id)) return coverageCache.get(id);
+    const d = {members: L.groups.get(id)?.members, transferred: [], excluded: []};
+    if (pathOf(id) >= 0 && !independentOf(id)) d.transferred = transfers.filter((m) =>
+      m !== id && treeOf(m) === treeOf(id) && inside(m, id) && !inside(id, m) && !structuralInside(m, id) && !independentOf(m));
+    for (let p = id; p !== null; p = callParent(p)) d.excluded.push(...(L.except.get(p) || []));
+    coverageCache.set(id, d);
+    return d;
+  }
   function intervals(i, id) {
-    let iv = L.groups.has(id) ? L.groups.get(id).members.reduce((a, m) => unite(a, intervals(i, m)), []) : raw(i, id);
+    const d = coverageOf(id);
+    let iv = d.members ? d.members.reduce((a, m) => unite(a, intervals(i, m)), []) : raw(i, id);
     // A path loses only the effective coverage extracted outside its structural ancestry.
-    if (pathOf(id) >= 0 && !independentOf(id)) for (const m of transfers) {
-      if (m !== id && treeOf(m) === treeOf(id) && inside(m, id) && !inside(id, m) && !structuralInside(m, id) && !independentOf(m)) {
-        iv = subtract(iv, intervals(i, m));
-      }
-    }
-    for (let p = id; p !== null; p = callParent(p)) {
-      for (const m of L.except.get(p) || []) iv = subtract(iv, raw(i, m));
-    }
+    for (const m of d.transferred) iv = subtract(iv, intervals(i, m));
+    for (const m of d.excluded) iv = subtract(iv, raw(i, m));
     return iv;
   }
   const covered = raw;

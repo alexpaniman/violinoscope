@@ -9,9 +9,9 @@ function fixture(extra = {}) {
   const names = extra.names || ['Compile', 'Prepare', 'Annotate IO', 'Optimize', 'Annotate KQL', 'Other', 'Wait', 'Async', 'Async child'];
   const rows = extra.rows || [0,-1,0,100000,1, 1,0,0,60000,0, 2,1,10000,10000,0, 5,1,25000,5000,0,
     3,0,60000,40000,0, 4,4,65000,5000,0, 6,4,80000,20000,0, 7,0,20000,80000,1, 8,7,30000,10000,0];
-  const events = new Map(), data = {units:[{ms:100,k:0}]};
-  const X = {data, meta:{unit:'Compile',chunk:100}, NU:1, GRID:1000, ROOT:'~root', ROOT2:'~two', checkLayout:true,
-    chunk:()=>({names,trees:[{rows,links:extra.links || []}]}), on:(n,f)=>events.set(n,f), emit:()=>{}, render:()=>{}, tokens:()=>{},
+  const count = extra.count || 1, events = new Map(), data = {units:Array.from({length:count},()=>({ms:100,k:0}))};
+  const X = {data, meta:{unit:'Compile',chunk:count}, NU:count, GRID:1000, ROOT:'~root', ROOT2:'~two', checkLayout:true,
+    chunk:()=>({names,trees:Array.from({length:count},()=>({rows,links:extra.links || []}))}), on:(n,f)=>events.set(n,f), emit:()=>{}, render:()=>{}, tokens:()=>{},
     reindex:()=>{data.columnIndex = new Map(data.columns.map((c,k)=>[c.id,k]));}};
   const context = {window:{TX:X},localStorage:{getItem:()=>null,setItem:()=>{}}};
   vm.runInNewContext(fs.readFileSync(`${__dirname}/../web/flows.js`, 'utf8'), context);
@@ -58,6 +58,30 @@ test('async work keeps its duration and never takes awaited time',()=>{
 test('excluded paths return outside their excluding parent',()=>{
  const {T,a,x,root}=fixture(); T.add([x]); T.exclude(a,[x]); assert.equal(T.parentOf(x),root);
  assert.ok(!T.candidates(a,'').some((r)=>r.id===x)); T.add([x]); near(T.msOf(a)[0],50); near(T.msOf(x)[0],10); T.check();
+});
+test('large projections preserve coverage through expansion, exclusions and undo',()=>{
+ const names=['Compile'], rows=[0,-1,0,100000,0];
+ for(let k=1;k<=8;k++){names.push(`Phase ${k}`);rows.push(k,k-1,0,75000,0);}
+ for(let k=0;k<75;k++) {
+  const parent=names.length;names.push(`Branch ${k}`,'Compute properties');
+  rows.push(parent,8,k*1000,1000,0,parent+1,parent,k*1000+100,200,0);
+ }
+ const {X,T}=fixture({names,rows,count:1500}), before=X.data.units.map(u=>Array.from(u.p));
+ const ids=T.candidates(X.ROOT2,'Compute properties').map(c=>c.id);assert.equal(ids.length,75);
+ let start=performance.now();const group=T.merge(ids,'Properties');const addMs=performance.now()-start;
+ assert.ok(T.msOf(group).every(v=>Math.abs(v-15)<1e-8));
+ start=performance.now();T.expand(group);const expandMs=performance.now()-start;
+ assert.ok(T.msOf(group).every(v=>Math.abs(v-15)<1e-8));
+ T.add(ids,group);assert.equal(X.data.columns.filter(c=>c.second).length,76);
+ T.collapse(group);T.expand(group);
+ T.exclude(group,[ids[0]]);assert.ok(T.msOf(group).every(v=>Math.abs(v-14.8)<1e-8));
+ T.undo();assert.ok(T.msOf(group).every(v=>Math.abs(v-15)<1e-8));
+ assert.deepEqual(X.data.units.map(u=>Array.from(u.p)),before);T.check();
+ console.log(`75 parts / 1500 units: add ${Math.round(addMs)} ms, expand ${Math.round(expandMs)} ms`);
+ if(process.env.CHECK_PERFORMANCE) {
+  assert.ok(addMs<3000,`Adding a projection blocked for ${Math.round(addMs)} ms`);
+  assert.ok(expandMs<3000,`Opening a projection blocked for ${Math.round(expandMs)} ms`);
+ }
 });
 test('random edit sequences preserve invariants and undo each change',()=>{
  for(let seed=1;seed<=Number(process.env.FUZZ_SEEDS || 50);seed++) {
