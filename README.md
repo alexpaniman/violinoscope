@@ -10,7 +10,7 @@ Open `report.html` in a browser. It contains everything and works offline. Pytho
 
 Inputs can be OTLP JSON, OpenTelemetry Collector JSON lines, Jaeger JSON, individual protobuf-JSON spans, or gzip versions of these. Files, directories and quoted globs work. Dataset names come from `dataset.name`, then `service.name`, then filenames; `baseline=before.jsonl` supplies an explicit name. Omit `--unit` when trace roots all have the same name.
 
-The layout icon between the picture and download buttons saves, switches, imports and exports named layouts. Edits autosave in your browser; export JSON to share or keep them. Drop a layout file onto the page, or use it when building:
+The layout icon between the picture and download buttons manages named layouts. Edits autosave; copy/paste JSON to share them, or Shift-click the import/export icons to use files. Drop a layout file onto the page, or use it when building:
 
 ```sh
 python3 violinoscope.py spans.jsonl --unit "Handle request" --layout overview.layout.json

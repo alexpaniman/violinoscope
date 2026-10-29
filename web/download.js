@@ -13,7 +13,8 @@
   function init() {
     btn = $('download');
     btn.addEventListener('click', download);
-    $('picture').addEventListener('click', () => { picture().catch(() => X.toast('Couldn’t draw the picture')); });
+    $('picture').title = 'Copy picture · Shift-click to download';
+    $('picture').addEventListener('click', e => { picture(e.shiftKey).catch(() => X.toast('Couldn’t draw the picture')); });
     const ready = () => { btn.disabled = !X.layout.ready; $('picture').disabled = !X.layout.ready; };
     X.on('layout', ready);
     ready();
@@ -47,7 +48,7 @@
   // The figure as it shows, from the plot's top to the strips' bottom and as wide as its columns, at three times the size;
   // above it the title and which groups each half and mark is. Its layers drawn in order: shapes, dots, the tree and
   // labels, the strips.
-  async function picture() {
+  async function picture(downloadFile = false) {
     const G = X.violins.G;
     if (!G || !X.layout.ready) return;
     const view = $('violins'), box = view.getBoundingClientRect(), T = X.T, k = 3, HEAD = 38;
@@ -70,10 +71,24 @@
       const r = el.getBoundingClientRect();
       ctx.drawImage(images[j] || el, r.left - box.left, r.top - box.top - top + HEAD, r.width, r.height);
     });
+    // Factors are HTML controls above the SVG layers. Draw their visible labels into the exported image too.
+    for (const pill of $('v-factors').querySelectorAll('[data-pill]')) {
+      const r = pill.getBoundingClientRect(), style = getComputedStyle(pill);
+      const x = r.left-box.left, y = r.top-box.top-top+HEAD;
+      ctx.fillStyle=style.backgroundColor;ctx.strokeStyle=style.borderColor;ctx.lineWidth=1;
+      ctx.beginPath();ctx.roundRect(x,y,r.width,r.height,Math.min(r.height/2,8));ctx.fill();ctx.stroke();
+      ctx.fillStyle=style.color;ctx.font=style.font || `500 12px ${X.SANS}`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(pill.textContent,x+r.width/2,y+r.height/2);
+    }
     ctx.restore();
     key(ctx, T, W);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-    if (blob) await save(blob, fileName('png'));
+    if (blob) {
+      if (!downloadFile && navigator.clipboard?.write && window.ClipboardItem) try {
+        await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);X.toast('Picture copied');return;
+      } catch (_) { /* File URLs and browser permissions may prevent clipboard access. */ }
+      await save(blob, fileName('png'));
+    }
   }
   function svgImage(el) {
     const r = el.getBoundingClientRect(), copy = el.cloneNode(true);

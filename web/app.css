@@ -557,13 +557,17 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .move-menu .add-head [data-move-cancel] { margin-left: auto; }
 
 .layout-menu { position: absolute; z-index: 12; top: 54px; right: 42px; width: min(290px, calc(100vw - 32px)); box-sizing: border-box; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); }
-.layout-head, .layout-actions, #layout-save-form { display: flex; align-items: center; gap: 12px; }
+.layout-head { display: flex; align-items: center; gap: 6px; }
 .layout-head b { font-size: 12px; font-weight: 500; margin-right: auto; }
 .layout-list { max-height: 220px; overflow: auto; margin: 8px -4px; }
-.layout-choice { display: flex; justify-content: space-between; width: 100%; padding: 7px; text-align: left; border: 0; border-radius: 5px; background: none; }
-.layout-choice:hover, .layout-choice.on { background: var(--raised); }
+.layout-row { display: grid; grid-template-columns: 14px minmax(0,1fr) 22px; align-items: center; gap: 5px; border-radius: 4px; padding: 1px 4px; }
+.layout-row:hover, .layout-row.on { background: var(--raised); }
+.layout-choice { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; padding: 7px 0; text-align: left; border: 0; background: none; font: inherit; font-size: 12px; }
+.layout-grip { cursor: grab; color: var(--muted); opacity: 0; }
+.layout-row .quiet-btn { opacity: 0; }
+.layout-row:hover .quiet-btn, .layout-row:focus-within .quiet-btn, .layout-row:hover .layout-grip { opacity: 1; }
+.layout-name { min-width: 0; width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 5px 0; font: inherit; font-size: 12px; }
+@media(hover:none) { .layout-row .quiet-btn, .layout-grip { opacity: 1; } }
 .layout-choice span, .layout-note { color: var(--muted); font-size: 11px; }
-#layout-name { width: 0; flex: 1; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; }
-.layout-actions { margin-top: 12px; }
 #layouts { position: relative; }
 #layouts.modified::after { content: ''; position: absolute; width: 3px; height: 3px; border-radius: 50%; background: var(--muted); right: 1px; top: 1px; }
