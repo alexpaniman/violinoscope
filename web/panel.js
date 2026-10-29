@@ -30,6 +30,16 @@
       if (level) { X.layout.unskip(level.dataset.unskip); return; }
       const back = e.target.closest('[data-unexclude]');
       if (back) { X.layout.unexclude(S.card, back.dataset.unexclude); return; }
+      const replace=e.target.closest('[data-replace-input]');
+      if(replace){X.edit.openInput(replace.dataset.owner,Number(replace.dataset.replaceInput),replace.getBoundingClientRect());return;}
+      const remove=e.target.closest('[data-remove-input]');
+      if(remove){X.layout.removeInput(remove.dataset.owner,Number(remove.dataset.removeInput));return;}
+      const retained=e.target.closest('[data-restore-cut]');
+      if(retained){X.layout.restoreRetained(S.card,Number(retained.dataset.restoreCut));return;}
+      const input=e.target.closest('[data-input-add]');
+      if(input){X.edit.openInput(S.card,X.layout.inputs(S.card).length,input.getBoundingClientRect());return;}
+      const cut=e.target.closest('[data-input-cut]');
+      if(cut){X.layout.restoreInputCut(cut.dataset.owner,Number(cut.dataset.inputIndex),Number(cut.dataset.inputCut));return;}
       if (e.target.closest('[data-made]')) { madeOpen = !madeOpen; renderCard(); return; }
       const more = e.target.closest('[data-made-add]');
       if (more) { X.edit.openAdd(S.card, more.getBoundingClientRect(), 'include'); return; }
@@ -48,7 +58,6 @@
       else if (act.dataset.act === 'spans') { const name = X.layout.spanNames(id)[0]; closeCard(); X.spans.pick(name); X.go('profile', 'callers'); }
       else if (act.dataset.act === 'move') { X.edit.openMove(id); }
       else if (act.dataset.act === 'split') { closeCard(); X.layout.ungroup(id); }
-      else if (act.dataset.act === 'promote') { const to = X.layout.promote(id); if (to) openCard(to, card.getBoundingClientRect()); }
       else if (act.dataset.act === 'rename' || act.dataset.rename !== undefined) {
         const h = card.querySelector('h3');
         h.innerHTML = `<input data-rename aria-label="Name" value="${esc(X.layout.label(id))}">`;
@@ -131,14 +140,11 @@
       .concat(root ? [] : skipped(col.id));
     // Its one span name, also when merged from spans of one name: what calls it and what it calls, in Spans.
     const names = root ? [] : X.layout.spanNames(col.id);
-    // Merged, and all its spans inside one span not on screen: it can become that span.
-    const span = root || !col.merged ? null : X.layout.promotable(col.id);
     const tools = root ? [] : [
-      X.layout.destinations(col.id).length ? '<button type="button" class="text-btn small" data-act="move">Move to…</button>' : '',
-      span ? `<button type="button" class="text-btn small promote" data-act="promote" title="Make it ${esc(X.layout.label(span))}, the span its spans all run in, with them under it">Make it ${esc(X.layout.label(span))}</button>` : '',
-      col.merged ? '<button type="button" class="text-btn small" data-act="split" title="Its larger spans on their own again; the rest behind the + of where they go">Split up</button>' : '',
+      X.layout.destinations(col.id).length ? '<button type="button" class="text-btn small" data-act="move">Move to…</button>' : X.layout.transferProblem(col.id) ? `<button type="button" class="text-btn small" disabled title="${esc(X.layout.transferProblem(col.id))}">Move to…</button>` : '',
+      col.merged ? `<button type="button" class="text-btn small" data-act="split" title="${X.layout.constrained(col.id)?'Show the parts while retaining this definition’s exclusions and bounds':'Dissolve this wrapper; preserve its inputs'}">${X.layout.constrained(col.id)?'Show parts':'Split up'}</button>` : '',
       names.length === 1 ? `<button type="button" class="text-btn small" data-act="spans" title="${esc(names[0])} in the Spans tab: what calls it and what it calls">In Spans</button>` : ''];
-    const title = root ? esc(col.label) : `<button type="button" class="title-edit" data-rename title="Rename it">${esc(col.label)}</button>`;
+    const title = root ? esc(col.label) : `${typeIcon(X.layout.kind(col.id))}<button type="button" class="title-edit" data-rename title="Rename it">${esc(col.label)}</button>`;
     let html = `<div class="card-top"><div class="card-id"><h3>${title}</h3>${where.length ? `<div class="crumbs">${where.join(' › ')}</div>` : ''}</div>`
       + `<div class="card-tools">${tools.join('')}<button class="icon-btn" type="button" data-close aria-label="Close">×</button></div></div>`
       + totals(k, halves, root);
@@ -148,7 +154,7 @@
     } else {
       if (col.dependency) html += `<p class="runs-line">Includes dependency-group coverage${col.second ? '' : ' within the enclosing phase'}; not an exact measure of blocked time.</p>`;
       else if (col.independent) html += '<p class="runs-line">Separate logical flow · measured independently of the elapsed-time breakdown.</p>';
-      html += shareScatter(k, halves) + runsOf(k, halves, col) + madeOf(col.id, halves);
+      html += shareScatter(k, halves) + runsOf(k, halves, col) + (X.layout.isRest(col.id) ? '<p class="runs-line">Recorded time outside this level’s model children. Hiding children does not change it.</p>' : madeOf(col.id, halves));
     }
     card.innerHTML = html;
   }
@@ -188,41 +194,29 @@
   // to put back. Its + includes or excludes more. Long, the list scrolls by itself.
   let madeOpen = false;
   const madeParts = new Set();
+  const typeIcon = kind => `<span class="definition-icon" title="${kind==='span'?'Recorded span':kind==='mixed'?'Spans and violin definitions':'Violin definition'}"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="${kind==='span'?'M3 3h8v8H3zM5 6h4M5 8h3':'M2 2h3v3H2zM2 9h3v3H2zM10 5.5h3v3h-3zM5 3.5h2v7H5M7 7h3'}" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg></span>`;
   function madeOf(id, halves) {
-    const units = halves.flatMap(([, u]) => u), merged = X.layout.isMerged(id);
-    const share = (m) => {
-      const ms = X.layout.msOf(m);
-      let sum = 0;
-      for (const i of units) sum += ms[i] / data.units[i].ms;
-      return units.length ? sum / units.length : 0;
-    };
-    const members = X.layout.members(id), out = X.layout.excluded(id);
-    const unit = members.some((m) => X.layout.isMerged(m)) ? 'part' : 'span';
-    const count = `${X.fmtInt(members.length)} ${unit}${members.length === 1 ? '' : 's'}${out.length ? ` · ${X.fmtInt(out.length)} excluded` : ''}`;
-    const name = (m) => `<span class="nm">${esc(X.layout.spanName(m) || X.layout.label(m))}${X.layout.under(m) ? `<small>in ${esc(X.layout.under(m))}</small>` : ''}</span>`;
-    let list = '';
-    if (madeOpen) {
-      // Quiet buttons that show with the row under the pointer: take a span out, or count an excluded one again.
-      const icon = (d) => `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-      const rowsOf = (parent, depth = 0) => X.layout.members(parent).map((m) => [m, share(m)]).sort((a, b) => b[1] - a[1]).map(([m, v]) => {
-        const group = X.layout.isMerged(m), open = madeParts.has(m);
-        const title = `<span class="member-name" style="padding-left:${depth * 14}px">${group ? `<button class="quiet-btn" type="button" data-made-part="${esc(m)}" aria-expanded="${open}" aria-label="Show parts of ${esc(X.layout.label(m))}">${open ? '▾' : '▸'}</button>` : ''}`
-          + `<button type="button" class="text-btn" data-reveal-part="${esc(m)}">${esc(X.layout.label(m))}</button></span>`;
-        return `<div class="member">${title}<span class="pct">${X.fmtPct(v)}</span>`
-          + (X.layout.isMerged(parent) ? `<button type="button" class="quiet-btn small" data-leave="${esc(m)}" data-from="${esc(parent)}" title="Take it out of ${esc(X.layout.label(parent))}" aria-label="Take it out">${icon('M4 4l6 6M10 4l-6 6')}</button>` : '<span></span>') + '</div>'
-          + (group && open ? rowsOf(m, depth + 1).join('') : '');
-      });
-      const rows = rowsOf(id);
-      const left = out.map((m) => `<div class="member out">${name(m)}<span class="tag">excluded</span>`
-        + `<button type="button" class="quiet-btn small" data-unexclude="${esc(m)}" title="Count its time in ${esc(X.layout.label(id))} again" aria-label="Include it again">${icon('M5.5 3 3 5.5 5.5 8M3 5.5h5a3 3 0 0 1 0 6H6.5')}</button></div>`);
-      const transferred = X.layout.transferred(id).map((m) => `<div class="member out">${name(m.id)}<span class="tag">counted in ${esc(X.layout.label(m.into))}</span></div>`);
-      list = `<div class="members">${rows.join('')}${left.join('')}${transferred.join('')}</div>`;
+    const units=halves.flatMap(([,u])=>u),inputs=X.layout.inputs(id),excluded=X.layout.excluded(id);
+    const share=values=>units.length?units.reduce((sum,i)=>sum+values[i]/data.units[i].ms,0)/units.length:0;
+    const count=`${inputs.length} input${inputs.length===1?'':'s'}${excluded.length?` · ${excluded.length} excluded`:''}`;
+    const arrow='<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M5.5 3 3 5.5 5.5 8M3 5.5h5a3 3 0 0 1 0 6H6.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const rowsOf=(owner,depth=0)=>X.layout.inputs(owner).map((input,index)=>{
+      const source=!!input.span,m=input.span||input.violin,name=source?X.layout.spanName(m):X.layout.label(m),open=madeParts.has(m);
+      const toggle=!source?`<button type="button" class="quiet-btn part-toggle" data-made-part="${esc(m)}" aria-expanded="${open}" aria-label="Show inputs of ${esc(name)}">${open?'▾':'▸'}</button>`:'<span class="part-toggle"></span>';
+      const label=source?`<span class="input-label">${esc(name)}</span>`:`<button type="button" class="text-btn input-label" data-reveal-part="${esc(m)}" title="Show this violin and its settings">${esc(name)}</button>`;
+      return `<div class="member" data-input-type="${source?'span':'violin'}"><span class="member-name" style="padding-left:${depth*12}px">${toggle}${typeIcon(source?'span':'derived')}${label}</span><span class="pct">${X.fmtPct(share(X.layout.inputMs(owner,index)))}</span><span class="member-actions"><button type="button" class="quiet-btn" data-owner="${esc(owner)}" data-replace-input="${index}" title="Replace input" aria-label="Replace input">⇄</button><button type="button" class="quiet-btn" data-owner="${esc(owner)}" data-remove-input="${index}" title="Remove input" aria-label="Remove input">×</button></span></div>`
+        +(!source && open?rowsOf(m,depth+1).join(''):'');
+    });
+    let list='';
+    if(madeOpen){
+      const out=excluded.map(m=>`<div class="member out"><span class="member-name"><span class="part-toggle"></span>${typeIcon('span')}<span class="input-label" title="${esc(X.layout.under(m))}">${esc(X.layout.spanName(m))}</span></span><span class="tag">excluded</span><span class="member-actions"><button type="button" class="quiet-btn" data-unexclude="${esc(m)}" title="Remove exclusion" aria-label="Remove exclusion">${arrow}</button></span></div>`);
+      const transferred=X.layout.transferred(id).map(m=>`<div class="member out"><span class="member-name"><span class="part-toggle"></span>${typeIcon('derived')}<span class="input-label">${esc(X.layout.label(m.id))}</span></span><span class="tag" title="${esc(X.layout.label(m.into))}">transferred</span><span></span></div>`);
+      const retained=X.layout.retained(id).map((_,index)=>`<div class="member out"><span class="member-name"><span class="part-toggle"></span>${typeIcon('span')}<span class="input-label">Transfer kept from copy</span></span><span class="tag">excluded</span><span class="member-actions"><button type="button" class="quiet-btn" data-restore-cut="${index}" title="Restore copied coverage" aria-label="Restore copied coverage">${arrow}</button></span></div>`);
+      const inputCuts=inputs.flatMap((input,index)=>(input.cuts||[]).map((cut,k)=>`<div class="member out"><span class="member-name"><span class="part-toggle"></span>${typeIcon('span')}<span class="input-label">Copied cut in ${esc(X.layout.spanName(input.span)||X.layout.label(input.violin))}</span></span><span class="tag">excluded</span><span class="member-actions"><button type="button" class="quiet-btn" data-owner="${esc(id)}" data-input-index="${index}" data-input-cut="${k}" title="Restore this input’s copied coverage" aria-label="Restore copied coverage">${arrow}</button></span></div>`));
+      list=`<div class="members">${rowsOf(id).join('')}${out.join('')}${retained.join('')}${inputCuts.join('')}${transferred.join('')}</div>`;
     }
-    const chevron = '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l3.5 3L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    return `<div class="made${madeOpen ? ' open' : ''}"><div class="made-head">`
-      + `<button type="button" class="made-toggle" data-made aria-expanded="${madeOpen}">${chevron}<span class="section-title">Made of</span><span class="n">${count}</span></button>`
-      + `${madeOpen ? `<span class="sub" title="Each span's share of ${esc(X.UNIT)} time, averaged over the ${esc(X.UNIT)} spans in view">average share</span>` : ''}`
-      + `<button type="button" class="quiet-btn small" data-made-add title="Include more spans in it, or exclude spans inside it" aria-label="Include or exclude spans">+</button></div>${list}</div>`;
+    const chevron='<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l3.5 3L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return `<div class="made${madeOpen?' open':''}"><div class="made-head"><button type="button" class="made-toggle" data-made aria-expanded="${madeOpen}">${chevron}<span class="section-title">Made of</span><span class="n">${count}</span></button><span class="made-tools"><button type="button" class="quiet-btn" data-input-add title="Add an input" aria-label="Add an input">+</button><button type="button" class="quiet-btn" data-made-add title="Include or exclude spans" aria-label="Include or exclude spans">−</button></span></div>${list}</div>`;
   }
 
   // Its share against the unit's time, both halves, one dot per unit: whether it is what makes long units long.

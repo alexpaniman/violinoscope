@@ -66,6 +66,64 @@ test('copy preserves a transferred definition with excluded descendants',()=>{
  T.exclude(a,[x]);T.merge([a,b],'Extracted');near(T.msOf(p)[0],40);
  const c=T.copyOver(p);near(T.msOf(c)[0],40);T.check();
 });
+test('explicit recorded inputs ignore edits to the corresponding violin and transfer full coverage',()=>{
+ const {T}=fixture({names:['Compile','P','A','X','B'],rows:[0,-1,0,100000,1,1,0,0,100000,0,2,1,0,60000,0,3,2,10000,20000,0,4,0,60000,30000,0]});
+ const p='Compile'+sep+'P',a=p+sep+'A',x=a+sep+'X',b='Compile'+sep+'B';
+ T.exclude(a,[x]);const g=T.merge([a,b],'Together');near(T.msOf(g)[0],70);near(T.msOf(p)[0],60);
+ T.replaceInput(g,0,{span:a});near(T.msOf(g)[0],90);near(T.msOf(p)[0],40);near(T.msOf(a)[0],40);
+ assert.equal(T.kind(g),'mixed');T.load(T.state());near(T.msOf(g)[0],90);
+ T.replaceInput(g,0,{violin:a});near(T.msOf(g)[0],70);near(T.msOf(p)[0],60);T.check();
+});
+test('a span violin can explicitly depend on a child definition',()=>{
+ const {T,a,x}=fixture();T.replaceInput(a,0,{violin:x});near(T.msOf(a)[0],10);assert.equal(T.kind(a),'derived');
+ T.load(T.state());near(T.msOf(a)[0],10);T.replaceInput(a,0,{span:a});near(T.msOf(a)[0],60);T.check();
+});
+test('raw source replacement retains transfers hidden by an edited source recipe',()=>{
+ const {T}=fixture({names:['Compile','A','X','Z','B','C'],rows:[0,-1,0,100000,0,1,0,0,60000,0,2,1,0,20000,0,3,1,30000,10000,0,4,0,60000,20000,0,5,0,80000,10000,0]});
+ const a='Compile'+sep+'A',x=a+sep+'X',z=a+sep+'Z',b='Compile'+sep+'B',c='Compile'+sep+'C';
+ const h=T.merge([z,c],'Extracted');T.replaceInput(a,0,{span:x});const g=T.merge([a,b],'Edited');near(T.msOf(g)[0],40);
+ T.replaceInput(g,0,{span:a});near(T.msOf(g)[0],70);near(T.msOf(h)[0],20);T.check();
+});
+test('splitting preserves raw inputs and keeps constrained wrappers as hidden definitions',()=>{
+ const {T,a,b,x,z}=fixture();T.exclude(a,[x]);const inner=T.merge([a,b],'Inner');T.replaceInput(inner,0,{span:a});
+ const before=T.msOf(inner)[0];T.exclude(inner,[z]);const after=T.msOf(inner)[0];assert.ok(after<before);
+ T.ungroup(inner);near(T.msOf(inner)[0],after);assert.ok(T.isMerged(inner));assert.ok(!T.shown(inner));
+ assert.equal(T.inputs(inner)[0].span,a);T.check();
+});
+test('rest is disjoint from model children, independent of display and removed with its source',()=>{
+ const {T,a,b,x,z}=fixture(),rest=T.restsOf(a)[0];near(T.msOf(rest)[0],45);
+ T.add([rest],a);T.hide(x);T.collapse(a);near(T.msOf(rest)[0],45);assert.ok(!T.canMerge(rest,b));
+ T.replaceInput(a,0,{violin:x});assert.equal(T.restsOf(a).length,0);assert.ok(!T.state().shown.includes(rest));
+ T.undo();assert.ok(T.restsOf(a).includes(rest));near(T.msOf(rest)[0],45);
+ const g=T.merge([a,b],'Whole');T.replaceInput(g,0,{span:a});near(T.msOf(T.restsOf(g)[0])[0],0);T.check();
+});
+test('composition operations work under edited path definitions',()=>{
+ const {T,a,x,z}=fixture();const g=T.merge([x,z],'Parts');T.replaceInput(a,0,{violin:g});T.ungroup(g);
+ const h=T.merge([x,z],'Parts again');near(T.msOf(a)[0],15);assert.ok(T.inputs(a).some(i=>i.violin===h));T.check();
+});
+test('copies retain raw input transfers without cutting other inputs',()=>{
+ const {T}=fixture({names:['Compile','A','X','B','C'],rows:[0,-1,0,100000,0,1,0,0,60000,0,2,1,10000,10000,0,3,0,60000,20000,0,4,0,80000,10000,0]});
+ const a='Compile'+sep+'A',x=a+sep+'X',b='Compile'+sep+'B',c='Compile'+sep+'C';
+ T.merge([x,c],'Extracted');const g=T.merge([a,b],'Raw');T.replaceInput(g,0,{span:a});near(T.msOf(g)[0],70);
+ const projection=T.copyOver(g);near(T.msOf(projection)[0],70);T.load(T.state());near(T.msOf(projection)[0],70);T.check();
+});
+test('rest visibility survives copying and moving its owner',()=>{
+ const {T,a}=fixture();const rest=T.restsOf(a)[0];T.add([rest],a);
+ const copy=T.copyOver(a);assert.ok(T.shown(T.restsOf(copy)[0]));
+ const moved=T.transfer(a,'~two');assert.ok(T.shown(T.restsOf(moved)[0]));assert.ok(!T.state().shown.includes(rest));T.check();
+});
+test('main-tree moves reject colliding independent sources including hidden definitions',()=>{
+ const {T,b,y,root}=fixture(),first=T.copyOver(b);
+ const kids=T.kids(first).filter(id=>!T.isRest(id)),inner=T.merge(kids,'Hidden');T.leave(kids[0],inner);T.hide(inner);
+ const second=T.copyOver(y),outer=T.merge([first,second],'Separate copies');
+ assert.equal(T.destinations(outer).length,0);assert.ok(T.transferProblem(outer));const before=JSON.stringify(T.state());
+ assert.equal(T.transfer(outer,root),null);assert.equal(JSON.stringify(T.state()),before);T.check();
+});
+test('incoming source definitions replace old target overrides',()=>{
+ const {T,a,x,root}=fixture(),p=T.copyOver(a);
+ T.replaceInput(a,0,{violin:x});near(T.msOf(a)[0],10);
+ const moved=T.transfer(p,root);near(T.msOf(moved)[0],60);T.check();
+});
 test('a group retains its placement when its other branch is removed',()=>{
  const {T,a,x,y,root}=fixture();const g=T.merge([x,y],'Both');T.leave(y,g);
  assert.equal(T.parentOf(g),root);near(T.msOf(a)[0],50);near(T.msOf(g)[0],10);T.check();
@@ -133,12 +191,13 @@ test('large projections preserve coverage through expansion, exclusions and undo
  }
 });
 test('random edit sequences preserve invariants and undo each change',()=>{
- for(let seed=1;seed<=Number(process.env.FUZZ_SEEDS || 50);seed++) {
+ for(let seed=Number(process.env.FUZZ_FROM || 1);seed<=Number(process.env.FUZZ_SEEDS || 50);seed++) {
   const {T,X,x,y,z,a,b}=fixture(); let n=seed;
   const rand=(k)=>{n=(Math.imul(n,1664525)+1013904223)>>>0;return (n>>>8)%k;};
   for(let step=0;step<100;step++) {
-   const ids=X.data.columns.map(c=>c.id), id=ids[rand(ids.length)], op=rand(16), before=JSON.stringify(T.state());
+   const ids=X.data.columns.map(c=>c.id), id=ids[rand(ids.length)], op=rand(19), before=JSON.stringify(T.state());
    if (process.env.DEBUG_LAYOUT) console.log(seed, step, op, id);
+   try {
    if(op===0) T.add([[x,y,z,a,b][rand(5)]]);
    else if(op===1&&id) T.expand(id);
    else if(op===2&&id) T.collapse(id);
@@ -152,9 +211,13 @@ test('random edit sequences preserve invariants and undo each change',()=>{
    else if(op===10&&id) {const ms=T.members(id);if(T.isMerged(id)&&ms.length)T.leave(ms[rand(ms.length)],id);}
    else if(op===11&&id) {const ms=T.excluded(id);if(ms.length)T.unexclude(id,ms[rand(ms.length)]);}
    else if(op===12&&id) {const cs=T.spansFor(id,'Annotate','include');if(cs.length)T.include(id,[cs[rand(cs.length)].id]);}
-   else if(op===13&&id&&T.promotable(id))T.promote(id);
+   else if(op===13&&id){const skipped=T.skippedAbove(id);if(skipped.length)T.unskip(skipped[0]);}
    else if(op===14&&id) {const siblings=ids.filter(x=>x!==id&&T.parentOf(x)===T.parentOf(id));if(siblings.length)T.move(id,siblings[rand(siblings.length)],true);}
    else if(op===15&&id) {const skipped=T.skippedAbove(id);if(skipped.length)T.unskip(skipped[0]);}
+   else if(op===16&&id&&!T.isRest(id)) {const inputs=T.inputs(id);if(inputs.length){const index=rand(inputs.length),input=inputs[index],key=input.span||input.violin,next=input.span?{violin:key}:{span:key};try{T.previewInput(id,index,next);T.replaceInput(id,index,next);}catch(e){assert.equal(JSON.stringify(T.state()),before);}}}
+   else if(op===17&&id&&!T.isRest(id)){const inputs=T.inputs(id);if(inputs.length)T.removeInput(id,rand(inputs.length));}
+   else if(op===18&&id){const rest=T.restsOf(id);if(rest.length)T.add([rest[rand(rest.length)]],id);}
+   }catch(error){console.error(`Fuzz seed ${seed}, step ${step}, operation ${op}, id ${id}\nBefore: ${before}`);throw error;}
    T.check();
    if(step%20===0){const d=T.breakdown();assert.equal(new Set(d.nodes.map(n=>n.id)).size,d.nodes.length);near(d.rows[0].reduce((s,v)=>s+v,0),1);assert.ok(d.rows[0].every(v=>Number.isFinite(v)&&v>=0));}
    const after=JSON.stringify(T.state());

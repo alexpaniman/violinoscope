@@ -41,7 +41,7 @@ async def main():
         await page.click('[data-move-apply]')
         after = await page.evaluate('JSON.stringify(TX.layout.state())')
         assert before != after
-        assert await page.evaluate('(id)=>!TX.layout.isMerged(id)', group)
+        assert await page.evaluate('(id)=>TX.layout.isMerged(id) && TX.layout.treeOf(id)===2', group)
         await page.keyboard.press('Control+z')
         assert await page.evaluate('JSON.stringify(TX.layout.state())') == before
         await page.keyboard.press('Control+Shift+z')

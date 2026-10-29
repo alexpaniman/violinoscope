@@ -5,6 +5,7 @@
   const lists = ['shown','open','skip','top2'], pairs = ['parents','names'], many = ['order','except','bounds'];
   const clone = x => JSON.parse(JSON.stringify(x));
   const D = window.ViolinDefinitions;
+  const mapInput=(input,ref)=>({...input,...(input.span ? {span:ref(input.span)} : {violin:ref(input.violin)}),...(input.cuts ? {cuts:input.cuts.map(cut=>D.mapExpression(cut,ref))} : {})});
   function validate(doc) {
     if (!doc || typeof doc.unit !== 'string' || !doc.unit || !doc.layout) throw Error('Unsupported layout file');
     return {unit:doc.unit, name:typeof doc.name==='string' ? doc.name : 'Imported layout', layout:D.validate(doc.unit,doc.layout)};
@@ -12,40 +13,44 @@
   function decode(input) {
     const doc = typeof input==='string' ? JSON.parse(input) : clone(input);
     if (doc.format!=='violinoscope-layout') return validate(doc);
-    if (![1,2].includes(doc.version) || !Array.isArray(doc.paths)) throw Error('Unsupported layout format');
+    if (![1,2,3].includes(doc.version) || !Array.isArray(doc.paths)) throw Error('Unsupported layout format');
     const paths = doc.paths.map(p=>{
       if (!Array.isArray(p) || !p.length || p[0]!==doc.unit || p.some(n=>typeof n!=='string' || /[\u0001-\u0003]/.test(n))) throw Error('Invalid span path');
       return p.join(SEP);
     });
     const ref = r => {
+      const rest=D.restParts(r);if(rest)return D.rest(...rest.map(ref));
       const m = typeof r==='string' && /^([sp])(?:([a-z0-9]+):)?(\d+)$/i.exec(r);
       if (!m) return r;
       if (!paths[Number(m[3])]) throw Error('Unknown span path');
       return m[1]==='p' ? D.copy(paths[Number(m[3])],m[2] || '') : paths[Number(m[3])];
     };
-    const s = {v:doc.version===2 ? 5 : 4};
+    const s = {v:doc.version===3 ? 6 : doc.version===2 ? 5 : 4};
     for (const k of lists) s[k]=(doc[k] || []).map(ref);
     for (const k of pairs) s[k]=Object.entries(doc[k] || {}).map(([a,b])=>[ref(a),k==='names' ? b : ref(b)]);
     for (const k of many) s[k]=Object.entries(doc[k] || {}).map(([a,b])=>[ref(a),b.map(ref)]);
     s.retained=Object.entries(doc.retained || {}).map(([id,cuts])=>[ref(id),cuts.map(cut=>D.mapExpression(cut,ref))]);
-    s.groups=(doc.groups || []).map(g=>[g.id,g.name,g.parts.map(ref),{...(g.tree==='projections' ? {tree:2,scope:g.scope || ''} : {}),...(g.match ? {match:{...g.match,under:ref(g.match.under)}} : {})}]);
+    s.definitions=Object.entries(doc.definitions || {}).map(([id,inputs])=>[ref(id),inputs.map(input=>mapInput(input,ref))]);
+    s.groups=(doc.groups || []).map(g=>[g.id,g.name,g.inputs ? g.inputs.map(input=>mapInput(input,ref)) : g.parts.map(ref),{...(g.tree==='projections' ? {tree:2,scope:g.scope || ''} : {}),...(g.match ? {match:{...g.match,under:ref(g.match.under)}} : {})}]);
     s.next=1+Math.max(0,...s.groups.map(g=>Number(g[0].slice(1))));
     return validate({unit:doc.unit,name:doc.name,layout:s});
   }
   function encode(input) {
     const doc=validate(input),s=doc.layout,paths=[],ids=new Map();
     const ref=r=>{
+      const rest=D.restParts(r);if(rest)return D.rest(...rest.map(ref));
       const copy=r.startsWith(COPY),key=D.source(r),scope=D.scope(r);
       if (key!==doc.unit && !key.startsWith(doc.unit+SEP)) return r;
       if (!ids.has(key)) { ids.set(key,paths.length); paths.push(key.split(SEP)); }
       return `${copy ? 'p'+(scope ? scope+':' : '') : 's'}${ids.get(key)}`;
     };
-    const out={format:'violinoscope-layout',version:2,name:doc.name,unit:doc.unit,paths};
+    const out={format:'violinoscope-layout',version:3,name:doc.name,unit:doc.unit,paths};
     for (const k of lists) if(s[k]?.length) out[k]=s[k].map(ref);
     for (const k of pairs) if(s[k]?.length) out[k]=Object.fromEntries(s[k].map(([a,b])=>[ref(a),k==='names' ? b : ref(b)]));
     for (const k of many) if(s[k]?.length) out[k]=Object.fromEntries(s[k].map(([a,b])=>[ref(a),b.map(ref)]));
     if(s.retained?.length) out.retained=Object.fromEntries(s.retained.map(([id,cuts])=>[ref(id),cuts.map(cut=>D.mapExpression(cut,ref))]));
-    if(s.groups?.length) out.groups=s.groups.map(([id,name,parts,more={}])=>({id,name,parts:parts.map(ref),
+    if(s.definitions?.length) out.definitions=Object.fromEntries(s.definitions.map(([id,inputs])=>[ref(id),inputs.map(input=>mapInput(input,ref))]));
+    if(s.groups?.length) out.groups=s.groups.map(([id,name,inputs,more={}])=>({id,name,inputs:inputs.map(input=>mapInput(input,ref)),
       ...(more.tree===2 ? {tree:'projections',...(more.scope ? {scope:more.scope} : {})} : {}),...(more.match ? {match:{...more.match,under:ref(more.match.under)}} : {})}));
     return out;
   }

@@ -217,13 +217,13 @@ async def main():
             if await page.get_attribute('#card-pop [data-made]', 'aria-expanded') != 'true':
                 await page.click('#card-pop [data-made]')
                 await page.wait_for_timeout(200)
-            members = await page.query_selector_all('#card-pop [data-leave]')
+            members = await page.query_selector_all('#card-pop [data-remove-input]')
             expect(len(members) >= 2, 'the card of a merged violin lists no members')
             # A row's button shows under the pointer, whole, inside the card.
             await page.hover('#card-pop .member')
             await page.wait_for_timeout(100)
             fits = await page.evaluate("""(() => {
-              const el = document.querySelector('#card-pop .member [data-leave]'), b = el.getBoundingClientRect();
+              const el = document.querySelector('#card-pop .member [data-remove-input]'), b = el.getBoundingClientRect();
               const c = document.querySelector('#card-pop .members').getBoundingClientRect();
               return getComputedStyle(el).opacity === '1' && b.left >= c.left && b.right <= c.right + 0.5 && b.width >= 20;
             })()""")
@@ -288,6 +288,7 @@ async def main():
 
         # From a card, spans inside a violin excluded from its time: its time drops, and they are listed to put back.
         excl = await page.evaluate("""(() => {
+          TX.layout.fresh();
           const T = TX.layout, cols = TX.violins.G.p.cols;
           const c = cols.find((c) => !c.root && !c.merged && !c.second && T.spansFor(c.id, '', 'exclude').length);
           if (!c) return null;
@@ -348,9 +349,8 @@ async def main():
           const unskipped = T.shown(c.id) && kids.every((k) => T.parentOf(k) === c.id);
           T.hide(c.id);
           const g = T.merge(kids.slice(0, 2), '');
-          const offered = T.promotable(g) === c.id;
-          const to = T.promote(g);
-          return { skipped, unskipped, offered, promoted: to === c.id && T.shown(c.id) && kids.slice(0, 2).every((k) => T.shown(k) && T.parentOf(k) === c.id) };
+          T.ungroup(g);T.unskip(c.id);
+          return { skipped, unskipped, restored: T.shown(c.id) && kids.slice(0, 2).every((k) => T.shown(k) && T.parentOf(k) === c.id) };
         })()""")
         if back is not None:
             expect(all(back.values()), f'putting a removed level back did not work: {back}')
@@ -385,14 +385,14 @@ async def main():
             ids = await page.evaluate(COLS)
             expect(all(i not in ids for i, _ in two), 'removing two picked violins left them')
 
-        # A merged violin hidden is gone: no longer merged, offered by no + list.
+        # Hiding a merged violin preserves its definition and makes it restorable from +.
         gone = await page.evaluate("""(() => {
           const c = TX.violins.G.p.cols.find((c) => c.merged && !c.second);
           if (!c) return null;
           TX.layout.hide(c.id);
-          return !TX.layout.isMerged(c.id) && !TX.layout.candidates(TX.ROOT, '').some((r) => r.id === c.id);
+          return TX.layout.isMerged(c.id) && !TX.layout.shown(c.id) && TX.layout.candidates(TX.ROOT, '').some((r) => r.id === c.id);
         })()""")
-        expect(gone is not False, 'a hidden merged violin stayed')
+        expect(gone is not False, 'a hidden merged violin lost its definition or restoration entry')
 
         # A violin's + lists its children and, apart, everything deeper, each with All, before any filter; Exclude
         # there leaves the ticked out of that violin's time.

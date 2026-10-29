@@ -68,7 +68,7 @@
     // The unit's own span is the root the columns branch from; in Share it is 100% everywhere, so it shows only its
     // median time.
     const depth = p.cols.map((col) => (col.root ? 0 : X.depthIdx[col.base] + 1));
-    const isParent = p.cols.map((col) => X.layout.kids(col.id).length > 0);
+    const isParent = p.cols.map((col) => X.layout.kids(col.id).some(id=>!X.layout.isRest(id) || X.layout.shown(id)));
     const bare = (c) => p.cols[c].root && S.mode === 'share';
     const visKids = p.cols.map((col) => p.cols.map((_, j) => j).filter((j) => p.cols[j].parent === col.id));
     // An open column with anything under it off screen has a + at the end of what it shows.
@@ -260,6 +260,7 @@
       // Picked to merge, on a tint.
       o.push(`<g class="hit" data-col="${c}" transform="translate(${n1(x + 3)} ${n1(TR.y0 + labelY)}) rotate(${deg})">`
         + `<rect x="${n1(-lens[c] - 4)}" y="-3" width="${n1(lens[c] + 8)}" height="${n1(SIZE + 6)}" rx="4" fill="${picked ? T.sel : 'transparent'}" fill-opacity="${picked ? 0.22 : 0}"${picked ? ` stroke="${T.sel}"` : ''}/>`
+        + (!col.root ? `<g transform="translate(${n1(-lens[c]-17)} 1)" opacity=".7"><title>${X.layout.kind(col.id)==='span'?'Recorded span':'Violin definition'}</title><path d="${X.layout.kind(col.id)==='span'?'M2 2h8v8H2zM4 5h4M4 7h3':'M1 1h3v3H1zM1 8h3v3H1zM9 4.5h3v3H9zM4 2.5h2v7H4M6 6h3'}" fill="none" stroke="${T.muted}" stroke-width="1.1"/></g>` : '')
         + `<text text-anchor="end" dominant-baseline="hanging" font-family="${X.SANS}" font-size="${SIZE}" fill="${T.ink}">${esc(labels[c])}`
         + `${counts[c] ? `<tspan dx="4" dy="${n1((SIZE - COUNT) * 0.8)}" font-size="${COUNT}" fill="${T.muted}">${counts[c]}</tspan>` : ''}</text></g>`);
     });

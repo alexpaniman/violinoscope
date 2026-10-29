@@ -142,14 +142,12 @@
   };
 
   // ---------------------------------------------------------------------------------------------------------
-  // What-if: a factor on any column scales its own time and everything inside it; nested factors multiply. A column's
-  // own time is the part of the unit's time it counts in its tree (u.o), so overlapping columns of one tree save
-  // nothing twice. Where a column of the second tree owns time the first tree's column owns too (u.x), both factors
-  // apply, multiplied.
+  // Factors belong to definitions, including hidden ones. Each analysis partitions its coverage; factors from
+  // independent analyses multiply on their actual interval intersections.
 
   let proj = null;
-  X.scenarioOn = () => X.layout.ready && X.layout.scenarioActive(S.factors);
-  X.scenarioKey = () => X.layout.ready ? X.layout.scenarioKey(S.factors) : '';
+  X.scenarioOn = () => X.layout?.ready && X.layout.scenarioActive(S.factors);
+  X.scenarioKey = () => X.layout?.ready ? X.layout.scenarioKey(S.factors) : '';
   X.project = () => { proj = X.scenarioOn() ? X.layout.project(S.factors) : null; };
   X.proj = () => proj;
   X.partMs = (i, k, measured) => (proj && !measured ? proj.col[i * X.NC + k] : data.units[i].s[k] * data.units[i].ms);

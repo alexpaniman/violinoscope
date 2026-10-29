@@ -145,22 +145,17 @@
   };
 
   // What is changed, so it is plain the page is showing a what-if; the dashed outlines are as measured. A factor on a
-  // violin not shown waits until it is shown again.
+  // hidden violin keeps its factor and its effect.
   function renderWhatif() {
-    const changed = [...S.factors].filter(([k, v]) => v !== 1 && data.columnIndex.has(k) && !data.columns[data.columnIndex.get(k)].async);
+    const changed = [...S.factors].filter(([k, v]) => v !== 1 && X.layout.scenarioActive(new Map([[k,v]])));
     $('whatif-chip').hidden = !changed.length;
-    const named = changed.map(([id, v]) => `${data.columns[data.columnIndex.get(id)].label} ${X.fmtFactor(v)}`);
+    const named = changed.map(([id, v]) => `${X.layout.label(id)} ${X.fmtFactor(v)}`);
     $('whatif-text').innerHTML = `What if: <b>${changed.length === 1 ? esc(named[0]) : `${changed.length} violins`}</b>`;
     $('whatif-text').title = `What if: ${named.join(', ')}\nDashed outlines: every violin as measured`;
   }
   X.setFactor = (id, f) => {
-    if (f === 1) S.factors.delete(id); else S.factors.set(id, f);
-    X.project();
+    X.layout.setFactor(id,f);
     renderWhatif();
-    X.violins.invalidate();
-    X.render();
-    X.panel.renderCard();
-    X.panel.render();
   };
 
   // ---------------------------------------------------------------------------------------------------------
@@ -740,7 +735,7 @@
       if (!e.target.closest('#v-add, [data-add], [data-made-add]')) X.edit.closeAdd();
       if (!e.target.closest('#v-move, [data-act="move"]')) X.edit.closeMove();
     });
-    $('whatif-clear').addEventListener('click', () => { for (const id of [...S.factors.keys()]) S.factors.delete(id); X.setFactor('__none__', 1); });
+    $('whatif-clear').addEventListener('click', () => { X.layout.clearFactors();renderWhatif(); });
     document.addEventListener('paste', (e) => {
       if (e.target.closest && e.target.closest('input, textarea')) return;
       if (pasted((e.clipboardData || window.clipboardData).getData('text') || '')) e.preventDefault();

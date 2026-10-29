@@ -12,6 +12,7 @@
   let menu, bar, hideBtn, ghost;
   // Mode: null for the tree's + (what shows under it), or from a card, 'include' or 'exclude' (what its time is made of).
   let under = null, query = '', ticked = new Set(), naming = false, rows = [], mode = null;
+  let replacement = null;
   X.picked = new Set();
 
   function init() {
@@ -34,6 +35,7 @@
       }
       const box = e.target.closest('input[data-id]');
       if (!box) return;
+      if(replacement)ticked.clear();
       if (box.checked) ticked.add(box.dataset.id); else ticked.delete(box.dataset.id);
       naming = false;
       renderFoot();
@@ -45,6 +47,11 @@
       const act = e.target.closest('[data-do]');
       if (!act) return;
       const ids = [...ticked], at = under;
+      if(act.dataset.do==='replace') {
+        const input={[mode]:ids[0]},index=replacement.index;
+        try{X.layout.replaceInput(at,index,input);closeAdd();X.panel.renderCard();}catch(error){X.toast(error.message);}
+        return;
+      }
       if (act.dataset.do === 'apply') {
         closeAdd();
         if (mode === 'exclude') X.layout.exclude(at, ids);
@@ -97,6 +104,7 @@
 
   // From a card, its spans: what to put into its time, or leave out of it.
   function openAdd(id, rect, what) {
+    replacement=null;
     under = id;
     query = '';
     ticked = new Set();
@@ -115,6 +123,9 @@
     renderList();
     menu.querySelector('[data-filter]').focus({ preventScroll: true });
   }
+  function openInput(id,index,rect) {
+    openAdd(id,rect,'include');replacement={index};mode='span';ticked=new Set();renderHead();renderList();
+  }
   let at = null;
   function placeAdd() {
     if (!at || menu.hidden) return;
@@ -127,7 +138,8 @@
   function renderHead() {
     const where = under === X.ROOT2 ? `any span of ${X.UNIT}` : X.layout.label(under === X.ROOT ? X.layout.rootKey() : under);
     const find = mode === 'include' ? 'Find spans to include' : mode === 'exclude' ? `Find spans in ${where} to exclude` : `Find in ${where}`;
-    const seg = mode ? `<div class="seg add-mode" role="group" aria-label="Spans">${['include', 'exclude'].map((m) => `<button type="button" data-mode="${m}" aria-pressed="${mode === m}">${m === 'include' ? 'Include' : 'Exclude'}</button>`).join('')}</div>` : '';
+    const modes=replacement ? ['span','violin'] : ['include','exclude'];
+    const seg = mode ? `<div class="seg add-mode" role="group" aria-label="Input type">${modes.map((m) => `<button type="button" data-mode="${m}" aria-pressed="${mode === m}">${{include:'Include',exclude:'Exclude',span:'Recorded span',violin:'Violin'}[m]}</button>`).join('')}</div>` : '';
     menu.querySelector('.add-head').innerHTML = `${seg}<input data-filter type="search" autocomplete="off" spellcheck="false" placeholder="${esc(find)}" aria-label="Find a span" value="${esc(query)}"><small class="add-scope"></small>`;
     menu.querySelector('[data-filter]').focus({ preventScroll: true });
   }
@@ -142,6 +154,12 @@
   // The tree's +: its children, then everything deeper under it, each section with an All of its own; a card's:
   // what to include or exclude.
   function renderList() {
+    if(replacement) {
+      rows=X.layout.inputChoices(under,mode,query);
+      menu.querySelector('.add-scope').textContent=mode==='span' ? 'Use recorded coverage' : 'Follow this violin’s edits';
+      menu.querySelector('.add-list').innerHTML=rows.map(r=>`<label class="add-row" title="${esc(r.where)}"><input type="radio" name="definition-input" data-id="${esc(r.id)}"${ticked.has(r.id)?' checked':''}><span class="nm">${esc(r.label)}<small>${esc(r.where)}</small></span></label>`).join('') || '<p class="add-none">No matching input.</p>';
+      renderFoot();return;
+    }
     rows = mode ? X.layout.spansFor(under, query, mode) : X.layout.candidates(under, query);
     const scope = menu.querySelector('.add-scope'), typed = !!query.trim();
     scope.textContent = mode === 'include' ? (typed ? `Any span of ${X.UNIT} not in it already` : '')
@@ -173,6 +191,15 @@
   }
   function renderFoot() {
     const foot = menu.querySelector('.add-foot'), n = ticked.size;
+    if(replacement) {
+      let preview='Choose an input',valid=false;
+      if(n)try {
+        const value=X.layout.previewInput(under,replacement.index,{[mode]:[...ticked][0]});
+        const units=X.unitsInView(true),ids=[...units.left,...units.right],mean=values=>ids.length?ids.reduce((s,i)=>s+values[i],0)/ids.length:0;
+        preview=`${X.fmtUs(mean(value.before))} → ${X.fmtUs(mean(value.after))} average`;valid=true;
+      }catch(error){preview=error.message;}
+      foot.innerHTML=`<span class="add-count">${esc(preview)}</span><button type="button" class="text-btn small primary" data-do="replace"${valid?'':' disabled'}>${replacement.index===X.layout.inputs(under).length?'Add':'Replace'}</button>`;placeAdd();return;
+    }
     if (naming) {
       foot.innerHTML = `<button type="button" class="text-btn small" data-do="back" aria-label="Back">←</button>`
         + `<input data-name autocomplete="off" spellcheck="false" aria-label="Name of the merged violin" value="${esc(X.layout.suggestName([...ticked]))}">`
@@ -225,7 +252,7 @@
         + '<button type="button" class="text-btn small" data-do="parent" title="A merged violin above them, named so, with them still shown under it">New parent</button>'
         + (above ? `<button type="button" class="text-btn small promote" data-do="above" title="Put ${esc(X.layout.label(above))} back above them">Under ${esc(X.layout.label(above))}</button>` : '')
         : '<span class="spacer"></span>')
-      + '<button type="button" class="text-btn small" data-do="remove" title="Remove them (Delete): their parents still count their time; merged ones go">Remove</button>'
+      + '<button type="button" class="text-btn small" data-do="remove" title="Hide these violins (Delete); their definitions and counted time stay">Hide</button>'
       + '<button type="button" class="chip-x" data-do="cancel" title="Let them go (Esc)" aria-label="Let them go">×</button>';
     bar.hidden = false;
     if (keep !== null) bar.querySelector('[data-name]').focus();
@@ -353,5 +380,5 @@
   }
   function closeMove() { if (moving === null) return false; moving = null; $('v-move').hidden = true; return true; }
 
-  X.edit = { openMove, closeMove, init, openAdd, closeAdd, pick, clearPicked, removePicked, showHide, showLift, rename, get open() { return !menu.hidden; } };
+  X.edit = { openMove, closeMove, init, openAdd, openInput, closeAdd, pick, clearPicked, removePicked, showHide, showLift, rename, get open() { return !menu.hidden; } };
 })();
