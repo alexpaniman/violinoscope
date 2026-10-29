@@ -735,9 +735,10 @@
     document.addEventListener('pointerdown', (e) => {
       if (!$('keys').hidden && !e.target.closest('#keys')) toggleKeys(false);
       if (!$('rangecard').hidden && !e.target.closest('#rangecard') && !e.target.closest('#range-chip')) toggleRange(false);
-      if (S.card !== null && !e.target.closest('#card-pop, #v-add') && !e.target.closest('[data-col]')) X.panel.closeCard();
+      if (S.card !== null && !e.target.closest('#card-pop, #v-add, #v-move') && !e.target.closest('[data-col]')) X.panel.closeCard();
       if (!e.target.closest('#v-factor-menu, [data-pill]')) X.violins.closeMenu();
       if (!e.target.closest('#v-add, [data-add], [data-made-add]')) X.edit.closeAdd();
+      if (!e.target.closest('#v-move, [data-act="move"]')) X.edit.closeMove();
     });
     $('whatif-clear').addEventListener('click', () => { for (const id of [...S.factors.keys()]) S.factors.delete(id); X.setFactor('__none__', 1); });
     document.addEventListener('paste', (e) => {
