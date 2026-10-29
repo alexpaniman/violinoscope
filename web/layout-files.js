@@ -96,5 +96,18 @@
     }
     return out;
   }
-  X.layoutFiles={encode,decode,missing,preserveMissing};
+  function stringify(doc) {
+    const pretty=(value,depth=0)=>{
+      if(!value || typeof value!=='object')return JSON.stringify(value);
+      const indent='  '.repeat(depth),child=indent+'  ';
+      if(Array.isArray(value)) {
+        if(value.every(v=>!v || typeof v!=='object'))return '['+value.map(v=>JSON.stringify(v)).join(', ')+']';
+        return '[\n'+value.map(v=>child+pretty(v,depth+1)).join(',\n')+'\n'+indent+']';
+      }
+      const entries=Object.entries(value);
+      return entries.length ? '{\n'+entries.map(([k,v])=>child+JSON.stringify(k)+': '+pretty(v,depth+1)).join(',\n')+'\n'+indent+'}' : '{}';
+    };
+    return pretty(encode(doc))+'\n';
+  }
+  X.layoutFiles={encode,decode,stringify,missing,preserveMissing};
 })();

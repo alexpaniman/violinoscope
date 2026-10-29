@@ -46,7 +46,7 @@
       if(el.hasAttribute('data-layout-import'))$('layout-file').click();
       if(el.hasAttribute('data-layout-export')){
         const doc=current(),file=`${doc.name.replace(/[\\/:*?"<>|]/g,'-')}.layout.json`;
-        X.download.save(new Blob([JSON.stringify(X.layoutFiles.encode(doc),null,2)+'\n'],{type:'application/json'}),file);
+        X.download.save(new Blob([X.layoutFiles.stringify(doc)],{type:'application/json'}),file);
       }
       if(el.hasAttribute('data-layout-delete')){library=library.filter(d=>d.name!==active);active=null;base=null;store();render();}
     };
