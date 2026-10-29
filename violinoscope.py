@@ -259,9 +259,14 @@ def build(args):
                 children[s['parent']].append(s)
             text = first_attr(spans, args.text_attr) if args.text_attr else None
             text = text if isinstance(text, str) else ''
-            group, label = None, None
-            if label_regex and text:
-                m = label_regex.search(text)
+            label_value = first_attr(spans, args.label_attr) if args.label_attr else None
+            label_value = str(label_value) if label_value is not None else ''
+            if args.skip_label and re.search(args.skip_label, label_value):
+                continue
+            group, label = None, label_value or None
+            label_source = label_value if args.label_attr else text
+            if label_regex and label_source:
+                m = label_regex.search(label_source)
                 if m:
                     group, label = m.groupdict().get('group'), m.groupdict().get('label')
             if args.skip_text and re.search(args.skip_text, text or ''):
@@ -460,7 +465,9 @@ def main():
                          'or the value of an attribute on any span of the trace')
     ap.add_argument('--text-attr', default='db.query.text', metavar='KEY',
                     help='the attribute holding query text, for --label-regex, --skip-text, --with-text and fingerprints')
-    ap.add_argument('--label-regex', metavar='REGEX', help='named groups "group" and "label" read from the query text')
+    ap.add_argument('--label-attr', metavar='KEY', help='Attribute supplying the unit label, independently of query text')
+    ap.add_argument('--skip-label', metavar='REGEX', help='Leave out units whose --label-attr value matches')
+    ap.add_argument('--label-regex', metavar='REGEX', help='Named groups group and label read from --label-attr, or query text')
     ap.add_argument('--cpu-attr', metavar='KEY', help="an attribute of the unit's span with its CPU time in microseconds")
     ap.add_argument('--skip-text', metavar='REGEX', help='leave out units whose query text matches, e.g. warm-up runs')
     ap.add_argument('--name', action='append', default=[], metavar='GROUP=LABEL', help='display name of a group or an input')
@@ -478,6 +485,8 @@ def main():
         ap.error('give span files or --jaeger')
     if args.group_by not in ('label', 'dataset') and not args.group_by.startswith('attr:'):
         ap.error('--group-by is label, dataset or attr:KEY')
+    if args.skip_label and not args.label_attr:
+        ap.error('--skip-label requires --label-attr')
     if args.jaeger and not args.service:
         ap.error('--jaeger requires --service')
     try:

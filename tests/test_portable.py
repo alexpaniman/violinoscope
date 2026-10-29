@@ -101,6 +101,21 @@ class Portable(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('choose --unit', result.stderr)
 
+    def test_labels_and_warmup_do_not_depend_on_query_text(self):
+        file = self.folder/'labels.jsonl'
+        spans = []
+        for i, label in enumerate(['00001-q42-warmup.sql', '00001-q42.sql']):
+            spans.append({**self.root,'traceId':f'{i+1:032x}', 'attributes':[
+                {'key':'query.name','value':{'stringValue':label}},
+                {'key':'db.query.text','value':{'stringValue':'redacted'}}]})
+        file.write_text('\n'.join(map(json.dumps,spans)))
+        result = self.run_cli(str(file),'--label-attr','query.name','--skip-label',r'.*-warmup\.sql$',
+                              '--label-regex',r'^\d+-(?P<label>q\d+)')
+        self.assertEqual(result.returncode,0,result.stderr)
+        html=(self.folder/'violinoscope.html').read_text()
+        self.assertIn('"l":"q42"',html)
+        self.assertIn('"datasets":[["labels",1]]',html)
+
     def test_flow_attributes_are_configurable(self):
         child = {**self.root,'spanId':'fedcba9876543210','parentSpanId':self.root['spanId'],'name':'Job',
                  'attributes':[{'key':'custom.flow','value':{'stringValue':'async'}}]}

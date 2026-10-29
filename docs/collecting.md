@@ -12,7 +12,7 @@ python3 tests/synth.py /tmp/after.jsonl --group after --traces 200 --seed 2
 python3 violinoscope.py /tmp/before.jsonl /tmp/after.jsonl --unit "Handle request"
 ```
 
-For a real workload, use the application's existing OTLP exporter or export individual span objects as protobuf JSON. Choose a root span that occurs once per request. Put a run name in the resource attribute `dataset.name`, or use `name=path` on the converter command line.
+For a real workload, use the application's existing OTLP exporter or export individual span objects as protobuf JSON. Choose a root span that occurs once per request. Put a run name in the resource attribute `dataset.name`, or use `name=path` on the converter command line. Use `--label-attr job.name` to label units from a span attribute; `--skip-label warmup` filters that value. This works even when query text is absent or redacted.
 
 ## OpenTelemetry Collector
 
