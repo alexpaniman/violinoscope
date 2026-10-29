@@ -95,6 +95,11 @@ class Portable(unittest.TestCase):
         result = self.run_cli(str(file))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('choose --unit', result.stderr)
+        first[-1]['status'] = {'code':'STATUS_CODE_ERROR'}
+        file.write_text(json.dumps(self.doc))
+        result = self.run_cli(str(file))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('choose --unit', result.stderr)
 
     def test_flow_attributes_are_configurable(self):
         child = {**self.root,'spanId':'fedcba9876543210','parentSpanId':self.root['spanId'],'name':'Job',
