@@ -15,6 +15,7 @@ function fixture(extra = {}) {
     reindex:()=>{data.columnIndex = new Map(data.columns.map((c,k)=>[c.id,k]));}};
   const context = {window:{TX:X},localStorage:{getItem:()=>null,setItem:()=>{}}};
   vm.runInNewContext(fs.readFileSync(`${__dirname}/../web/flows.js`, 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(`${__dirname}/../web/definition-model.js`, 'utf8'), context);
   vm.runInNewContext(source, context);
   events.get('chunk')(0);
   const T=X.layout, path=(...xs)=>xs.join(sep), root='Compile';
@@ -41,7 +42,7 @@ test('merge retains operands and their exclusions',()=>{
 test('projections are independent, moving changes ownership',()=>{
  const {T,a,b,x,y,root}=fixture(); const g=T.merge([x,y],'Annotations'); const c=T.copyOver(g);
  near(T.msOf(c)[0],15); T.hide(g); near(T.msOf(a)[0],50); near(T.msOf(b)[0],35);
- const moved=T.transfer(c,root); near(T.msOf(a)[0],50); near(T.msOf(b)[0],35); assert.ok(!T.isMerged(c));
+ const moved=T.transfer(c,root); near(T.msOf(a)[0],50); near(T.msOf(b)[0],35); assert.equal(moved,c);
  const back=T.transfer(moved,'~two'); near(T.msOf(a)[0],60); near(T.msOf(back)[0],15); T.check();
 });
 test('hidden groups remain definitions, restore and roundtrip without changing time',()=>{
@@ -52,6 +53,27 @@ test('hidden groups remain definitions, restore and roundtrip without changing t
  assert.deepEqual([a,b,g,root].map(id=>T.msOf(id)[0]),times);
  const saved=JSON.stringify(T.state()); T.load(T.state()); assert.equal(JSON.stringify(T.state()),saved);
  T.add([g]); assert.ok(T.shown(g)); assert.equal(T.parentOf(x),g); T.check();
+});
+test('copies keep transferred holes and independent later edits',()=>{
+ const {T,a,x,y}=fixture();const g=T.merge([x,y],'Extracted'),c=T.copyOver(a);
+ near(T.msOf(a)[0],50);near(T.msOf(c)[0],50);
+ T.exclude(g,[x]);near(T.msOf(a)[0],60);near(T.msOf(c)[0],50);
+ T.load(T.state());near(T.msOf(c)[0],50);T.check();
+});
+test('copy preserves a transferred definition with excluded descendants',()=>{
+ const {T}=fixture({names:['Compile','P','A','X','B'],rows:[0,-1,0,100000,1,1,0,0,80000,0,2,1,0,60000,0,3,2,10000,20000,0,4,0,80000,10000,0]});
+ const p='Compile'+sep+'P',a=p+sep+'A',x=a+sep+'X',b='Compile'+sep+'B';
+ T.exclude(a,[x]);T.merge([a,b],'Extracted');near(T.msOf(p)[0],40);
+ const c=T.copyOver(p);near(T.msOf(c)[0],40);T.check();
+});
+test('a group retains its placement when its other branch is removed',()=>{
+ const {T,a,x,y,root}=fixture();const g=T.merge([x,y],'Both');T.leave(y,g);
+ assert.equal(T.parentOf(g),root);near(T.msOf(a)[0],50);near(T.msOf(g)[0],10);T.check();
+});
+test('extracted projection inputs retain their former containing bounds',()=>{
+ const {T}=fixture({names:['Compile','H','P','A','Q'],rows:[0,-1,0,100000,1,1,0,0,100000,0,2,1,0,60000,0,3,2,0,70000,0,4,1,80000,10000,0]});
+ const h=T.copyOver('Compile'+sep+'H'),p=T.kids(h).find(k=>T.spanName(k)==='P'),q=T.kids(h).find(k=>T.spanName(k)==='Q'),a=T.kids(p)[0];
+ near(T.msOf(a)[0],60);const g=T.merge([a,q],'Parts');near(T.msOf(g)[0],70);near(T.msOf(a)[0],60);T.check();
 });
 test('merge preserves exclusions inherited from the parent it leaves',()=>{
  const {T}=fixture({names:['Compile','P','A','X','B'],rows:[0,-1,0,100000,1,1,0,0,80000,0,2,1,0,60000,0,3,2,10000,20000,0,4,0,80000,10000,0]});
@@ -199,7 +221,7 @@ test('full breakdown applies intersecting main and projection what-if factors ex
 
 test('moving a span preserves its edited descendants',()=>{
  const {T,a,x,z}=fixture(); T.add([x,z]);T.rename(x,'Renamed annotation');T.exclude(x,[]);
- const c=T.transfer(a,'~two'); assert.equal(T.label(copy(x)),'Renamed annotation');assert.ok(T.shown(copy(x)));
+ const c=T.transfer(a,'~two'), child=T.kids(c).find(id=>T.sourceKey(id)===x); assert.equal(T.label(child),'Renamed annotation');assert.ok(T.shown(child));
  const moved=T.transfer(c,'Compile');assert.equal(moved,a);assert.equal(T.label(x),'Renamed annotation');assert.ok(T.shown(x));T.check();
 });
 test('legacy async groups migrate without stealing elapsed time',()=>{
@@ -217,7 +239,44 @@ test('an excluded descendant can be a separate merge operand',()=>{
 
 test('async migration respects an existing projection membership',()=>{
  const {T,a,b,async}=fixture();T.load({v:2,groups:[['g1','Mixed',[a,async]],['g2','Projection',[copy(async),copy(b)],{tree:2}]],shown:['g1','g2'],open:[]});
- near(T.msOf('g1')[0],60);assert.ok(T.members('g2').includes(copy(async)));T.check();
+ near(T.msOf('g1')[0],60);assert.ok(T.members('g2').some(id=>T.sourceKey(id)===async));T.check();
+});
+test('independent projections retain overlapping inputs and separate edits',()=>{
+ const {T,x,y,z}=fixture(); const a=T.merge([copy(x),copy(y)],'First'),b=T.merge([copy(y),copy(z)],'Second');
+ near(T.msOf(a)[0],15);near(T.msOf(b)[0],10);assert.equal(T.members(a).length,2);
+ assert.ok(!T.members(a).some(id=>T.members(b).includes(id)));
+ T.exclude(b,[copy(y)]);near(T.msOf(a)[0],15);near(T.msOf(b)[0],5);
+ const saved=JSON.stringify(T.state());T.load(T.state());assert.equal(JSON.stringify(T.state()),saved);
+ near(T.msOf(a)[0],15);near(T.msOf(b)[0],5);T.check();
+});
+test('independent projection factors multiply and do not depend on display',()=>{
+ const {T,X,a}=fixture(),first=T.copyOver(a),factors=new Map([[first,.5]]);
+ near(T.project(factors).total[0],70);
+ const second=T.copyOver(a);near(T.project(factors).total[0],70);
+ const k1=X.data.columns.findIndex(c=>c.id===first),k2=X.data.columns.findIndex(c=>c.id===second);
+ near(X.data.units[0].o[k1],.6);near(X.data.units[0].o[k2],.6);
+ factors.set(second,.5);near(T.project(factors).total[0],55);
+ T.move(first,second,true);near(T.project(factors).total[0],55);
+ T.hide(first);near(T.project(factors).total[0],55);assert.ok(T.scenarioActive(factors));
+ const projection=T.project(factors);X.proj=()=>projection;X.scenarioKey=()=>T.scenarioKey(factors);
+ near(T.breakdown().rows[0].reduce((a,b)=>a+b,0),.55);
+});
+test('missing sources remain editable zero-valued inputs',()=>{
+ const {T,root,x}=fixture(),missing=root+sep+'Future phase';
+ T.load({v:5,groups:[['g1','Reusable',[x,missing]]],shown:['g1']});
+ assert.ok(T.members('g1').includes(missing));near(T.msOf(missing)[0],0);assert.equal(T.hasPath(missing),false);
+ T.leave(missing,'g1');const state=T.state();T.load(state);assert.ok(!T.members('g1').includes(missing));T.check();
+});
+test('overlap attribution is independent of displayed row order and names',()=>{
+ const {T}=fixture({names:['Compile','A','B'],rows:[0,-1,0,100000,1,1,0,0,60000,0,2,0,40000,40000,0]});
+ const a='Compile'+sep+'A',b='Compile'+sep+'B';
+ const values=()=>{const d=T.breakdown();return Object.fromEntries(d.nodes.map((n,k)=>[n.id,d.rows[0][k]]));};
+ const before=values();T.move(a,b,true);T.rename(a,'ZZZ');assert.deepEqual(values(),before);
+});
+test('invalid imports reject ownership cycles without changing the layout',()=>{
+ const {T}=fixture(),before=JSON.stringify(T.state());
+ assert.throws(()=>T.load({v:5,groups:[['g1','A',['g2']],['g2','B',['g1']],['g3','C',['g1']]]}),/owner|cycle/);
+ assert.equal(JSON.stringify(T.state()),before);
 });
 function dependencyFixture() {
  const f=fixture({names:['Compile','Prepare','Dependency batch','Request A','Decode','Request B'],

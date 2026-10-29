@@ -148,48 +148,9 @@
   // apply, multiplied.
 
   let proj = null;
-  X.scenarioOn = () => data.columns.some((c) => !c.async && S.factors.has(c.id) && S.factors.get(c.id) !== 1);
-  X.scenarioKey = () => [...S.factors].filter(([k, f]) => f !== 1 && data.columnIndex.has(k)).map(([k, f]) => `${k}=${f}`).sort().join(',');
-  X.project = () => {
-    if (!X.scenarioOn()) { proj = null; return; }
-    const NC = X.NC, eff = new Float64Array(NC);
-    for (let k = 0; k < NC; k++) {
-      let f = 1;
-      for (let p = k; p >= 0; p = X.parentIdx[p]) if (!data.columns[p].async)
-        f *= S.factors.has(data.columns[p].id) ? S.factors.get(data.columns[p].id) : 1;
-      // A dependency group's own speed-up needs a critical-path model. It still belongs to its enclosing
-      // phase, so a factor on that whole phase scales its coverage even when the group is displayed.
-      eff[k] = data.columns[k].second && data.columns[k].async ? 1 : f;
-    }
-    // N1: the first tree's columns; parts: the split of the unit's time, those and what none of them counts.
-    const N1 = data.partition.length - 1, P = N1 + 1;
-    const total = new Float64Array(X.NU), col = new Float64Array(X.NU * NC), own = new Float64Array(X.NU * P), save = new Float64Array(NC);
-    data.units.forEach((u, i) => {
-      // Shares of the unit saved: by each column's own time, and under no violin.
-      let all = 0, under = 0;
-      for (let k = 0; k < NC; k++) save[k] = k < N1 ? u.p[k] * (1 - eff[k]) : 0;
-      for (let k = 0; k < N1; k++) all += save[k];
-      if (u.x) {
-        for (let q = 0; q < u.x.length; q += 3) {
-          const k = u.x[q], j = u.x[q + 1], sh = u.x[q + 2], first = k >= 0 ? eff[k] : 1;
-          // The second factor on what the first one left.
-          const more = sh * first * (1 - eff[j]);
-          if (k >= 0) save[k] += more; else under += more;
-          save[j] += sh * (1 - first * eff[j]);
-          all += more;
-        }
-      }
-      total[i] = Math.max(1e-3, u.ms * (1 - all));
-      for (let k = 0; k < NC; k++) {
-        let s = 0;
-        for (let d = k; d <= X.subEnd[k]; d++) s += save[d];
-        col[i * NC + k] = Math.max(0, (u.s[k] - s) * u.ms);
-      }
-      for (let k = 0; k < N1; k++) own[i * P + k] = Math.max(0, u.p[k] - save[k]);
-      own[i * P + N1] = Math.max(0, u.p[N1] - under);
-    });
-    proj = { total, col, eff, own, P };
-  };
+  X.scenarioOn = () => X.layout.ready && X.layout.scenarioActive(S.factors);
+  X.scenarioKey = () => X.layout.ready ? X.layout.scenarioKey(S.factors) : '';
+  X.project = () => { proj = X.scenarioOn() ? X.layout.project(S.factors) : null; };
   X.proj = () => proj;
   X.partMs = (i, k, measured) => (proj && !measured ? proj.col[i * X.NC + k] : data.units[i].s[k] * data.units[i].ms);
   X.totalMs = (i, measured) => (proj && !measured ? proj.total[i] : data.units[i].ms);
