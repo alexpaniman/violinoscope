@@ -298,6 +298,9 @@ def build(args):
         print(f'{fallback}: {n_spans} spans, {len(by_trace)} traces, {units} units', file=sys.stderr)
     if not records:
         sys.exit(f'no units found: no span is named {args.unit!r}' if args.unit else 'no units found')
+    root_names = {r['tree'][0][0] for r in records}
+    if not args.unit and len(root_names) > 1:
+        raise ValueError('Multiple root span names; choose --unit: ' + ', '.join(sorted(root_names)))
     runs = list(dict.fromkeys(r['dataset'] for r in records + failures))
     unit = args.unit or unit_names.most_common(1)[0][0]
     write_bundle(args, unit, records, failures, runs)

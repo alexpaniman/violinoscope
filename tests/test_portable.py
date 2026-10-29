@@ -87,6 +87,15 @@ class Portable(unittest.TestCase):
                 ['g1','First',['Request\x01A'],{'parent':'g2'}],
                 ['g2','Second',['Request\x01B'],{'parent':'g1'}]]}})
 
+    def test_different_roots_require_a_unit(self):
+        first = self.doc['resourceSpans'][0]['scopeSpans'][0]['spans']
+        first.append({**self.root, 'name':'Another operation','spanId':'123456789abcdef0'})
+        file = self.folder/'roots.json'
+        file.write_text(json.dumps(self.doc))
+        result = self.run_cli(str(file))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('choose --unit', result.stderr)
+
     def test_flow_attributes_are_configurable(self):
         child = {**self.root,'spanId':'fedcba9876543210','parentSpanId':self.root['spanId'],'name':'Job',
                  'attributes':[{'key':'custom.flow','value':{'stringValue':'async'}}]}

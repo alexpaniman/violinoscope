@@ -8,7 +8,7 @@ python3 violinoscope.py before.jsonl after.jsonl --unit "Handle request" -o repo
 
 Open `report.html` in a browser. It contains everything and works offline. Python 3.9+ is the only build dependency; no server or JavaScript build step.
 
-Inputs can be OTLP JSON, OpenTelemetry Collector JSON lines, Jaeger JSON, individual protobuf-JSON spans, or gzip versions of these. Files, directories and quoted globs work. Dataset names come from `dataset.name`, then `service.name`, then filenames; `baseline=before.jsonl` supplies an explicit name. Omit `--unit` to use trace roots.
+Inputs can be OTLP JSON, OpenTelemetry Collector JSON lines, Jaeger JSON, individual protobuf-JSON spans, or gzip versions of these. Files, directories and quoted globs work. Dataset names come from `dataset.name`, then `service.name`, then filenames; `baseline=before.jsonl` supplies an explicit name. Omit `--unit` when trace roots all have the same name.
 
 The layout icon between the picture and download buttons saves, switches, imports and exports named layouts. Edits autosave in your browser; export JSON to share or keep them. Drop a layout file onto the page, or use it when building:
 
