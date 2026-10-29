@@ -4,7 +4,9 @@ A unit is one occurrence of the span selected with `--unit`. A violin describes 
 
 The main tree partitions that budget. Extracting paths into another main-tree violin transfers their coverage out of their former owners. Intermediate parents measure their remaining coverage. A merged violin retains its parts and their exclusions; overlapping intervals count once. Projections measure independent combinations and take nothing from the main tree.
 
-Opening, closing and hiding change what is displayed. They do not change a retained merged violin's definition. Taking a member out through **Made of**, excluding a span, splitting a merge, or moving a projection into the main tree changes that definition. A main-tree move offers only destinations that contain all its spans, with a preview of the transfer. Keyboard undo restores exact layout snapshots.
+Opening, closing and hiding change what is displayed. Hidden intermediate and merged violins retain their definitions and assignments; the **+** picker restores them. Empty definitions also survive. Taking a member out through **Made of**, excluding a span, splitting a merge, or moving a projection into the main tree changes the model. A main-tree move offers only destinations that contain all its spans, with a preview of the transfer. Keyboard undo restores exact layout snapshots.
+
+A merge retains the effective definitions selected, including exclusions inherited from a level they leave. Exclusions subtract intervals after union: excluding a part is not equivalent to removing its input when another input overlaps it. Taking an input out changes all derived ancestors that depend on it; it is not silently inserted into an outer merge.
 
 Own time belongs to the deepest shown violin covering an interval. What nothing covers completes the elapsed-time budget. The automatic time breakdown uses the whole underlying tree, independently of which violins are open.
 

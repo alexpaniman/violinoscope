@@ -40,9 +40,36 @@ test('merge retains operands and their exclusions',()=>{
 });
 test('projections are independent, moving changes ownership',()=>{
  const {T,a,b,x,y,root}=fixture(); const g=T.merge([x,y],'Annotations'); const c=T.copyOver(g);
- near(T.msOf(c)[0],15); T.hide(g); near(T.msOf(a)[0],60); near(T.msOf(b)[0],40);
+ near(T.msOf(c)[0],15); T.hide(g); near(T.msOf(a)[0],50); near(T.msOf(b)[0],35);
  const moved=T.transfer(c,root); near(T.msOf(a)[0],50); near(T.msOf(b)[0],35); assert.ok(!T.isMerged(c));
  const back=T.transfer(moved,'~two'); near(T.msOf(a)[0],60); near(T.msOf(back)[0],15); T.check();
+});
+test('hidden groups remain definitions, restore and roundtrip without changing time',()=>{
+ const {T,X,a,b,x,y,root}=fixture(); T.add([x,y]); const g=T.merge([x,y],'Annotations');
+ const times=[a,b,g,root].map(id=>T.msOf(id)[0]); T.hide(g);
+ assert.ok(T.isMerged(g)); assert.ok(T.candidates(root,'Annotations').some(r=>r.id===g));
+ assert.ok(!X.data.columns.some(c=>c.id===g)); assert.ok(X.data.columns.some(c=>c.id===x));
+ assert.deepEqual([a,b,g,root].map(id=>T.msOf(id)[0]),times);
+ const saved=JSON.stringify(T.state()); T.load(T.state()); assert.equal(JSON.stringify(T.state()),saved);
+ T.add([g]); assert.ok(T.shown(g)); assert.equal(T.parentOf(x),g); T.check();
+});
+test('merge preserves exclusions inherited from the parent it leaves',()=>{
+ const {T}=fixture({names:['Compile','P','A','X','B'],rows:[0,-1,0,100000,1,1,0,0,80000,0,2,1,0,60000,0,3,2,10000,20000,0,4,0,80000,10000,0]});
+ const p='Compile'+sep+'P',a=p+sep+'A',x=a+sep+'X',b='Compile'+sep+'B';
+ T.exclude(p,[x]);near(T.msOf(a)[0],40);const g=T.merge([a,b],'Together');
+ near(T.msOf(g)[0],50);near(T.msOf(a)[0],40);near(T.msOf(p)[0],20);
+ assert.ok(T.excluded(p).includes(x));assert.ok(T.excluded(a).includes(x));T.check();
+});
+test('exclude cuts overlapping coverage supplied by another input',()=>{
+ const {T}=fixture({names:['Compile','A','B'],rows:[0,-1,0,100000,1,1,0,0,60000,0,2,0,40000,40000,0]});
+ const a='Compile'+sep+'A',b='Compile'+sep+'B',g=T.merge([a,b],'Overlap');near(T.msOf(g)[0],80);
+ T.exclude(g,[a]);near(T.msOf(g)[0],20);assert.ok(T.excluded(g).includes(a));T.check();
+});
+test('taking a part out propagates through derived ancestors and keeps empty definitions',()=>{
+ const {T,x,y,z}=fixture();const g=T.merge([x,y],'Inner'),h=T.merge([g,z],'Outer');
+ T.leave(x,g);near(T.msOf(g)[0],5);near(T.msOf(h)[0],10);assert.ok(!T.members(h).includes(x));
+ T.leave(y,g);near(T.msOf(g)[0],0);near(T.msOf(h)[0],5);assert.ok(T.isMerged(g));
+ const s=JSON.stringify(T.state());T.load(T.state());assert.equal(JSON.stringify(T.state()),s);T.check();
 });
 test('snapshot undo and redo restore exact definitions and display',()=>{
  const {T,x,y}=fixture(); const before=JSON.stringify(T.state()); T.merge([x,y],'Named'); const after=JSON.stringify(T.state());
@@ -153,9 +180,9 @@ test('full breakdown is independent of visibility and respects transfers and exc
  assert.ok(!d.nodes.some(n=>n.id===async));
  T.expand(a);T.hide(x);assert.equal(T.breakdown(),d,'display changes must reuse the measured breakdown');
  const g=T.merge([x,y],'Annotations');d=T.breakdown();near(total(d,g),15);near(total(d,a),50);near(total(d,b),35);
- T.exclude(g,[x]);d=T.breakdown();near(total(d,g),5);near(total(d,root),100);near(own(d,x),10);
+ T.exclude(g,[x]);d=T.breakdown();near(total(d,g),5);near(total(d,root),100);near(own(d,x),0);near(total(d,a),60);
  T.rename(z,'Renamed small step');assert.ok(T.breakdown().nodes.some(n=>n.label==='Renamed small step'));
- T.hide(a);d=T.breakdown();near(own(d,a),45);near(total(d,root),100);
+ T.hide(a);d=T.breakdown();near(own(d,a),55);near(total(d,root),100);
  near(d.rows[0].reduce((s,v)=>s+v,0),1);
 });
 

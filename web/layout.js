@@ -190,7 +190,8 @@
     const p = pathOf(id);
     if (p >= 0) return paths[p].depth;
     if (id === REST) return 1;
-    return Math.min(...L.groups.get(id).members.map(callDepth));
+    const parts = L.groups.get(id).members;
+    return parts.length ? Math.min(...parts.map(callDepth)) : 0;
   }
   // Whether node x lies inside node y, in the same tree: under one of y's paths, or one of its members.
   function inside(x, y) {
@@ -249,7 +250,7 @@
     return in2.has(a) ? copyOf(a) : ROOT2;
   }
   // Every node's children, shown or not; built again whenever what is merged changes.
-  let kidsOf = new Map();
+  let kidsOf = new Map(), modelKids = new Map();
   let definitionKey = '';
   function relink() {
     parentCache = new Map();
@@ -266,8 +267,12 @@
     for (const P of paths) if (P.independent && (!paths[P.parent] || !paths[P.parent].independent)) grow(P.id);
     for (const d of L.groups.values()) if (d.tree === 2) for (const m of d.members) if (isCopy(m)) grow(pathOf(m));
     transfers = [...new Set([...memberOf.keys(), ...L.parents.keys(), ...L.top2])];
-    kidsOf = new Map();
-    const add = (id) => { const p = parentOf(id); if (p !== null) (kidsOf.get(p) || kidsOf.set(p, []).get(p)).push(id); };
+    kidsOf = new Map(); modelKids = new Map();
+    const add = (id) => {
+      const model = callParent(id), display = parentOf(id);
+      if (model !== null) (modelKids.get(model) || modelKids.set(model, []).get(model)).push(id);
+      if (display !== null && !L.skip.has(id)) (kidsOf.get(display) || kidsOf.set(display, []).get(display)).push(id);
+    };
     for (const P of paths) if (P.id !== rootPath && !P.independent) add(P.key);
     for (const key of in2) add(copyOf(key));
     for (const g of L.groups.keys()) add(g);
@@ -282,9 +287,11 @@
     const p = pathOf(id);
     if (p >= 0) { const P = paths[p]; return P.n ? P.start / P.n : 1; }
     if (id === REST) return 2;
-    return Math.min(...L.groups.get(id).members.map(startOf));
+    const parts = L.groups.get(id).members;
+    return parts.length ? Math.min(...parts.map(startOf)) : 2;
   }
   const kidsOfNode = (id) => kidsOf.get(id) || [];
+  const modelChildren = (id) => modelKids.get(id) || [];
   function shownOf(id) {
     if (isRoot(id)) return true;
     const p = id === null ? null : parentOf(id);
@@ -377,7 +384,7 @@
   // ---------------------------------------------------------------------------------------------------------
   // Changing what is shown.
 
-  function descendants(id, out = []) { for (const k of kidsOfNode(id)) { out.push(k); descendants(k, out); } return out; }
+  function descendants(id, out = []) { for (const k of modelChildren(id)) { out.push(k); descendants(k, out); } return out; }
   // Closed: what is under it waits, shown or open as it was, for when it opens again.
   function collapse(id) { L.open.delete(id); }
   // Opening a node shows what was shown under it before; the first time, its children that take a fair share of its
@@ -400,50 +407,31 @@
     }
     if (removed) for (const list of L.order.values()) { const k = list.indexOf(id); if (k >= 0) list.splice(k, 1); }
   }
-  // A hidden operand survives while another definition references it. Unreferenced groups removed from the
-  // layout release their members; a remaining single part retains its name and exclusions.
+  // Definitions survive hiding and becoming empty. Only explicit dissolution removes a definition.
   function drop(g) {
     unshow(g);
     L.groups.delete(g); L.except.delete(g); L.names.delete(g); L.order.delete(g); L.parents.delete(g);
     for (const list of L.order.values()) { const k = list.indexOf(g); if (k >= 0) list.splice(k, 1); }
   }
   function prune() {
-    for (let changed = true; changed;) {
-      changed = false;
-      const referenced = new Set([...L.groups.values()].flatMap((d) => d.members));
-      for (const [g, d] of [...L.groups]) {
-        d.members = [...new Set(d.members)].filter(exists);
-        if (!d.members.length || (!L.shown.has(g) && !referenced.has(g))) {
-          for (const parent of L.groups.values()) parent.members = parent.members.filter((m) => m !== g);
-          drop(g); changed = true;
-        }
-      }
-      if (changed) relink();
-    }
+    for (const d of L.groups.values()) d.members = [...new Set(d.members)].filter(exists);
     for (const [id, p] of L.parents) if (!exists(id) || (!exists(p) && p !== ROOT2)) L.parents.delete(id);
   }
   // Removed: its parent still counts it; put at the top of the second tree, it leaves it; merged, it goes. A span
   // open with children shown leaves just its level: they move up to its parent, which holds them as it held it.
-  const lifts = (id) => !L.groups.has(id) && pathOf(id) >= 0 && isOpen(id) && kidsOfNode(id).some((k) => L.shown.has(k));
+  const lifts = (id) => isOpen(id) && kidsOfNode(id).some((k) => L.shown.has(k));
   function hide(id) {
-    if (memberOf.has(id)) { unshow(id); return; }
-    if (lifts(id)) {
-      L.skip.add(id);
-      L.shown.delete(id); L.open.delete(id);
-      relink();
-      return;
-    }
-    unshow(id, true);
-    if (L.groups.has(id)) { drop(id); relink(); }
-    if (L.top2.delete(id)) relink();
+    if (isRoot(id) || !exists(id)) return;
+    if (!isOpen(id)) unshow(id);
+    L.skip.add(id);
+    L.shown.delete(id); L.open.delete(id);
+    relink();
   }
   // Left out of a node's time: spans inside it; put back, one at a time.
   function exclude(id, spans) {
     const list = L.except.get(id) || [];
     for (const m of spans) {
       if (m === id || !exists(m) || !contains(id, m) || (treeOf(id) === 1 && independentOf(m))) continue;
-      const d = L.groups.get(id);
-      if (d && d.members.includes(m)) { leave(m, id); continue; }
       if (!list.includes(m)) list.push(m);
       unshow(m);
     }
@@ -471,6 +459,7 @@
   // Shown, with every node above it shown and open, up to `stop`.
   function showUp(id, stop) {
     for (let k = id; k !== null && k !== stop && !isRoot(k); k = parentOf(k)) {
+      if (k === id) L.skip.delete(k);
       L.shown.add(k);
       const p = parentOf(k);
       if (p !== null && !isRoot(p)) L.open.add(p);
@@ -502,6 +491,12 @@
     for (const [g, d] of L.groups) if (g !== keep) d.members = d.members.filter((x) => !list.includes(x));
     for (const m of list) { L.top2.delete(m); L.parents.delete(m); }
   }
+  // A move preserves the selected definition, including cuts inherited from a level it leaves.
+  // Ownership transfers remain derived; only real exclusions are carried into the moved part.
+  function retainCuts(ids) {
+    const cuts = ids.map(id => [id, [...new Set(coverageOf(id).excluded)]]);
+    for (const [id, list] of cuts) if (list.length) L.except.set(id, list);
+  }
   // A node before or after a sibling, its subtree with it.
   function move(id, next, after) {
     const p = parentOf(id);
@@ -522,6 +517,7 @@
     if (members.length < 2) { add(members, tree === 2 ? ROOT2 : null); return members[0] || null; }
     const home = homeOf(members), seen = new Set(keep ? members.filter(shownOf) : []);
     const id = `g${L.next++}`;
+    retainCuts(members);
     free(members, null);
     L.groups.set(id, Object.assign({ label: name || suggestName(members), members }, tree === 2 ? { tree } : {}, match ? { match } : {}));
     if (home && L.groups.has(home)) L.groups.get(home).members.push(id);
@@ -596,7 +592,7 @@
     if (!L.groups.has(into) || !canMerge(id, into)) return null;
     const parent = memberOf.get(into);
     if (parent && !inside(id, parent)) return null;
-    free([id], null);
+    retainCuts([id]); free([id], null);
     L.groups.get(into).members.push(id);
     relink(); showUp(into);
     return into;
@@ -605,9 +601,8 @@
   function leave(id, from) {
     const g = from || memberOf.get(id), d = L.groups.get(g);
     if (!d || !d.members.includes(id)) return;
-    const parent = memberOf.get(g);
+    retainCuts([id]);
     d.members = d.members.filter((x) => x !== id);
-    if (parent) L.groups.get(parent).members.push(id);
     relink();
     if (isCopy(id) && parentOf(id) === null) { L.top2.add(id); relink(); }
     showUp(id);
@@ -729,7 +724,7 @@
     const found = (s) => s && s.toLowerCase().includes(q);
     const offer = (k, name, trail, deep) => { if (!shownOf(k) && (!q || found(name) || found(spanName(k)))) out.push({ id: k, label: name, where: trail.join(' › '), group: L.groups.has(k), deep }); };
     const walk = (id, trail, deep) => {
-      for (const k of kidsOfNode(id)) {
+      for (const k of modelChildren(id)) {
         offer(k, label(k), trail, deep);
         walk(k, [...trail, label(k)], true);
       }
@@ -742,7 +737,7 @@
     };
     if (under === ROOT2) {
       anywhere(rootPath, [], false);
-      for (const k of kidsOfNode(ROOT2)) if (L.groups.has(k)) offer(k, label(k), [], false);
+      for (const k of modelChildren(ROOT2)) if (L.groups.has(k)) offer(k, label(k), [], false);
     } else walk(under, [], false);
     const rows = out.slice(0, 400).map((c) => Object.assign(c, shareIn(c.id, under)));
     return rows.sort((x, y) => x.deep - y.deep || y.share - x.share);
@@ -1062,7 +1057,6 @@
       for (const [id, d] of groups) {
         const ok = d.members.filter((m) => isPath(m) || isCopy(m) || m === REST || groups.has(m));
         if (ok.length !== d.members.length) { d.members = ok; changed = true; }
-        if (ok.length < 1) { groups.delete(id); changed = true; }
       }
     }
     // Migrate the old nested-group relation into actual composition, keeping each operand intact.
@@ -1079,7 +1073,7 @@
     for (const [id, p] of s.parents || []) if (exists(id) && (exists(p) || p === ROOT2)) L.parents.set(id, p);
     for (const id of s.top2 || []) if (isCopy(id)) L.top2.add(id);
     for (const [p, list] of s.order || []) L.order.set(p, list);
-    for (const id of s.skip || []) if (pathOf(id) >= 0) L.skip.add(id);
+    for (const id of s.skip || []) if (exists(id)) L.skip.add(id);
     relink();
     for (const [id, list] of s.except || []) if (exists(id)) { const ok = list.filter((m) => pathOf(m) >= 0); if (ok.length) L.except.set(id, ok); }
     for (const id of s.shown || []) if (exists(id)) L.shown.add(id);
@@ -1152,7 +1146,6 @@
   function check() {
     const seen = new Set();
     for (const [g, d] of L.groups) {
-      if (!d.members.length) throw new Error(`Empty violin: ${g}`);
       for (const m of d.members) {
         if (!exists(m) || treeOf(m) !== treeOf(g) || seen.has(m)) throw new Error(`Invalid or duplicate member: ${m}`);
         seen.add(m);
