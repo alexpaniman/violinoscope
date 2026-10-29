@@ -89,7 +89,7 @@ async def main():
             expect(await count() == n + 1, 'adding from the + list added no violin')
         # Picked with Shift (one by its name, one anywhere along it), they merge into one violin, closed; a plain
         # click elsewhere lets picked violins go; New parent puts a merged violin above them, still shown.
-        last = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.second).map(([c, k]) => [c.id, k]).slice(-2)')
+        last = await page.evaluate('''(() => { const rows=TX.violins.G.p.cols.map((c,k)=>[c,k]).filter(([c])=>!c.root&&!c.second).reverse(); for(const [a,i] of rows)for(const [b,j] of rows)if(TX.layout.canMerge(a.id,b.id))return [[a.id,i],[b.id,j]];return []; })()''')
         await page.click(f'[data-col="{last[1][1]}"]', modifiers=['Shift'])
         xy = await page.evaluate(f"""(() => {{ const G = TX.violins.G, s = document.getElementById('stage').getBoundingClientRect();
           return [s.left + G.xOf({last[0][1]}), s.top + G.TR.y0 + 2]; }})()""")
@@ -102,7 +102,7 @@ async def main():
         closed = await page.evaluate(f"""(() => {{ const T = TX.layout, ids = {[i for i, _ in last]!r};
           const g = T.parentOf(ids[0]); return T.isMerged(g) && T.shown(g) && ids.every((id) => T.parentOf(id) === g && !T.shown(id)); }})()""")
         expect(closed, 'Merge did not make one closed violin of the two')
-        two = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.second && !c.merged).map(([c, k]) => [c.id, k]).slice(-2)')
+        two = await page.evaluate('''(() => { const rows=TX.violins.G.p.cols.map((c,k)=>[c,k]).filter(([c])=>!c.root&&!c.second&&!c.merged).reverse(); for(const [a,i] of rows)for(const [b,j] of rows)if(TX.layout.canMerge(a.id,b.id))return [[a.id,i],[b.id,j]];return []; })()''')
         await page.click(f'[data-col="{two[0][1]}"]', modifiers=['Shift'])
         await page.mouse.click(5, 400)
         expect(await page.evaluate('TX.picked.size') == 0, 'a click elsewhere did not let the picked violins go')

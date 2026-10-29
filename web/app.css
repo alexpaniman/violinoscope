@@ -496,6 +496,7 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .card-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .member .pct { text-align: right; font-variant-numeric: tabular-nums; }
 .member .quiet-btn { opacity: 0; }
+.member .quiet-btn.part-toggle { opacity: 1; }
 .member:hover .quiet-btn, .member .quiet-btn:focus-visible { opacity: 1; }
 @media (hover: none) { .member .quiet-btn { opacity: 1; } }
 
