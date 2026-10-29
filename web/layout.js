@@ -170,7 +170,8 @@
   }
   const independentOf=id=>recipeFlag(id,'independent'),flowOf=id=>recipeFlag(id,'flow'),dependencyOf=id=>recipeFlag(id,'dependency');
   function structuralInside(id, parent) {
-    for (let k = id; k !== null; k = callParent(k)) if (k === parent) return true;
+    const seen=new Set();
+    for (let k = id; k !== null; k = callParent(k)) {if(k===parent)return true;if(seen.has(k))throw Error('Layout contains a placement cycle');seen.add(k);}
     return false;
   }
   const rawInside = (x, y) => {
@@ -277,11 +278,9 @@
     if (id === REST) return rootKey();
     if (!L.groups.has(id)) return null;
     if (L.groups.get(id).parent) return L.groups.get(id).parent;
-    const ap = anchor(id), direct = spansOf(id).some((m) => pathOf(m) === ap);
-    const a = paths[direct && paths[ap].parent >= 0 ? paths[ap].parent : ap].key;
-    if (L.groups.get(id).tree !== 2) return a;
-    const up = copyOf(a, scopeOf(id));
-    return in2.has(up) ? up : ROOT2;
+    // An unowned custom definition has a stable root placement. Never re-infer its parent from changing inputs:
+    // an empty input can otherwise make the inferred parent one of the group's own descendants.
+    return L.groups.get(id).tree===2 ? ROOT2 : rootKey();
   }
   // Every node's children, shown or not; built again whenever what is merged changes.
   let kidsOf = new Map(), modelKids = new Map();
@@ -596,7 +595,9 @@
   }
   // Shown, with every node above it shown and open, up to `stop`.
   function showUp(id, stop) {
+    const seen=new Set();
     for (let k = id; k !== null && k !== stop && !isRoot(k); k = parentOf(k)) {
+      if(seen.has(k))throw Error('Layout contains a display cycle');seen.add(k);
       if (k === id) L.skip.delete(k);
       L.shown.add(k);
       const p = parentOf(k);
@@ -605,26 +606,7 @@
   }
   // A node's spans: its own, or a merged node's members.
   const spansOf = id => inputsOf(id).flatMap(input=>input.span?[input.span]:spansOf(input.violin));
-  // How many merged nodes a merged node is inside; the merged nodes inside it, it included.
-  const levelOf = (g) => { let n = 0; for (let q = memberOf.get(g); q; q = memberOf.get(q)) n++; return n; };
-  function within(g) {
-    const out = new Set([g]);
-    for (let grew = true; grew;) {
-      grew = false;
-      for (const [h, d] of L.groups) if (!out.has(h) && out.has(d.parent)) { out.add(h); grew = true; }
-    }
-    return out;
-  }
-  // The deepest merged node all of them are inside, none of them being it or holding it.
-  function homeOf(list) {
-    let home = null;
-    for (const g of L.groups.keys()) {
-      if (list.some((x) => x === g || structuralInside(g, x)) || !list.every((x) => structuralInside(x, g))) continue;
-      if (home === null || levelOf(g) > levelOf(home)) home = g;
-    }
-    return home;
-  }
-  // Spans out of the merged nodes they are in, but `keep` and those it is inside; one left with fewer than two goes.
+  // Detach selected inputs from their old recipes. Empty recipes remain available for later edits.
   function free(list, keep) {
     for (const [g, d] of recipes()) if (g !== keep) d.members = d.members.filter((x) => x===g || !list.includes(x));
     for (const m of list) { L.top2.delete(m); L.parents.delete(m); }
@@ -734,9 +716,10 @@
   function leave(id, from) {
     const g = from || memberOf.get(id), d = definitionOf(g);
     if (!d || !d.members.includes(id)) return;
-    const retain = retainContext([id]);
+    const retain = retainContext([id]),surrounding=callParent(g);
     d.members = d.members.filter((x) => x !== id);
     delete d.match;
+    placeReleased(id,g,surrounding);
     relink();
     retain();
     if (isCopy(id) && parentOf(id) === null) { L.top2.add(id); relink(); }
@@ -755,10 +738,11 @@
       return;
     }
     const keep = shownOf(id) ? largest(d.members, id) : [];
-    const parent = memberOf.get(id), retain = retainContext(d.members);
+    const parent = memberOf.get(id), surrounding=callParent(id), retain = retainContext(d.members);
     if (parent) definitionOf(parent).inputs = inputsOf(parent).flatMap(input => input.violin===id ? d.inputs.map(Definitions.typedInput) : [input]);
     for (const m of d.members) if (L.except.has(id)) L.except.set(m, [...new Set([...(L.except.get(m) || []), ...L.except.get(id)])]);
     drop(id);
+    if(!parent)for(const member of d.members)placeReleased(member,id,surrounding);
     relink();
     retain();
     for (const m of d.members) if (isCopy(m) && parentOf(m) === null) L.top2.add(m);
@@ -780,7 +764,7 @@
   function duplicate(id, tree, remove, targetScope, preserveGroups = false) {
     const inherited = coverageOf(id);
     if (tree === 2 && targetScope === undefined) targetScope = newScope();
-    const mapping = new Map(), source = state(), sourceTree = treeOf(id);
+    const mapping = new Map(), source = state();
     const scope = moveClosure(id);
     const frozenCuts = new Map(scope.concat(id).map(x => [x, [
       ...(L.retained.get(x) || []), ...coverageOf(x).transferred.map(freezeClaim)
@@ -804,7 +788,7 @@
     const out = dup(id);
     for (const x of scope) dup(x);
     for(const x of new Set([...source.shown,...source.open,...source.skip,...source.names.map(([id])=>id)]))if(isRest(x)&&mapping.has(restParts(x)[0]))dup(x);
-    const targets = new Set(mapping.values()), freshGroups = new Set([...targets].filter((m) => L.groups.has(m)));
+    const targets = new Set(mapping.values());
     for (const [g, d] of recipes()) if (!targets.has(g) && treeOf(g) === tree) d.members = d.members.filter((m) => m===g || !targets.has(m));
     const names = new Map(source.names), exclusions = new Map(source.except), bounds = new Map(source.bounds), orders = new Map(source.order), parents = new Map(source.parents);
     for (const [x, y] of mapping) {
@@ -843,9 +827,12 @@
     if (independentOf(id)) return [];
     if(transferProblem(id))return [];
     const spans = spansOf(id).map((m) => paths[pathOf(m)].key);
+    if(!spans.length)return [{id:rootKey(),label:label(rootKey())}];
+    const mapped=new Set(moveClosure(id).map(m=>pathOf(m)>=0 ? Definitions.source(m) : m));
     if (new Set(spans).size !== spans.length) return [];
     return [rootKey(), ...paths.filter((p) => p.id !== rootPath && !p.independent && spans.every((m) => rawInside(m, p.key) && m !== p.key)).map((p) => p.key)]
       .concat([...L.groups].filter(([, d]) => d.tree !== 2).map(([g]) => g))
+      .filter(target=>{for(let p=target;p!==null;p=callParent(p))if(mapped.has(p))return false;return true;})
       .filter((p) => !independentOf(p) && spans.every((m) => {
         if (!contains(p, m)) return false;
         for (let q = p; q !== null; q = callParent(q)) if (excludedBy(q, m)) return false;
@@ -866,11 +853,17 @@
   }
   function transfer(id, target) {
     if (!destinations(id).some((d) => d.id === target)) return null;
-    const tree = target === ROOT2 ? 2 : 1, out = duplicate(id, tree, true, undefined, true);
+    const tree = target === ROOT2 ? 2 : 1;
+    const incoming=new Set(tree===1 ? moveClosure(id).map(m=>pathOf(m)>=0 ? Definitions.source(m) : m) : []);
+    const replacing=[...incoming].filter(m=>pathOf(m)>=0);
+    const retain=retainContext(replacing.flatMap(parent=>modelChildren(parent).filter(child=>L.parents.has(child) && !isRest(child) && !incoming.has(child))));
+    const out = duplicate(id, tree, true, undefined, true);
     if (target === ROOT2 && isCopy(out)) L.top2.add(out);
     else if (L.groups.has(target)) L.groups.get(target).members = [...L.groups.get(target).members,out];
     else L.parents.set(out, target);
-    relink(); showUp(out);
+    relink();
+    for(const parent of replacing)releaseUnsupported(parent);
+    retain();showUp(out);
     return out;
   }
   // Any node can be renamed; a path or the rest given back its spans' name, or none, is called that again.
@@ -924,11 +917,22 @@
   function removeInput(owner,index) {
     if(isRoot(owner))return;
     const inputs=inputsOf(owner),old=inputs[index];if(!old)return;
-    const id=Definitions.inputKey(old),retain=retainContext([...new Set([...(id!==owner?[id]:[]),...modelChildren(owner).filter(id=>!isRest(id))])]);
+    const id=Definitions.inputKey(old),surrounding=callParent(owner),retain=retainContext([...new Set([...(id!==owner?[id]:[]),...modelChildren(owner).filter(id=>!isRest(id))])]);
     if(!definitionOf(owner))L.definitions.set(owner,definition({inputs}));
     definitionOf(owner).inputs=inputs.filter((_,k)=>k!==index);delete definitionOf(owner).match;
+    if(id!==owner)placeReleased(id,owner,surrounding);
     relink();releaseUnsupported(owner);retain();
     if(id!==owner && isCopy(id) && parentOf(id)===null)L.top2.add(id);
+  }
+  function placeReleased(id,owner,surrounding) {
+    if(L.parents.get(id)===owner)L.parents.delete(id);
+    const path=pathOf(id),natural=path>=0 ? paths[path].parent : -1;
+    const parent=natural<0 ? null : isCopy(id) ? copyOf(paths[natural].key,scopeOf(id)) : paths[natural].key;
+    const seen=new Set([id]);let cycle=false;
+    for(let p=parent;p!==null;p=callParent(p)){if(seen.has(p)){cycle=true;break;}seen.add(p);}
+    let target=cycle ? surrounding : parent;
+    while(target!==null && !isRoot(target) && !supports(target,id))target=callParent(target);
+    if(cycle || target!==parent)L.parents.set(id,target || (treeOf(id)===2?ROOT2:rootKey()));
   }
   function inputChoices(owner,type,query='') {
     const q=query.trim().toLowerCase(),tree=treeOf(owner),parent=callParent(owner);
@@ -1394,6 +1398,15 @@
     for (const [p, list] of s.order || []) L.order.set(p, list);
     for (const id of s.skip || []) if (exists(id)) L.skip.add(id);
     relink();
+    // Legacy files inferred top-level group placement. Resolve that once during migration and persist it.
+    if((s.v || 0)<6)for(const [id,d] of L.groups)if(!memberOf.has(id) && !L.parents.has(id)) {
+      const ap=anchor(id),direct=spansOf(id).some(m=>pathOf(m)===ap);
+      const path=paths[direct && paths[ap].parent>=0 ? paths[ap].parent : ap].key;
+      const candidate=d.tree===2 ? copyOf(path,scopeOf(id)) : path;
+      const parent=(d.tree!==2 || in2.has(candidate)) && !structuralInside(candidate,id) ? candidate : d.tree===2 ? ROOT2 : rootKey();
+      L.parents.set(id,parent);
+    }
+    relink();
     for (const [id, list] of s.except || []) if (exists(id)) { const ok = list.filter((m) => pathOf(m) >= 0); if (ok.length) L.except.set(id, ok); }
     for (const [id, list] of s.bounds || []) if (exists(id)) L.bounds.set(id,list);
     for (const id of s.shown || []) if (exists(id)) L.shown.add(id);
@@ -1476,7 +1489,7 @@
   }
   function undo() { if (!past.length) return false; future.push(snapshot()); restoreSnapshot(past.pop()); return true; }
   function redo() { if (!future.length) return false; past.push(snapshot()); restoreSnapshot(future.pop()); return true; }
-  function check() {
+  function checkGraph() {
     const seen = new Set();
     for (const [g, d] of L.groups) {
       for (const m of d.members) {
@@ -1492,6 +1505,9 @@
       }
     }
     for (const id of L.skip) if (L.shown.has(id)) throw new Error(`Shown removed level: ${id}`);
+  }
+  function check() {
+    checkGraph();
     const columns = new Map(data.columns.map((c, k) => [c.id, k]));
     for (const u of data.units) {
       for (let k = 0; k < data.columns.length; k++) {
@@ -1509,6 +1525,7 @@
       const r = f(...args); relink(); settle(); prune(); relink();
       if (before === snapshot()) return r;
       Definitions.validate(rootKey(),state());
+      checkGraph();
       apply();
       if (X.checkLayout) check();
       past.push(before); if (past.length > 100) past.shift(); future.length = 0;

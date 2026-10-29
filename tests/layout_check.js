@@ -124,6 +124,41 @@ test('incoming source definitions replace old target overrides',()=>{
  T.replaceInput(a,0,{violin:x});near(T.msOf(a)[0],10);
  const moved=T.transfer(p,root);near(T.msOf(moved)[0],60);T.check();
 });
+test('an edited projection cannot move under its own destination identity',()=>{
+ const {T,a,root}=fixture(),p=T.copyOver(a),x=T.kids(p).find(id=>T.spanName(id)==='Annotate IO');
+ T.replaceInput(p,0,{violin:x});assert.ok(!T.destinations(p).some(d=>d.id===a));
+ assert.equal(T.transfer(p,a),null);const moved=T.transfer(p,root);near(T.msOf(moved)[0],10);T.check();
+});
+test('an empty incoming definition releases unsupported destination children',()=>{
+ const {T,a,x,z,root}=fixture(),p=T.copyOver(a);T.exclude(p,[T.kids(p).find(id=>T.spanName(id)==='Annotate IO')]);T.removeInput(p,0);
+ const g=T.merge([x,z],'Local parts');T.leave(z,g);near(T.msOf(g)[0],10);
+ const moved=T.transfer(p,root);assert.equal(moved,a);near(T.msOf(a)[0],0);
+ assert.equal(T.parentOf(g),root);near(T.msOf(g)[0],10);T.check();
+});
+test('incoming definitions retain their own context rather than overwritten destination cuts',()=>{
+ const {T,root}=fixture({names:['Compile','P','A','X','B'],rows:[0,-1,0,100000,0,1,0,0,80000,0,2,1,0,60000,0,3,2,10000,20000,0,4,0,80000,10000,0]});
+ const p=root+sep+'P',a=p+sep+'A',x=a+sep+'X',b=root+sep+'B';
+ const cp=T.copyOver(p),ca=T.kids(cp).find(id=>T.spanName(id)==='A'),cb=T.copyOver(b);
+ const h=T.merge([ca,cb],'Moved parts');T.removeInput(cp,0);const incoming=T.merge([cp,h],'Incoming');near(T.msOf(incoming)[0],70);
+ const state=T.state();state.parents.push([a,p]);T.load(state);T.exclude(p,[x]);near(T.msOf(a)[0],40);
+ const moved=T.transfer(incoming,root);near(T.msOf(moved)[0],70);near(T.msOf(a)[0],60);T.check();
+});
+test('empty inputs never make an unowned ancestor reanchor inside itself',()=>{
+ const {T,a,x,root}=fixture();
+ T.load({v:6,definitions:[[a,[]]],groups:[['g1','Outer',[{violin:'g2'}]],['g2','Inner',[{violin:a},{violin:x}]]],shown:['g1','g2'],open:['g1']});
+ assert.equal(T.parentOf('g1'),root);near(T.msOf('g1')[0],10);T.leave(x,'g2');
+ assert.equal(T.parentOf('g1'),root);near(T.msOf('g1')[0],0);T.check();
+});
+test('released inputs use a surrounding parent when their recorded parent would form a cycle',()=>{
+ const {T,a,b,y,root}=fixture();
+ T.load({v:6,definitions:[[a,[]],[b,[]]],parents:[[b,a],[a,y],['g1',root]],groups:[['g1','Owner',[{violin:y}]]],shown:['g1',a,b]});
+ T.removeInput('g1',0);assert.equal(T.parentOf(y),root);T.check();T.undo();T.leave(y,'g1');assert.equal(T.parentOf(y),root);T.check();
+});
+test('released inputs bypass recorded parents whose recipes no longer include them',()=>{
+ const {T,a,x,y,z,root}=fixture(),g=T.merge([x,y],'Annotations');T.replaceInput(a,0,{violin:z});
+ near(T.msOf(x)[0],10);T.leave(x,g);assert.equal(T.parentOf(x),root);near(T.msOf(x)[0],10);T.check();
+ T.undo();T.ungroup(g);assert.equal(T.parentOf(x),root);near(T.msOf(x)[0],10);T.check();
+});
 test('a group retains its placement when its other branch is removed',()=>{
  const {T,a,x,y,root}=fixture();const g=T.merge([x,y],'Both');T.leave(y,g);
  assert.equal(T.parentOf(g),root);near(T.msOf(a)[0],50);near(T.msOf(g)[0],10);T.check();
@@ -192,6 +227,7 @@ test('large projections preserve coverage through expansion, exclusions and undo
 });
 test('random edit sequences preserve invariants and undo each change',()=>{
  for(let seed=Number(process.env.FUZZ_FROM || 1);seed<=Number(process.env.FUZZ_SEEDS || 50);seed++) {
+  if(seed%50===0)console.log(`fuzz seed ${seed}`);
   const {T,X,x,y,z,a,b}=fixture(); let n=seed;
   const rand=(k)=>{n=(Math.imul(n,1664525)+1013904223)>>>0;return (n>>>8)%k;};
   for(let step=0;step<100;step++) {
