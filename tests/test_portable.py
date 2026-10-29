@@ -123,3 +123,19 @@ class Portable(unittest.TestCase):
         from collections import defaultdict
         children = defaultdict(list, {root['id']:[child]})
         self.assertEqual(violinoscope.analyze_unit(root, children, 'custom.flow')['tree'][1][4], 1)
+
+    def test_overlapping_units_use_their_own_enclosing_request_labels(self):
+        spans = []
+        for i, label in enumerate(['q1', 'q2']):
+            parent = {**self.root, 'spanId':f'{i+2:016x}', 'name':'Envelope',
+                      'attributes':[{'key':'query.name','value':{'stringValue':label}}]}
+            unit = {**self.root, 'spanId':f'{i+4:016x}', 'parentSpanId':parent['spanId']}
+            spans.extend([parent, unit])
+        path = self.folder/'overlap.jsonl'
+        path.write_text('\n'.join(map(json.dumps,spans)))
+        result = self.run_cli(str(path),'--unit','Request','--label-attr','query.name','-o','out')
+        self.assertEqual(result.returncode,0,result.stderr)
+        text = (self.folder/'out/data/summary.js').read_text()
+        summary = json.loads(text.split('=',1)[1].rstrip().rstrip(';'))
+        self.assertEqual([u['l'] for u in summary['units']],['q1','q2'])
+        self.assertEqual([u['ms'] for u in summary['units']],[100,100])

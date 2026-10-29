@@ -257,29 +257,37 @@ def build(args):
             children = defaultdict(list)
             for s in spans:
                 children[s['parent']].append(s)
-            text = first_attr(spans, args.text_attr) if args.text_attr else None
-            text = text if isinstance(text, str) else ''
-            label_value = first_attr(spans, args.label_attr) if args.label_attr else None
-            label_value = str(label_value) if label_value is not None else ''
-            if args.skip_label and re.search(args.skip_label, label_value):
-                continue
-            group, label = None, label_value or None
-            label_source = label_value if args.label_attr else text
-            if label_regex and label_source:
-                m = label_regex.search(label_source)
-                if m:
-                    group, label = m.groupdict().get('group'), m.groupdict().get('label')
-            if args.skip_text and re.search(args.skip_text, text or ''):
-                continue
-            if args.group_by.startswith('attr:'):
-                value = first_attr(spans, args.group_by[5:])
-                group = str(value) if value is not None else None
-            elif args.group_by == 'dataset':
-                group = None
-            fp = fingerprint(text) if text else ''
             roots = ([s for s in spans if s['name'] == args.unit] if args.unit
                      else [s for s in spans if not s['parent'] or s['parent'] not in spans_by_id])
             for root in roots:
+                rec = analyze_unit(root, children, args.flow_attr)
+                context, ancestor = [root], spans_by_id.get(root['parent'])
+                visited = {root['id']}
+                while ancestor and ancestor['id'] not in visited:
+                    visited.add(ancestor['id'])
+                    context.append(ancestor)
+                    ancestor = spans_by_id.get(ancestor['parent'])
+                context.extend(s for s in rec['spans'] if s['id'] != root['id'])
+                text = first_attr(context, args.text_attr) if args.text_attr else None
+                text = text if isinstance(text, str) else ''
+                label_value = first_attr(context, args.label_attr) if args.label_attr else None
+                label_value = str(label_value) if label_value is not None else ''
+                if args.skip_label and re.search(args.skip_label, label_value):
+                    continue
+                group, label = None, label_value or None
+                label_source = label_value if args.label_attr else text
+                if label_regex and label_source:
+                    m = label_regex.search(label_source)
+                    if m:
+                        group, label = m.groupdict().get('group'), m.groupdict().get('label')
+                if args.skip_text and re.search(args.skip_text, text or ''):
+                    continue
+                if args.group_by.startswith('attr:'):
+                    value = first_attr(context, args.group_by[5:])
+                    group = str(value) if value is not None else None
+                elif args.group_by == 'dataset':
+                    group = None
+                fp = fingerprint(text) if text else ''
                 dataset = fallback if explicit else root.get('dataset') or fallback
                 key = (dataset, trace_id, root['id'])
                 if key in seen_units:
@@ -289,7 +297,6 @@ def build(args):
                 unit_names[root['name']] += 1
                 base = {'dataset': dataset, 'group': group or dataset, 'label': label or (fp[:8] or root['id'][:8]),
                         'trace': trace_id, 'fp': fp}
-                rec = analyze_unit(root, children, args.flow_attr)
                 if root['error']:
                     failures.append(dict(base, reason=failure_reason(failure_detail(rec['spans'], root))))
                     continue
@@ -462,7 +469,7 @@ def main():
     ap.add_argument('--right', help='groups for the right half (default: the rest)')
     ap.add_argument('--group-by', default='label', metavar='label|dataset|attr:KEY',
                     help='what makes a group: the group in --label-regex (falling back to the input), the input, '
-                         'or the value of an attribute on any span of the trace')
+                         'or an attribute on the unit, an ancestor, or its children')
     ap.add_argument('--text-attr', default='db.query.text', metavar='KEY',
                     help='the attribute holding query text, for --label-regex, --skip-text, --with-text and fingerprints')
     ap.add_argument('--label-attr', metavar='KEY', help='Attribute supplying the unit label, independently of query text')
