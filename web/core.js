@@ -148,15 +148,18 @@
   // apply, multiplied.
 
   let proj = null;
-  X.scenarioOn = () => data.columns.some((c) => S.factors.has(c.id) && S.factors.get(c.id) !== 1);
+  X.scenarioOn = () => data.columns.some((c) => !c.async && S.factors.has(c.id) && S.factors.get(c.id) !== 1);
   X.scenarioKey = () => [...S.factors].filter(([k, f]) => f !== 1 && data.columnIndex.has(k)).map(([k, f]) => `${k}=${f}`).sort().join(',');
   X.project = () => {
     if (!X.scenarioOn()) { proj = null; return; }
     const NC = X.NC, eff = new Float64Array(NC);
     for (let k = 0; k < NC; k++) {
       let f = 1;
-      for (let p = k; p >= 0; p = X.parentIdx[p]) f *= S.factors.has(data.columns[p].id) ? S.factors.get(data.columns[p].id) : 1;
-      eff[k] = f;
+      for (let p = k; p >= 0; p = X.parentIdx[p]) if (!data.columns[p].async)
+        f *= S.factors.has(data.columns[p].id) ? S.factors.get(data.columns[p].id) : 1;
+      // A dependency group's own speed-up needs a critical-path model. It still belongs to its enclosing
+      // phase, so a factor on that whole phase scales its coverage even when the group is displayed.
+      eff[k] = data.columns[k].second && data.columns[k].async ? 1 : f;
     }
     // N1: the first tree's columns; parts: the split of the unit's time, those and what none of them counts.
     const N1 = data.partition.length - 1, P = N1 + 1;
@@ -199,12 +202,17 @@
   X.ROOT = '_all';
   X.ROOT2 = '~two';
   X.columnsFor = () => [{ id: X.ROOT, label: X.UNIT, parent: null, base: -1, root: true }]
-    .concat(data.columns.map((c, k) => ({ id: c.id, label: c.label, parent: c.parent, base: k, merged: c.merged, second: c.second })));
+    .concat(data.columns.map((c, k) => ({ id: c.id, label: c.label, parent: c.parent, base: k, merged: c.merged, second: c.second, async: c.async, dependency: c.dependency, independent: c.independent })));
   X.colMs = (i, col, measured) => (col.root ? X.totalMs(i, measured) : X.partMs(i, col.base, measured));
 
   const clamp = X.clamp;
   function scaleFor(mode, linear, top) {
     if (mode === 'share') {
+      if (top > 1) {
+        const step = X.niceStep(top, 6), hi = Math.ceil(top / step) * step, ticks = [];
+        for (let v = 0; v <= hi; v += step) ticks.push({v, label: `${Math.round(v * 100)}%`});
+        return {fwd: (v) => linear ? clamp(v,0,hi) : Math.sqrt(clamp(v,0,hi)), lo:0, hi:linear ? hi : Math.sqrt(hi), ticks};
+      }
       if (linear) {
         const ticks = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1].map((v) => ({ v, label: v ? `${Math.round(v * 100)}%` : '0' }));
         return { fwd: (v) => clamp(v, 0, 1), lo: 0, hi: 1, ticks };
@@ -245,6 +253,7 @@
     const cols = X.columnsFor();
     const value = X.valueFn(cols, mode, false);
     let top = 1, above = 0;
+    if (mode === 'share') for (const i of view.left.concat(view.right)) for (let c=0;c<cols.length;c++) if(cols[c].async) top = Math.max(top, value(i,c));
     if (mode === 'ms') {
       const all = [];
       for (const i of view.left.concat(view.right)) for (let c = 0; c < cols.length; c++) all.push(value(i, c));
@@ -424,29 +433,42 @@
   // Kept apart from the parsed spans, which are dropped and parsed again: each compilation's highest lane on each
   // track (-1 for none), once its spans are read.
   const trackLanes = new Array(X.NU).fill(null);
+  const trackDepths = new Array(X.NU).fill(null);
   X.hasSpans = (unit) => chunks.has(data.units[unit].k);
+  X.spanExtent = (unit) => {
+    const u = data.units[unit], chunk = chunks.get(u.k);
+    return chunk ? X.traceFlows(chunk.trees[unit - u.k * meta.chunk]).extent : [0, u.ms];
+  };
   X.trackLanesOf = (unit) => {
     if (!trackLanes[unit] && X.hasSpans(unit)) X.spansOf(unit);
     return trackLanes[unit];
+  };
+  X.trackDepthsOf = (unit) => {
+    if (!trackDepths[unit] && X.hasSpans(unit)) X.spansOf(unit);
+    return trackDepths[unit];
   };
   X.spansOf = (unit) => {
     if (spanCache.has(unit)) return spanCache.get(unit);
     const u = data.units[unit], chunk = chunks.get(u.k);
     if (!chunk) return null;
-    const flat = chunk.trees[unit - u.k * meta.chunk].rows, n = flat.length / 5;
+    const tree = chunk.trees[unit - u.k * meta.chunk], flat = tree.rows, n = flat.length / 5, flow = X.traceFlows(tree);
     const rows = new Array(n), top = new Int16Array(X.TRACKS.length).fill(-1);
+    const depths = Array.from({length:X.TRACKS.length}, () => []);
     let maxDepth = 0;
     for (let r = 0; r < n; r++) {
       const parent = flat[5 * r + 1], flags = flat[5 * r + 4], name = chunk.names[flat[5 * r]];
       const depth = parent >= 0 ? rows[parent].depth + 1 : 0;
-      const async = parent >= 0 && (flags & 1), track = async ? trackIndex.get(name) : -1, lane = async ? flags >>> 10 : -1;
+      const async = flow.root[r] > 0, fr = flow.root[r];
+      const track = async ? trackIndex.get(chunk.names[flat[5 * fr]]) : -1, lane = async ? flat[5 * fr + 4] >>> 10 : -1;
       if (!async && depth > maxDepth) maxDepth = depth;
       if (async && lane > top[track]) top[track] = lane;
-      rows[r] = { name, parent, start: flat[5 * r + 2] / 1000, dur: flat[5 * r + 3] / 1000, depth, part: X.layout.partOfRow(unit, r), track, lane, flags };
+      if (async) depths[track][lane] = Math.max(depths[track][lane] || 0, flow.depth[r] + 1);
+      rows[r] = { name, parent, start: flat[5 * r + 2] / 1000, dur: flat[5 * r + 3] / 1000, depth, part: X.layout.partOfRow(unit, r), track, lane, flags,
+        flowStart: !!flow.start[r], flowDepth:flow.depth[r], flowRoot:fr, dependency:!!flow.dependency[r] };
     }
-    const tree = chunk.trees[unit - u.k * meta.chunk];
     const out = { rows, maxDepth, links: tree.links || [], total: rows[0] ? rows[0].dur : u.ms };
     trackLanes[unit] = top;
+    trackDepths[unit] = depths;
     if (spanCache.size > 400) spanCache.clear();
     spanCache.set(unit, out);
     return out;
@@ -504,14 +526,14 @@
     let cur = null, end = 0, d = 0;
     const close = () => { if (cur) { cur.r1 = end; cur.d1 = cur.toD(end); d = cur.d1 + RUN_GAP; } };
     for (const i of units) {
-      const u = data.units[i], k = X.runOf(i);
+      const u = data.units[i], k = X.runOf(i), [lo, hi] = X.spanExtent(i), start = u.at + lo;
       if (!cur || cur.run !== k) {
         close();
-        cur = runFold(k, u.at, d);
+        cur = runFold(k, start, d);
         runs.push(cur);
-        end = u.at;
-      } else if (u.at - end > GAP_MIN) gaps.push(cur.fold(end, u.at));
-      end = Math.max(end, u.at + u.ms);
+        end = start;
+      } else if (start - end > GAP_MIN) gaps.push(cur.fold(end, start));
+      end = Math.max(end, u.at + hi);
     }
     close();
     // Where one run ends and the next begins.

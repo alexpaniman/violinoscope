@@ -22,7 +22,7 @@
   // Nothing in a script may end it early.
   const inScript = (s) => s.replace(/<\/(script)/gi, '<\\/$1');
   function build() {
-    const doc = { saved: new Date().toISOString(), unit: X.UNIT, layout: X.layout.state() };
+    const doc = { saved: new Date().toISOString(), ...(X.layouts ? X.layouts.current() : {unit:X.UNIT,layout:X.layout.state()}) };
     const head = ['<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
       '<style>[hidden]{display:none!important}body{margin:0}</style>', `<title>${esc(document.title)}</title>`];
     for (const link of document.querySelectorAll('link[href^="https://fonts."]')) head.push(link.outerHTML);
@@ -132,5 +132,5 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   }
 
-  X.download = { init, build, picture };
+  X.download = { init, build, picture, save };
 })();

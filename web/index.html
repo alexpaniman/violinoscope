@@ -2,10 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>[hidden]{display:none!important}body{margin:0}</style>
 <title>Violinoscope</title>
-<meta name="claude:viewport-fit-sides" content="cover">
-<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="app.css">
 </head><body>
 <div class="app" id="app">
@@ -22,6 +19,7 @@
       <div class="seg factor-menu" id="v-factor-menu" role="group" hidden></div>
       <button type="button" class="hide-x" id="v-hide" hidden>×</button>
       <div class="add-menu" id="v-add" role="dialog" aria-label="Add violins" hidden></div>
+      <div class="add-menu move-menu" id="v-move" role="dialog" aria-label="Move violin" hidden></div>
       <div class="merge-bar" id="v-merge" role="group" aria-label="Merge the picked violins" hidden></div>
     </div>
     <div class="view" id="flame" hidden><canvas id="flame-canvas" role="img" aria-label="Spans stacked: where they ran, or merged heaviest first"></canvas></div>
@@ -66,12 +64,15 @@
           <button class="range-chip" id="range-chip" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="rangecard"><span data-u>{unit} time</span><b id="range-value">all</b></button>
           <button class="range-clear" id="range-clear" type="button" aria-label="Show every duration" title="Show every duration" hidden>×</button>
           <button class="quiet-btn" id="picture" type="button" data-for="violins" disabled aria-label="Save the violins as an image" title="Save the violins as an image (PNG)"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4.5 10.5 7 8l2 1.8 1.5-1.3 1.5 2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10.4" cy="6.2" r="0.9" fill="currentColor"/></svg></button>
+          <button class="quiet-btn" id="layouts" type="button" disabled aria-label="Layouts" aria-haspopup="dialog" aria-expanded="false" aria-controls="layout-menu" title="Layouts"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M7 3v10M7 7h6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
           <button class="quiet-btn" id="download" type="button" disabled aria-label="Download this page as one file" title="Download this page as one HTML file, data and all, opening with these violins"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </div>
       </div>
     </div>
 
     <div class="overview" id="overview" hidden><canvas id="overview-canvas" aria-label="Overview" title="Drag to pick a stretch to show, or an edge of it to move that edge; double-click or F for all of it"></canvas><div class="ov-nav" id="ov-nav" hidden><button type="button" data-nav="all" title="All of it (F, or double-click the strip); Esc goes back to where you were">All</button></div></div>
+    <div id="layout-menu" class="layout-menu" role="dialog" aria-label="Layouts" hidden></div>
+    <input type="file" id="layout-file" accept=".json,application/json" hidden>
     <div class="toast" id="toast" role="status" hidden></div>
 
     <section class="card" id="rangecard" role="dialog" data-u aria-label="{unit} time range" hidden>
@@ -88,6 +89,7 @@
       </div>
       <svg id="range-svg" data-u aria-label="Histogram of {unit} times: drag the handles or across it to pick a range, double-click to show all"></svg>
       <div class="dom-legend" id="dom-legend" hidden></div>
+
       <div class="card-cross" id="card-cross" hidden></div>
     </section>
 
@@ -102,12 +104,17 @@
 <script src="data/summary.js"></script>
 <script src="data/layout.js"></script>
 <script src="core.js"></script>
+<script src="flows.js"></script>
 <script src="layout.js"></script>
 <script src="gl.js"></script>
 <script src="violins.js"></script>
 <script src="edit.js"></script>
 <script src="download.js"></script>
+<script src="layout-files.js"></script>
+<script src="layout-menu.js"></script>
 <script src="nav.js"></script>
+<script src="flame-view.js"></script>
+<script src="parts.js"></script>
 <script src="flame.js"></script>
 <script src="spans.js"></script>
 <script src="timeline.js"></script>

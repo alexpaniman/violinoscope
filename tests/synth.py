@@ -87,8 +87,8 @@ def request(rnd, index, group, t0):
         t.span(name, run, s, e)
     # Waits beside the planning, on their own track; the release runs on after the request is answered.
     wait_start = plan_start + ms(rnd, 0.1)
-    t.span('Wait for metadata', root, wait_start, wait_start + ms(rnd, 1.0, 1.2), {'ydb.flow': 'async'})
-    t.span('Release state', root, root_end - ms(rnd, 0.05), root_end + ms(rnd, 0.2), {'ydb.flow': 'async'})
+    t.span('Wait for metadata', root, wait_start, wait_start + ms(rnd, 1.0, 1.2), {'span.flow': 'async'})
+    t.span('Release state', root, root_end - ms(rnd, 0.05), root_end + ms(rnd, 0.2), {'span.flow': 'async'})
     return t, root_end
 
 

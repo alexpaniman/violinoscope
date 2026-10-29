@@ -49,17 +49,19 @@
     for (const i of units) {
       const d = nav.start[i], e = d + data.units[i].ms;
       let line = lines.find((l) => l.end <= d);
-      if (!line) { line = { units: [], d0: [], d1: [], end: -Infinity }; lines.push(line); }
+      if (!line) { line = { units: [], d0: [], d1: [], reach: [], end: -Infinity }; lines.push(line); }
       pos.set(i, { line, j: line.units.length });
       line.units.push(i); line.d0.push(d); line.d1.push(e);
+      line.reach.push(Math.max(line.reach.at(-1) ?? -Infinity, d + X.spanExtent(i)[1]));
       line.end = e;
     }
-    M = { key: X.viewKey(), nav, units, lines, pos, heavy: null };
+    M = { key: nav.key, nav, units, lines, pos, heavy: null };
     return M;
   }
 
   function model() {
-    if (!M || M.key !== X.viewKey()) { build(); scrollY = 0; }
+    const nav = X.nav.model();
+    if (!M || M.key !== nav.key) { const changed = !M || M.nav.viewKey !== nav.viewKey; build(); if (changed) scrollY = 0; }
     return M;
   }
 
@@ -78,10 +80,10 @@
       const lanes = new Map();
       for (const s of sp.rows) {
         if (s.lane < 0) continue;
-        const k = s.track * 65536 + s.lane;
+        const k = `${s.track}:${s.lane}:${s.flowDepth}`;
         if (!lanes.has(k) || lanes.get(k)[1] < s.dur) lanes.set(k, [s.part, s.dur]);
       }
-      d.lanes = [...lanes].map(([k, [part]]) => [Math.floor(k / 65536), k % 65536, part]);
+      d.lanes = [...lanes].map(([k, [part]]) => [...k.split(':').map(Number), part]);
       d.spans = true;
     } else {
       const u = data.units[i];
@@ -114,7 +116,7 @@
         map[r] = k;
         own[k] += s.dur;
         count[k]++;
-        if (p === pk && !nodes[k].async) inner[pk] += s.dur;
+        if (p === pk) inner[pk] += s.dur;
       });
       let total = 0;
       for (const k of nodes[0].kids.values()) total += own[k];
@@ -132,8 +134,8 @@
     // Node 0 is the root of the compiler's chart, and 1 + k that of asynchronous track k.
     const roots = X.TRACKS.map((t, k) => 1 + k);
     const nodes = [0, ...roots].map((r) => ({ name: '', part: -1, depth: -1, async: r > 0, kids: new Map(), dur: 0, n: 0, inner: 0 }));
-    // Where a span goes: under its parent's node, or, if it is asynchronous, to its track's chart.
-    const into = (pk, s) => (s.lane >= 0 ? 1 + s.track : pk);
+    // Only a new flow starts at its track's root. Ordinary descendants remain under their flow's parent.
+    const into = (pk, s) => (s.flowStart ? 1 + s.track : pk);
     for (const i of units) {
       if (!X.hasSpans(i)) continue;
       const sp = X.spansOf(i), map = new Int32Array(sp.rows.length);
@@ -149,7 +151,7 @@
         nodes[k].dur += s.dur;
         nodes[k].n++;
         // A synchronous child's time is not its parent's own.
-        if (p === pk && !nodes[k].async) nodes[pk].inner += s.dur;
+        if (p === pk) nodes[pk].inner += s.dur;
         map[r] = k;
       });
     }
@@ -228,14 +230,14 @@
 
   function zoomAt(px, factor) {
     sync();
+    if (S.flame === 'heavy') { setWindow(...X.flameWindow.zoom(win.d0, win.d1, (px - LEFT) / (W - LEFT - RIGHT), factor, heavyExtent())); return; }
     const span = win.d1 - win.d0, at = win.d0 + (px - LEFT) / (W - LEFT - RIGHT) * span;
     const ns = S.flame === 'heavy' ? clamp(span * factor, 1e-6, 1.2 * heavyExtent()) : span * factor;
     setWindow(at - (at - win.d0) * ns / span, at + (win.d1 - at) * ns / span);
   }
   function pan(dxPx) {
     sync();
-    const d = dxPx / (W - LEFT - RIGHT) * (win.d1 - win.d0);
-    setWindow(win.d0 + d, win.d1 + d);
+    setWindow(...X.flameWindow.pan(win.d0, win.d1, dxPx / (W - LEFT - RIGHT)));
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -243,12 +245,10 @@
 
   function request() { if (!dirty) dirty = requestAnimationFrame(() => { dirty = 0; paint(); }); }
 
-  // The compilations on a line that reach into the window: the first is found by binary search, a few before it are
-  // kept for asynchronous spans that outlast their compilation.
+  // Prefix maxima retain every compilation whose async tail reaches the window, however many roots ended since.
   function visible(line) {
     let lo = 0, hi = line.units.length;
-    while (lo < hi) { const m = (lo + hi) >> 1; if (line.d1[m] < win.d0) lo = m + 1; else hi = m; }
-    lo = Math.max(0, lo - 3);
+    while (lo < hi) { const m = (lo + hi) >> 1; if (line.reach[m] < win.d0) lo = m + 1; else hi = m; }
     let end = lo;
     while (end < line.units.length && line.d0[end] <= win.d1) end++;
     return [lo, end];
@@ -257,20 +257,20 @@
   // Lanes of each asynchronous track in the window: as many as its busiest moment there needs. A compilation wide
   // enough to draw its spans counts only the lanes of its spans in the window; a narrower one, all of its lanes.
   function asyncLanes() {
-    const n = new Array(X.TRACKS.length).fill(0), px = (W - LEFT - RIGHT) / (win.d1 - win.d0);
+    const n = Array.from({length:X.TRACKS.length}, () => []), px = (W - LEFT - RIGHT) / (win.d1 - win.d0);
     for (const line of M.lines) {
       const [lo, end] = visible(line);
       for (let j = lo; j < end; j++) {
         const i = line.units[j];
         if ((line.d1[j] - line.d0[j]) * px >= 3 && X.hasSpans(i)) {
           for (const s of X.spansOf(i).rows) {
-            if (s.lane < 0 || s.lane < n[s.track]) continue;
+            if (s.lane < 0) continue;
             const a = line.d0[j] + s.start;
-            if (a <= win.d1 && a + s.dur >= win.d0) n[s.track] = s.lane + 1;
+            if (a <= win.d1 && a + s.dur >= win.d0) n[s.track][s.lane] = Math.max(n[s.track][s.lane] || 0, s.flowDepth + 1);
           }
         } else {
-          const t = X.trackLanesOf(i);
-          if (t) for (let k = 0; k < t.length; k++) if (t[k] + 1 > n[k]) n[k] = t[k] + 1;
+          const t = X.trackDepthsOf(i);
+          if (t) t.forEach((lanes, k) => lanes.forEach((depth, lane) => { n[k][lane] = Math.max(n[k][lane] || 0, depth); }));
         }
       }
     }
@@ -281,7 +281,8 @@
     const top = X.contentTop() + AXIS;
     let y = top + 6 - scrollY;
     const lines = M.lines.map((line) => { const l = { line, y0: y }; y += ROWS * ROWH + 4; return l; });
-    const n = asyncLanes(), total = n.reduce((a, b) => a + b, 0);
+    const depths = asyncLanes(), n = depths.map((lanes) => Array.from({length:lanes.length}, (_, k) => lanes[k] || 1).reduce((a, b) => a + b, 0));
+    const total = n.reduce((a, b) => a + b, 0);
     let lanes = null;
     if (total) {
       // A track per span name, as in Perfetto, each its name and its lanes, as tall as a row of the line above until
@@ -293,7 +294,9 @@
       let ty = head + ASYNC_HEAD - 6, base = 0;
       n.forEach((c, k) => {
         if (!c) return;
-        tracks[k] = { name: X.TRACKS[k].name, head: ty, y0: ty + TRACK_HEAD, n: c, base };
+        let offset = 0;
+        const offsets = Array.from({length:depths[k].length}, (_, lane) => { const at = offset; offset += depths[k][lane] || 1; return at; });
+        tracks[k] = { name: X.TRACKS[k].name, head: ty, y0: ty + TRACK_HEAD, n: c, base, offsets };
         base += c;
         ty += TRACK_HEAD + c * h + 4;
       });
@@ -464,7 +467,7 @@
     for (let j = lo; j < end; j++) {
       const i = line.units[j], a = X_(line.d0[j]), b = X_(line.d1[j]), w = b - a;
       const sel = i === S.sel;
-      if (w < 3 && !sel) {
+      if (w < 3 && X.spanExtent(i)[1] * scale < 3 && !sel) {
         // A pixel-wide compilation: its biggest part at each of the first levels, and a mark on each of its lanes.
         const px = Math.floor(a);
         if (px === lastPx[0]) continue;
@@ -475,9 +478,9 @@
         }
         hot.bars.push({ i, x0: px, x1: px + Math.max(1, w), y0: l.y0, y1: l.y0 + dom.length * ROWH, r: -1 });
         if (lanes) {
-          for (const [track, lane, part] of dom.lanes) {
+          for (const [track, lane, depth, part] of dom.lanes) {
             const tr = lanes.tracks[track];
-            if (tr && lane < tr.n) rect(part >= 0 ? T.cols[part] : T.unowned, px, tr.y0 + lane * laneH, 1, laneH - gapY);
+            if (tr && tr.offsets[lane] !== undefined) rect(part >= 0 ? T.cols[part] : T.unowned, px, tr.y0 + (tr.offsets[lane] + depth) * laneH, 1, laneH - gapY);
           }
         }
         if (!X.hasSpans(i)) X.loadChunk(data.units[i].k).catch(() => {});
@@ -498,14 +501,15 @@
         for (let r = 0; r < sp.rows.length; r++) {
           const s = sp.rows[r];
           const async = s.lane >= 0, tr = async && lanes ? lanes.tracks[s.track] : null;
-          if (async ? !tr || s.lane >= tr.n : s.depth >= ROWS) continue;
+          if (async ? !tr || tr.offsets[s.lane] === undefined : s.depth >= ROWS) continue;
           const sx = a + s.start * scale, ex = sx + s.dur * scale;
           if (ex < xL || sx > xR) continue;
-          const bw = ex - sx, row = async ? 1 + ROWS + tr.base + s.lane : 1 + s.depth;
-          const y = async ? tr.y0 + s.lane * laneH : l.y0 + s.depth * ROWH, h = async ? laneH - gapY : ROWH - 1;
+          const flowRow = async ? tr.offsets[s.lane] + s.flowDepth : 0;
+          const bw = ex - sx, row = async ? 1 + ROWS + tr.base + flowRow : 1 + s.depth;
+          const y = async ? tr.y0 + flowRow * laneH : l.y0 + s.depth * ROWH, h = async ? laneH - gapY : ROWH - 1;
           if (sel && flows) flows.pos.set(r, { x0: sx, x1: ex, y: y + h / 2 });
           if (bw < 1) { const px = Math.floor(sx); if (px === lastPx[row]) continue; lastPx[row] = px; }
-          // Asynchronous spans hollow, as in the Timeline: they run beside the compiler, not in it.
+          // Separate logical flows are hollow; ordinary descendants keep their nesting within that flow.
           const color = s.depth === 0 ? root : s.part >= 0 ? T.cols[s.part] : async ? T.faint : T.unowned;
           const hollow = async && bw >= 4 && h >= 5, fill = hollow ? X.mix(color, T.bg, 0.8) : color;
           ctx.globalAlpha = (dim && s.name !== S.name ? 0.3 : 1) * fade;
@@ -651,7 +655,7 @@
       const node = b.heavy.node, k = b.heavy.k, h = M.heavy, root = node.depth === 0 && !node.async, part = node.part >= 0 ? data.columns[node.part].label : '';
       const who = h.unit !== null ? data.units[h.unit].l : null, dur = h.dur(k), n = h.n(k);
       const lines = [root ? who || 'All in view' : node.name, `${X.fmtMs(dur)} · ${X.fmtPct(dur / h.total)}${who ? ` of ${who}` : ''}`];
-      lines.push(node.async ? 'Beside its parent; spans that overlap add up' : `self ${X.fmtMs(Math.max(0, dur - h.inner(k)))}`);
+      lines.push(node.async ? 'Separate logical flow; overlapping occurrences add up' : `self ${X.fmtMs(Math.max(0, dur - h.inner(k)))}`);
       // How often it runs: spans on this path, and per compilation.
       lines.push(h.units > 1 ? `${X.fmtInt(n)} spans, ${X.round3(n / h.units)} per ${X.UNIT} · ${X.fmtMs(dur / h.units)} each` : `${X.fmtInt(n)} ${n === 1 ? 'span' : 'spans'}`);
       lines.push(part);
@@ -662,7 +666,7 @@
     const s = X.spansOf(b.i).rows[b.r];
     const lines = [s.name, `${X.fmtMs(s.dur)} · from ${X.fmtMs(s.start)} into ${u.l}`];
     if (s.part >= 0) lines.push(data.columns[s.part].label);
-    if (s.lane >= 0) lines.push('Runs beside its parent');
+    if (s.lane >= 0) lines.push(s.flowStart ? 'Starts a separate logical flow' : 'Within a separate logical flow');
     return lines;
   }
 

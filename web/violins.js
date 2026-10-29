@@ -14,7 +14,7 @@
   const DOT_R = DOT / 2;  // as the GPU draws it
   const COUNT = 10.5;  // the size of a merged violin's count of spans
 
-  const MAX_ZOOM = 12, GAP = 0.6, SIDE = 40;
+  const MAX_ZOOM = 12, GAP = 0.6, SIDE = 52;
 
   let root, pill, pills, menu, under, over, heat, hover, pad, points;
   let G = null, lastKey = null;
@@ -265,7 +265,7 @@
     });
     // The second tree's +: small and dashed, at the side, clear of the + at the end of the root's line.
     {
-      const sx = END + SIDE - 12, sy = nodeY(0);
+      const sx = Math.max(END + SIDE - 12, ...p.cols.map((_, c) => more[c] ? plusX(c) + 20 : xOf(c) + 20)), sy = nodeY(0);
       o.push(`<g class="hit add" data-add="${X.ROOT2}"><title>Projections: violins beside the tree that take nothing from it, any spans, merged as you like; or drop a name here</title>`
         + `<rect x="${n1(sx - 10)}" y="${n1(sy - 10)}" width="20" height="20" fill="transparent"/>`
         + `<circle cx="${n1(sx)}" cy="${n1(sy)}" r="5" fill="none" stroke="${T.line}" stroke-dasharray="2 2"/>`
@@ -504,7 +504,7 @@
 
   function showPill(c) {
     const col = c === null || !G ? null : G.p.cols[c];
-    if (!col || col.root || drag || menuId !== null || factorOf(col.id) !== 1) { pill.hidden = true; return; }
+    if (!col || col.root || col.async || drag || menuId !== null || factorOf(col.id) !== 1) { pill.hidden = true; return; }
     if (!pill.hidden && pill.dataset.pill === String(c)) return;
     pill.dataset.pill = String(c);
     pill.title = pillTitle(col);
@@ -517,7 +517,7 @@
     const top = Math.round(pillTop());
     let html = '';
     G.p.cols.forEach((col, c) => {
-      const f = col.root ? 1 : factorOf(col.id);
+      const f = col.root || col.async ? 1 : factorOf(col.id);
       if (f === 1 || col.id === menuId) return;
       html += `<button type="button" class="whatif-pill set" data-pill="${c}" title="${esc(pillTitle(col))}" style="left:${Math.round(pillX(c))}px;top:${top}px">${X.fmtFactor(f)}</button>`;
     });
@@ -545,6 +545,7 @@
     menu.style.top = `${Math.round(pillTop() - 4)}px`;
   }
   function openMenu(c) {
+    if (G.p.cols[c].async) return;
     menuId = G.p.cols[c].id;
     pill.hidden = true;
     placePills();

@@ -25,7 +25,7 @@
       const unit = e.target.closest('[data-unit]');
       if (unit) { const i = Number(unit.dataset.unit); if (S.sel === i) X.go('timeline'); else { X.select(i); renderCard(); } return; }
       const out = e.target.closest('[data-leave]');
-      if (out) { X.layout.leave(out.dataset.leave, S.card); return; }
+      if (out) { X.layout.leave(out.dataset.leave, out.dataset.from || S.card); return; }
       const level = e.target.closest('[data-unskip]');
       if (level) { X.layout.unskip(level.dataset.unskip); return; }
       const back = e.target.closest('[data-unexclude]');
@@ -33,6 +33,10 @@
       if (e.target.closest('[data-made]')) { madeOpen = !madeOpen; renderCard(); return; }
       const more = e.target.closest('[data-made-add]');
       if (more) { X.edit.openAdd(S.card, more.getBoundingClientRect(), 'include'); return; }
+      const member = e.target.closest('[data-reveal-part]');
+      if (member) { const id = member.dataset.revealPart; if (!X.layout.shown(id)) X.layout.add([id]); openCard(id, card.getBoundingClientRect()); return; }
+      const branch = e.target.closest('[data-made-part]');
+      if (branch) { const id = branch.dataset.madePart; if (madeParts.has(id)) madeParts.delete(id); else madeParts.add(id); renderCard(); return; }
       const part = e.target.closest('[data-open-part]');
       if (part) { const b = card.getBoundingClientRect(); openCard(part.dataset.openPart, { left: b.left, right: b.right, top: b.top, bottom: b.top }); return; }
       const act = e.target.closest('[data-act], button[data-rename]');
@@ -42,6 +46,7 @@
       else if (act.dataset.act === 'reset') { closeCard(); X.layout.fresh(); }
       else if (act.dataset.act === 'saved') { closeCard(); X.layout.reset(); }
       else if (act.dataset.act === 'spans') { const name = X.layout.spanNames(id)[0]; closeCard(); X.spans.pick(name); X.go('profile', 'callers'); }
+      else if (act.dataset.act === 'move') { X.edit.openMove(id); }
       else if (act.dataset.act === 'split') { closeCard(); X.layout.ungroup(id); }
       else if (act.dataset.act === 'promote') { const to = X.layout.promote(id); if (to) openCard(to, card.getBoundingClientRect()); }
       else if (act.dataset.act === 'rename' || act.dataset.rename !== undefined) {
@@ -129,6 +134,7 @@
     // Merged, and all its spans inside one span not on screen: it can become that span.
     const span = root || !col.merged ? null : X.layout.promotable(col.id);
     const tools = root ? [] : [
+      X.layout.destinations(col.id).length ? '<button type="button" class="text-btn small" data-act="move">Move to…</button>' : '',
       span ? `<button type="button" class="text-btn small promote" data-act="promote" title="Make it ${esc(X.layout.label(span))}, the span its spans all run in, with them under it">Make it ${esc(X.layout.label(span))}</button>` : '',
       col.merged ? '<button type="button" class="text-btn small" data-act="split" title="Its larger spans on their own again; the rest behind the + of where they go">Split up</button>' : '',
       names.length === 1 ? `<button type="button" class="text-btn small" data-act="spans" title="${esc(names[0])} in the Spans tab: what calls it and what it calls">In Spans</button>` : ''];
@@ -140,6 +146,8 @@
       html += `<div class="card-row"><button type="button" class="text-btn small" data-act="reset" title="${esc(X.UNIT)} and the spans that take most of its time">Start over</button>`
         + `${X.layout.saved ? '<button type="button" class="text-btn small" data-act="saved" title="The violins this page was saved with">Back to the saved violins</button>' : ''}</div>`;
     } else {
+      if (col.dependency) html += `<p class="runs-line">Includes dependency-group coverage${col.second ? '' : ' within the enclosing phase'}; not an exact measure of blocked time.</p>`;
+      else if (col.independent) html += '<p class="runs-line">Separate logical flow · measured independently of the elapsed-time breakdown.</p>';
       html += shareScatter(k, halves) + runsOf(k, halves, col) + madeOf(col.id, halves);
     }
     card.innerHTML = html;
@@ -179,6 +187,7 @@
   // share of the unit's time, largest first, × taking one out of a merged violin; and the spans left out of it, each
   // to put back. Its + includes or excludes more. Long, the list scrolls by itself.
   let madeOpen = false;
+  const madeParts = new Set();
   function madeOf(id, halves) {
     const units = halves.flatMap(([, u]) => u), merged = X.layout.isMerged(id);
     const share = (m) => {
@@ -188,17 +197,26 @@
       return units.length ? sum / units.length : 0;
     };
     const members = X.layout.members(id), out = X.layout.excluded(id);
-    const count = `${X.fmtInt(members.length)} ${members.length === 1 ? 'span' : 'spans'}${out.length ? ` · ${X.fmtInt(out.length)} excluded` : ''}`;
+    const unit = members.some((m) => X.layout.isMerged(m)) ? 'part' : 'span';
+    const count = `${X.fmtInt(members.length)} ${unit}${members.length === 1 ? '' : 's'}${out.length ? ` · ${X.fmtInt(out.length)} excluded` : ''}`;
     const name = (m) => `<span class="nm">${esc(X.layout.spanName(m) || X.layout.label(m))}${X.layout.under(m) ? `<small>in ${esc(X.layout.under(m))}</small>` : ''}</span>`;
     let list = '';
     if (madeOpen) {
       // Quiet buttons that show with the row under the pointer: take a span out, or count an excluded one again.
       const icon = (d) => `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-      const rows = members.map((m) => [m, share(m)]).sort((a, b) => b[1] - a[1]).map(([m, v]) => `<div class="member">${name(m)}<span class="pct">${X.fmtPct(v)}</span>`
-        + (merged ? `<button type="button" class="quiet-btn small" data-leave="${esc(m)}" title="Take it out of ${esc(X.layout.label(id))}" aria-label="Take it out">${icon('M4 4l6 6M10 4l-6 6')}</button>` : '<span></span>') + '</div>');
+      const rowsOf = (parent, depth = 0) => X.layout.members(parent).map((m) => [m, share(m)]).sort((a, b) => b[1] - a[1]).map(([m, v]) => {
+        const group = X.layout.isMerged(m), open = madeParts.has(m);
+        const title = `<span class="member-name" style="padding-left:${depth * 14}px">${group ? `<button class="quiet-btn" type="button" data-made-part="${esc(m)}" aria-expanded="${open}" aria-label="Show parts of ${esc(X.layout.label(m))}">${open ? '▾' : '▸'}</button>` : ''}`
+          + `<button type="button" class="text-btn" data-reveal-part="${esc(m)}">${esc(X.layout.label(m))}</button></span>`;
+        return `<div class="member">${title}<span class="pct">${X.fmtPct(v)}</span>`
+          + (X.layout.isMerged(parent) ? `<button type="button" class="quiet-btn small" data-leave="${esc(m)}" data-from="${esc(parent)}" title="Take it out of ${esc(X.layout.label(parent))}" aria-label="Take it out">${icon('M4 4l6 6M10 4l-6 6')}</button>` : '<span></span>') + '</div>'
+          + (group && open ? rowsOf(m, depth + 1).join('') : '');
+      });
+      const rows = rowsOf(id);
       const left = out.map((m) => `<div class="member out">${name(m)}<span class="tag">excluded</span>`
         + `<button type="button" class="quiet-btn small" data-unexclude="${esc(m)}" title="Count its time in ${esc(X.layout.label(id))} again" aria-label="Include it again">${icon('M5.5 3 3 5.5 5.5 8M3 5.5h5a3 3 0 0 1 0 6H6.5')}</button></div>`);
-      list = `<div class="members">${rows.join('')}${left.join('')}</div>`;
+      const transferred = X.layout.transferred(id).map((m) => `<div class="member out">${name(m.id)}<span class="tag">counted in ${esc(X.layout.label(m.into))}</span></div>`);
+      list = `<div class="members">${rows.join('')}${left.join('')}${transferred.join('')}</div>`;
     }
     const chevron = '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l3.5 3L3 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     return `<div class="made${madeOpen ? ' open' : ''}"><div class="made-head">`

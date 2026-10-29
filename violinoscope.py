@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
-"""Builds an interactive explorer of where traced work spends its time, from Wilson / OpenTelemetry spans.
+"""Turn OpenTelemetry or Jaeger spans into a self-contained interactive HTML report.
 
-Inputs (any mix, each optionally named as NAME=PATH to become a dataset). Each input is a run: the page lays runs
-out one after another in the order given, each on its own clock, so runs from different days or machines never
-look concurrent:
-  - OTLP JSON: an ExportTraceServiceRequest object, or one per line (the OpenTelemetry collector's file exporter);
-  - Jaeger JSON: the UI's or the query API's {"data": [traces]};
-  - protobuf JSON lines: one span per line, as Wilson's test uploader dumps them;
-  - --jaeger URL: traces fetched from a Jaeger query service.
+  python3 violinoscope.py before.jsonl after.jsonl --unit "Handle request" -o report.html
+  python3 violinoscope.py baseline=old.json candidate=new.json --layout layout.json
 
---unit names the span that is one unit of work (a query compilation, a request); without it, each trace's root is
-one. The page builds its violins from the call paths under it. The output is a directory with index.html and its
-data; open it from disk or serve it. Standard library only.
-
-  violinoscope.py suite=spans/*.jsonl tpc=tpc_otlp.json --unit "Compile query" -o out/
-  violinoscope.py old=before.jsonl new=after.jsonl --run-label old="build a1930a8" --run-label new="build fcd8251" -o out/
-  violinoscope.py --jaeger http://jaeger:16686 --service ydb --lookback 2h -o out/
+Inputs may be files, directories, globs, or NAME=PATH. Without --unit, trace roots
+are the units of work. Dataset names come from resources or input filenames.
 """
 import argparse
 import base64
@@ -28,6 +18,10 @@ import os
 import re
 import sys
 import time
+import tempfile
+from pathlib import Path
+
+import layouts
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
@@ -65,7 +59,7 @@ def otlp_value(v):
     return None
 
 
-def from_otlp_span(s):
+def from_otlp_span(s, relation_attr="span.link.relation"):
     status = s.get('status') or {}
     return {
         'trace': b64_or_hex(s.get('traceId', '')), 'id': b64_or_hex(s.get('spanId', '')),
@@ -75,7 +69,7 @@ def from_otlp_span(s):
         'error': status.get('code') in OTLP_STATUS_ERROR, 'message': status.get('message', ''),
         # Links to other spans, with what each means: depends_on, follows_from, or nothing said.
         'links': [(b64_or_hex(l.get('spanId', '')), next((otlp_value(a.get('value', {})) for a in l.get('attributes', [])
-                                                          if a.get('key') == 'ydb.link.relation'), ''))
+                                                          if a.get('key') == relation_attr), ''))
                   for l in s.get('links', [])],
     }
 
@@ -90,43 +84,53 @@ def from_jaeger_trace(trace):
             'trace': s['traceID'].lower().rjust(32, '0'), 'id': s['spanID'].lower(), 'parent': parent.lower(),
             'name': s.get('operationName', ''), 'start': start, 'end': start + int(s.get('duration', 0)) * 1000,
             'attrs': tags, 'error': error, 'message': tags.get('otel.status_description', ''),
+            'dataset': tags.get('dataset.name') or trace.get('processes', {}).get(s.get('processID'), {}).get('serviceName'),
+            'links': [(r['spanID'].lower(), 'follows_from') for r in s.get('references', []) if r.get('refType') == 'FOLLOWS_FROM'],
         }
 
 
-def spans_from_document(doc):
+def spans_from_document(doc, relation_attr="span.link.relation"):
+    if isinstance(doc, dict) and 'batches' in doc:  # Tempo's trace-by-ID JSON
+        doc = {'resourceSpans': doc['batches']}
+    if isinstance(doc, dict) and isinstance(doc.get('trace'), dict):
+        yield from spans_from_document(doc['trace'], relation_attr)
+        return
     if isinstance(doc, dict) and 'resourceSpans' in doc:
         for rs in doc['resourceSpans']:
+            resource = {a['key']: otlp_value(a.get('value', {})) for a in rs.get('resource', {}).get('attributes', [])}
             for ss in rs.get('scopeSpans', rs.get('instrumentationLibrarySpans', [])):
                 for s in ss.get('spans', []):
-                    yield from_otlp_span(s)
+                    span = from_otlp_span(s, relation_attr)
+                    span["dataset"] = resource.get("dataset.name") or resource.get("service.name")
+                    yield span
     elif isinstance(doc, dict) and 'data' in doc and isinstance(doc['data'], list):
         for trace in doc['data']:
             yield from from_jaeger_trace(trace)
     elif isinstance(doc, dict) and 'spanId' in doc:
-        yield from_otlp_span(doc)
+        yield from_otlp_span(doc, relation_attr)
     elif isinstance(doc, list):
         for item in doc:
-            yield from spans_from_document(item)
+            yield from spans_from_document(item, relation_attr)
 
 
-def read_file(path):
+def read_file(path, relation_attr="span.link.relation"):
     opener = gzip.open if path.endswith('.gz') else open
-    with opener(path, 'rt') as f:
+    with opener(path, 'rt', encoding='utf-8') as f:
         head = f.read(1 << 16)
         f.seek(0)
         lines = '\n' in head.strip() and head.lstrip().startswith('{') and _first_line_parses(head)
         if lines:
-            for line in f:
+            for number, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     doc = json.loads(line)
-                except json.JSONDecodeError:
-                    continue  # a truncated last line
-                yield from spans_from_document(doc)
+                except json.JSONDecodeError as error:
+                    raise ValueError(f"{path}:{number}: invalid JSON: {error.msg}") from error
+                yield from spans_from_document(doc, relation_attr)
         else:
-            yield from spans_from_document(json.load(f))
+            yield from spans_from_document(json.load(f), relation_attr)
 
 
 def _first_line_parses(head):
@@ -179,19 +183,23 @@ def failure_reason(message):
 # ---------------------------------------------------------------------------------------------------------------
 # One unit of work: its root span and everything under it, in tree order.
 
-def analyze_unit(root, children):
+def analyze_unit(root, children, flow_attr="span.flow"):
     lo, hi = root['start'], root['end']
     inside, stack = [], [(root, -1)]
+    seen = set()
     while stack:
         s, parent_row = stack.pop()
+        if s["id"] in seen:
+            raise ValueError(f"Cyclic span tree in trace {root['trace']}")
+        seen.add(s["id"])
         inside.append((s, parent_row))
         row = len(inside) - 1
         for k in sorted(children[s['id']], key=lambda x: x['start'], reverse=True):
             stack.append((k, row))
     # Rows: name, parent row, start and length in microseconds from the unit's start, and flags: 1 asynchronous
-    # (it runs beside its parent, as on a track of its own in Perfetto), 2 failed.
+    # (a new logical flow; unmarked descendants inherit it), 2 failed.
     tree = [(s['name'], parent_row, (s['start'] - lo) // 1000, (s['end'] - s['start']) // 1000,
-             (1 if s['attrs'].get('ydb.flow') == 'async' else 0) | (2 if s['error'] else 0))
+             (1 if s['attrs'].get(flow_attr) == 'async' else 0) | (2 if s['error'] else 0))
             for s, parent_row in inside]
     # Links between its spans, as rows: from, to, and 1 for depends_on, 2 for follows_from, 0 else.
     row_of = {s['id']: row for row, (s, _) in enumerate(inside)}
@@ -224,19 +232,21 @@ def build(args):
         expanded = []
         for p in paths:
             expanded += sorted(os.path.join(p, f) for f in os.listdir(p)) if os.path.isdir(p) else [p]
-        sources.append((name or os.path.splitext(os.path.basename(pattern.rstrip('/')))[0], expanded))
+        sources.append((name or os.path.splitext(os.path.basename(pattern.rstrip('/')))[0], expanded, bool(name)))
     if args.jaeger:
-        sources.append(('jaeger', None))
+        sources.append(('jaeger', None, False))
 
     records, failures = [], []
     unit_names = Counter()
     seen_units = set()
-    for dataset, paths in sources:
+    for fallback, paths, explicit in sources:
         by_trace = defaultdict(dict)
         stream = (fetch_jaeger(args.jaeger, args.service, args.operation, args.lookback, args.limit) if paths is None
-                  else (s for p in paths for s in read_file(p)))
+                  else (s for p in paths for s in read_file(p, args.link_relation_attr)))
         n_spans = 0
         for s in stream:
+            if s['end'] < s['start']:
+                raise ValueError(f"Span {s['id']} ends before it starts")
             by_trace[s['trace']][s['id']] = s
             n_spans += 1
         units = 0
@@ -263,6 +273,7 @@ def build(args):
             roots = ([s for s in spans if s['name'] == args.unit] if args.unit
                      else [s for s in spans if not s['parent'] or s['parent'] not in spans_by_id])
             for root in roots:
+                dataset = fallback if explicit else root.get('dataset') or fallback
                 key = (dataset, trace_id, root['id'])
                 if key in seen_units:
                     continue
@@ -271,7 +282,7 @@ def build(args):
                 unit_names[root['name']] += 1
                 base = {'dataset': dataset, 'group': group or dataset, 'label': label or (fp[:8] or root['id'][:8]),
                         'trace': trace_id, 'fp': fp}
-                rec = analyze_unit(root, children)
+                rec = analyze_unit(root, children, args.flow_attr)
                 if root['error']:
                     failures.append(dict(base, reason=failure_reason(failure_detail(rec['spans'], root))))
                     continue
@@ -282,10 +293,10 @@ def build(args):
                 if args.with_text:
                     rec['text'] = text[:TEXT_LIMIT]
                 records.append(rec)
-        print(f'{dataset}: {n_spans} spans, {len(by_trace)} traces, {units} units', file=sys.stderr)
+        print(f'{fallback}: {n_spans} spans, {len(by_trace)} traces, {units} units', file=sys.stderr)
     if not records:
         sys.exit(f'no units found: no span is named {args.unit!r}' if args.unit else 'no units found')
-    runs = list(dict.fromkeys(name for name, _ in sources))
+    runs = list(dict.fromkeys(r['dataset'] for r in records + failures))
     unit = args.unit or unit_names.most_common(1)[0][0]
     write_bundle(args, unit, records, failures, runs)
 
@@ -358,8 +369,13 @@ def write_bundle(args, unit, records, failures, runs):
         'failures': [{'ds': f['dataset'], 'g': f['group'], 'l': f['label'], 't': f['trace'], 'reason': f['reason']} for f in failures],
     }
     write_js(os.path.join(out, 'data', 'summary.js'), 'EXPLORER_SUMMARY', summary)
-    # The violins saved into the page, which the page itself writes on claude.ai: kept when building again.
-    if not os.path.exists(os.path.join(out, 'data', 'layout.js')):
+    if args.layout:
+        doc = layouts.decode(json.loads(Path(args.layout).read_text()))
+        if doc['unit'] != unit:
+            raise ValueError(f"Layout is for {doc['unit']!r}, not {unit!r}")
+        doc['saved'] = hashlib.sha256(json.dumps(doc, sort_keys=True).encode()).hexdigest()
+        write_js(os.path.join(out, 'data', 'layout.js'), 'EXPLORER_LAYOUT', doc)
+    elif not os.path.exists(os.path.join(out, 'data', 'layout.js')):
         write_js(os.path.join(out, 'data', 'layout.js'), 'EXPLORER_LAYOUT', None)
     for k in range(0, len(records), CHUNK):
         chunk_names, chunk_index = [], {}
@@ -378,30 +394,37 @@ def write_bundle(args, unit, records, failures, runs):
             json.dump({'chunk': k // CHUNK, 'names': chunk_names, 'trees': trees}, f, separators=(',', ':'))
             f.write(';\n')
 
-    write_page(out)
-    print(f'{len(records)} units of {unit}, {len(failures)} failed -> {out}/index.html', file=sys.stderr)
+    write_page(out, split_data=args.split_data, output=getattr(args, 'html_output', None))
+    print(f"{len(records)} units of {unit}, {len(failures)} failed -> {getattr(args, 'html_output', None) or out + '/index.html'}", file=sys.stderr)
 
 
-def write_page(out):
-    """Writes out/index.html: web/index.html with its scripts and styles inside it, so the page can save itself as one
-    file; the data stays in out/data."""
-    web = os.path.join(HERE, 'web')
-    page = open(os.path.join(web, 'index.html')).read()
+def write_page(out, split_data=False, output=None):
+    """Inline code, styles and (by default) every data chunk. No network required."""
+    web = Path(HERE) / 'web'
+    page = (web / 'index.html').read_text()
+    data = Path(out) / 'data'
 
-    def inline(m):
-        src = m.group(1)
-        if src.startswith('data/'):
-            return m.group(0)
-        code = open(os.path.join(web, src)).read()
-        # Nothing in a script may end it early.
+    def script(code, marker=''):
         code = re.sub(r'</(script)', r'<\\/\1', code, flags=re.I)
-        return f'<script data-v="{src[:-3]}">\n{code}</script>'
+        return f'<script{marker}>\n{code}</script>'
 
-    css = open(os.path.join(web, 'app.css')).read()
+    def inline(match):
+        src = match[1]
+        if src.startswith('data/'):
+            return match[0] if split_data else script((Path(out) / src).read_text())
+        return script((web / src).read_text(), f' data-v="{src[:-3]}"')
+
+    css = (web / 'app.css').read_text()
     page = page.replace('<link rel="stylesheet" href="app.css">', f'<style data-v>\n{css}</style>')
+    if not split_data:
+        summary = json.loads((data / 'summary.js').read_text().split('=', 1)[1].rstrip().rstrip(';'))
+        count = max((u['k'] for u in summary['units']), default=-1) + 1
+        chunks = '\n'.join(script((data / f'trees-{k:04d}.js').read_text()) for k in range(count))
+        page = page.replace('<script src="core.js"></script>', chunks + '\n<script src="core.js"></script>')
     page = re.sub(r'<script src="([^"]+)"></script>', inline, page)
-    with open(os.path.join(out, 'index.html'), 'w') as f:
-        f.write(page)
+    target = Path(output) if output else Path(out) / 'index.html'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(page)
 
 
 def natural(s):
@@ -418,7 +441,11 @@ def write_js(path, name, value):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('inputs', nargs='*', help='[NAME=]file, directory or glob')
-    ap.add_argument('-o', '--output', required=True, help='directory to write the explorer to')
+    ap.add_argument('-o', '--output', default='violinoscope.html', help='HTML file (default: violinoscope.html), or a directory')
+    ap.add_argument('--layout', help='Saved layout JSON to use as the report’s default')
+    ap.add_argument('--split-data', action='store_true', help='Keep data in separate files (requires directory output)')
+    ap.add_argument('--flow-attr', default='span.flow', help='Attribute marking a logical flow boundary with value async')
+    ap.add_argument('--link-relation-attr', default='span.link.relation', help='Link attribute naming depends_on or follows_from')
     ap.add_argument('--unit', help="the span that is one unit of work (default: each trace's root)")
     ap.add_argument('--title', help='the page title (default: the unit span\'s name)')
     ap.add_argument('--left', help='groups for the left half of each violin, comma-separated (default: the largest group)')
@@ -436,7 +463,7 @@ def main():
                     help='a note on an input, such as the build it ran on, shown with its run')
     ap.add_argument('--with-text', action='store_true', help='keep query text for the drill-down (off by default: it may be sensitive)')
     ap.add_argument('--jaeger', help='Jaeger query service to fetch traces from, e.g. http://host:16686')
-    ap.add_argument('--service', default='ydb')
+    ap.add_argument('--service', help='Service name to search for with --jaeger')
     ap.add_argument('--operation', default='', help='Jaeger operation to search for (default: any)')
     ap.add_argument('--lookback', type=float, default=3600, help='seconds of history to fetch from Jaeger')
     ap.add_argument('--limit', type=int, default=2000)
@@ -446,7 +473,20 @@ def main():
         ap.error('give span files or --jaeger')
     if args.group_by not in ('label', 'dataset') and not args.group_by.startswith('attr:'):
         ap.error('--group-by is label, dataset or attr:KEY')
-    build(args)
+    if args.jaeger and not args.service:
+        ap.error('--jaeger requires --service')
+    try:
+        if args.output.lower().endswith(('.html', '.htm')):
+            if args.split_data:
+                ap.error('--split-data requires directory output')
+            args.html_output = args.output
+            with tempfile.TemporaryDirectory(prefix='violinoscope-') as folder:
+                args.output = folder
+                build(args)
+        else:
+            build(args)
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        ap.exit(1, f'error: {error}\n')
 
 
 if __name__ == '__main__':

@@ -25,7 +25,7 @@
   // The compilations in view, run by run in the order they ran, and where each starts in display time (start[i]).
   // A new set starts on all of it, or on the selected compilation.
   const model = X.nav.model = () => {
-    const key = X.viewKey();
+    const viewKey = X.viewKey(), key = `${viewKey}|${X.chunksLoaded()}`;
     if (M && M.key === key) return M;
     const units = X.allInView().sort((a, b) => X.runOf(a) - X.runOf(b) || data.units[a].at - data.units[b].at);
     const fold = X.timeFold(units), pos = new Map(), start = new Float64Array(data.units.length).fill(NaN);
@@ -34,13 +34,27 @@
       if (!run || run.run !== X.runOf(i)) run = fold.runs.find((r) => r.run === X.runOf(i));
       const d = start[i] = run.toD(data.units[i].at);
       pos.set(i, k);
-      dMin = Math.min(dMin, d);
-      dMax = Math.max(dMax, d + data.units[i].ms);
+      const [lo, hi] = X.spanExtent(i);
+      dMin = Math.min(dMin, d + lo);
+      dMax = Math.max(dMax, d + hi);
     });
     if (!units.length) { dMin = 0; dMax = 1; }
-    M = { key, units, pos, start, runs: fold.runs, gaps: fold.gaps, breaks: fold.breaks, dMin, dMax };
-    back.length = 0;
-    S.tw = S.sel !== null && pos.has(S.sel) ? extent(S.sel) : null;
+    const previous = M;
+    M = { key, viewKey, units, pos, start, runs: fold.runs, gaps: fold.gaps, breaks: fold.breaks, dMin, dMax };
+    if (previous && previous.viewKey === viewKey) {
+      // Newly loaded tails can change both the bounds and folded gaps. Keep a zoom on the same real times;
+      // a view showing everything follows the expanded bounds instead.
+      const remap = (w) => w.map((d) => {
+        const oldRun = previous.runs.findLast((r) => r.d0 <= d) || previous.runs[0];
+        const newRun = oldRun && M.runs.find((r) => r.run === oldRun.run);
+        return newRun ? newRun.toD(oldRun.toR(d)) : d;
+      });
+      if (S.tw) S.tw = S.tw[0] <= previous.dMin && S.tw[1] >= previous.dMax ? null : remap(S.tw);
+      for (let k = 0; k < back.length; k++) back[k] = remap(back[k]);
+    } else {
+      back.length = 0;
+      S.tw = S.sel !== null && pos.has(S.sel) ? extent(S.sel) : null;
+    }
     return M;
   };
 
@@ -50,9 +64,7 @@
   }
   // A compilation's stretch, its asynchronous tail included.
   function extent(i) {
-    const u = data.units[i], a = M.start[i];
-    let b = a + u.ms;
-    if (X.hasSpans(i)) for (const s of X.spansOf(i).rows) b = Math.max(b, a + s.start + s.dur);
+    const [lo, hi] = X.spanExtent(i), a = M.start[i] + lo, b = M.start[i] + hi;
     const pad = (b - a) * 0.04;
     return [a - pad, b + pad];
   }
@@ -181,6 +193,6 @@
     canvas.addEventListener('pointerup', () => { drag = null; });
     canvas.addEventListener('dblclick', () => { if (heavy()) X.flame.setHeavyWindow(0, X.flame.heavyExtent(), true); else X.nav.fitAll(); });
     $('ov-nav').addEventListener('click', (e) => { if (e.target.closest('[data-nav]')) X.nav.fitAll(); });
-    X.on('chunk', () => { if (shown()) draw(); });
+    X.on('chunk', () => { if (shown()) { model(); changed(); } });
   };
 })();

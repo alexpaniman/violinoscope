@@ -147,7 +147,7 @@
   // What is changed, so it is plain the page is showing a what-if; the dashed outlines are as measured. A factor on a
   // violin not shown waits until it is shown again.
   function renderWhatif() {
-    const changed = [...S.factors].filter(([k, v]) => v !== 1 && data.columnIndex.has(k));
+    const changed = [...S.factors].filter(([k, v]) => v !== 1 && data.columnIndex.has(k) && !data.columns[data.columnIndex.get(k)].async);
     $('whatif-chip').hidden = !changed.length;
     const named = changed.map(([id, v]) => `${data.columns[data.columnIndex.get(id)].label} ${X.fmtFactor(v)}`);
     $('whatif-text').innerHTML = `What if: <b>${changed.length === 1 ? esc(named[0]) : `${changed.length} violins`}</b>`;
@@ -258,10 +258,14 @@
 
   function renderCard() {
     const rc = rangeDomain(), card = $('rangecard'), svg = $('range-svg'), T = X.T;
+    if (!X.layout.ready) { svg.innerHTML = ''; return; }
+    if (!rc.dom || rc.domKey !== X.scenarioKey()) {
+      rc.dom = coarsen(bucketShares(rc)); rc.domKey = X.scenarioKey();
+    }
     // The parts are named at the right of the chart, so both charts leave that much room.
-    const LABELS = 160, W = svg.clientWidth || card.clientWidth - 24, PAD = 7, w = W - 2 * PAD - LABELS, END = PAD + w;
+    const LABELS = 210, W = svg.clientWidth || card.clientWidth - 24, PAD = 7, w = W - 2 * PAD - LABELS, END = PAD + w;
     const xOfL = (l) => PAD + (l - rc.lo) / (rc.hi - rc.lo) * w;
-    const HIST = 30, RUG0 = 34, RUG1 = 41, DOM0 = RUG1 + 8, DOMH = 210;
+    const HIST = 30, RUG0 = 34, RUG1 = 41, DOM0 = RUG1 + 8, DOMH = Math.max(210, rc.dom.parts.length * 14);
     const AXY = DOM0 + DOMH + 13, Ht = AXY + 4;
     const out = [];
     const r = drag ? drag.range : S.range;
@@ -296,7 +300,6 @@
       out.push(`<circle cx="${n1(xOfL(Math.log10(Math.max(data.units[i].ms, 1e-3))))}" cy="${(RUG0 + RUG1) / 2}" r="3" fill="${T.surface}" stroke="${T[`m${X.slotOf(g)}`]}" stroke-width="1.5"/>`);
     }
     if (S.sel !== null) out.push(`<path d="M${n1(xOfL(Math.log10(Math.max(data.units[S.sel].ms, 1e-3))))} 0V${RUG1}" stroke="${T.sel}" stroke-width="2"/>`);
-    if (!rc.dom || rc.domKey !== X.scenarioKey()) { rc.dom = coarsen(bucketShares(rc)); rc.domKey = X.scenarioKey(); }
     const domKey = `${W}|${T.scheme}|${rc.domKey}`;
     if (!rc.domSvg || rc.domSvg.key !== domKey) rc.domSvg = { key: domKey, svg: dominanceSvg(rc, xOfL, DOM0, DOMH, W).join('') };
     out.push(rc.domSvg.svg);
@@ -331,8 +334,10 @@
   // joined stretches, and empty ones between buckets, are veiled.
   const FEW = 5;
   function bucketShares(rc) {
-    const P = data.partition.length, NB = rc.NB, at = (l) => clamp(Math.floor((l - rc.lo) / (rc.hi - rc.lo) * NB), 0, NB - 1);
+    const breakdown = X.layout.breakdown(), P = breakdown.nodes.length, NB = rc.NB;
+    const at = (l) => clamp(Math.floor((l - rc.lo) / (rc.hi - rc.lo) * NB), 0, NB - 1);
     const sum = Array.from({ length: NB }, () => new Float64Array(P)), n = new Float64Array(NB), logs = new Float64Array(NB);
+    const lows = new Float64Array(NB).fill(Infinity), highs = new Float64Array(NB);
     // With a what-if, each column's own time takes its factors, and each unit sits at the time it would take.
     const proj = X.proj();
     const row = new Float64Array(P);
@@ -340,26 +345,29 @@
       const u = data.units[i];
       let total = 0;
       for (let p = 0; p < P; p++) {
-        row[p] = proj ? proj.own[i * proj.P + p] : u.p[p];
+        row[p] = breakdown.rows[i][p];
         total += row[p];
       }
       const l = Math.log10(Math.max(proj ? X.totalMs(i, false) : u.ms, 1e-3)), b = at(l);
       n[b]++;
       logs[b] += l;
+      lows[b] = Math.min(lows[b], 10 ** l); highs[b] = Math.max(highs[b], 10 ** l);
       for (let p = 0; p < P; p++) sum[b][p] += total > 0 ? row[p] / total : 0;
     }
     const groups = [];
     let cur = null;
     for (let b = 0; b < NB; b++) {
       if (!n[b]) continue;
-      if (!cur) cur = { b0: b, b1: b, n: 0, logs: 0, sum: new Float64Array(P) };
+      if (!cur) cur = { b0: b, b1: b, n: 0, logs: 0, lo: Infinity, hi: 0, sum: new Float64Array(P) };
       cur.b1 = b; cur.n += n[b]; cur.logs += logs[b];
+      cur.lo = Math.min(cur.lo, lows[b]); cur.hi = Math.max(cur.hi, highs[b]);
       for (let p = 0; p < P; p++) cur.sum[p] += sum[b][p];
       if (cur.n >= FEW) { groups.push(cur); cur = null; }
     }
     if (cur && groups.length) {
       const g = groups[groups.length - 1];
       g.b1 = cur.b1; g.n += cur.n; g.logs += cur.logs;
+      g.lo = Math.min(g.lo, cur.lo); g.hi = Math.max(g.hi, cur.hi);
       for (let p = 0; p < P; p++) g.sum[p] += cur.sum[p];
     } else if (cur) groups.push(cur);
     const groupOf = new Int32Array(NB).fill(-1);
@@ -367,7 +375,7 @@
     // Each group at the middle of its compilations' times.
     const xs = groups.map((g) => g.logs / g.n);
     const curves = Array.from({ length: P }, (_, p) => monotone(xs, groups.map((g) => g.sum[p] / g.n)));
-    const G = 240, grid = new Float64Array(G), mean = [], neff = new Float64Array(G), wide = new Uint8Array(G);
+    const G = 240, grid = new Float64Array(G), mean = [], neff = new Float64Array(G), wide = new Uint8Array(G), support = [];
     for (let j = 0; j < G; j++) {
       const x = rc.lo + (rc.hi - rc.lo) * j / (G - 1), row = new Float64Array(P), g = groups[groupOf[at(x)]];
       let total = 0;
@@ -377,44 +385,39 @@
       mean.push(row);
       neff[j] = g ? g.n : 0;
       wide[j] = !g || g.b1 > g.b0 ? 1 : 0;
+      const edge = x < xs[0] ? groups[0] : x > xs[xs.length - 1] ? groups[groups.length - 1] : null;
+      support.push(g ? {lo:g.lo, hi:g.hi, n:g.n} : edge ? {lo:edge.lo, hi:edge.hi, n:edge.n, edge:true} : null);
     }
-    return { grid, mean, neff, wide };
+    return { grid, mean, neff, wide, support, breakdown };
   }
-  // Which parts the stack shows, adding up to the whole: the first tree's leaves, but a parent in place of its children
-  // where at most one of them matters (the rest of its own time counting as one of them), and what is left small in
-  // Other, last. A part matters if it is wide somewhere or wide on average.
+  // Meaningful work anywhere along the axis gets a stable name. The remaining recorded steps and time outside
+  // child spans are distinct, inspectable parts; small leftovers share one Other band.
   const WIDE = 0.1, BROAD = 0.05;
   function coarsen(dom) {
-    const N1 = data.partition.length - 1, G = dom.grid.length, T = X.T, other = [];
-    const total = (ks) => { const s = new Float64Array(G); for (let j = 0; j < G; j++) for (const k of ks) s[j] += dom.mean[j][k]; return s; };
-    const matters = (ks) => { const s = total(ks); let top = 0, sum = 0; for (const v of s) { top = Math.max(top, v); sum += v; } return top >= WIDE || sum / G >= BROAD; };
-    const kidsOf = (k) => (X.kids[k] || []).filter((c) => c < N1);
-    const under = (k) => [k, ...kidsOf(k).flatMap(under)];
-    const ks = (u) => u.flatMap((part) => part.ks);
-    // Of several, those that matter, the others to Other; a split one, made of several parts, matters.
-    const keep = (units) => {
-      const kept = units.filter((u) => u.length > 1 || matters(ks(u)));
-      for (const u of units) if (!kept.includes(u)) other.push(...ks(u));
-      return kept;
+    const {nodes, children, tops, none} = dom.breakdown, T = X.T, N1 = data.partition.length - 1;
+    const under = (k) => [k, ...children[k].flatMap(under)];
+    const nameOf = (p) => p.other ? 'Other' : p.kind === 'own' ? `${nodes[p.node].label}: own time`
+      : p.kind === 'steps' ? `Other steps in ${nodes[p.node].label}` : nodes[p.node].label;
+    const detailOf = (p) => {
+      if (p.other) return p.components.flatMap(detailOf);
+      if (p.kind === 'own' || !children[p.node].length) return [{label:nameOf(p), ks:p.ks}];
+      return [...(p.kind === 'whole' ? [{label:`${nodes[p.node].label}: own time`, ks:[p.node]}] : []),
+        ...(p.roots || children[p.node]).map((k) => ({label:nodes[k].label, ks:under(k)}))];
     };
-    function partsOf(k) {
-      const kids = kidsOf(k);
-      if (!kids.length) return [{ ks: [k], node: k }];
-      const units = [[{ ks: [k], node: k, rest: true }], ...kids.map(partsOf)];
-      const kept = units.filter((u) => u.length > 1 || matters(ks(u)));
-      if (kept.length <= 1) return [{ ks: under(k), node: k }];
-      return keep(units).flat();
-    }
-    const tops = data.columns.map((c, k) => k).filter((k) => k < N1 && X.parentIdx[k] < 0);
-    const shown = keep([...tops.map(partsOf), [{ ks: [N1], node: N1 }]]).flat();
-    if (other.length) shown.push({ ks: other, other: true });
+    const shown = X.coarsenParts(dom.mean, children, tops, none, WIDE, BROAD);
     const parts = shown.map((part) => {
-      const k = part.other ? N1 : part.node, name = k === N1 ? data.partition[N1].label : data.columns[k].label;
-      const label = part.other ? 'Other' : part.rest ? `Rest of ${name}` : name;
-      return { label, ks: part.ks, fill: part.other ? X.mix(X.partFill(N1), T.surface, 0.45) : X.partFill(k), stroke: T.parts[k] };
+      let base = N1, depth = 0;
+      if (!part.other) for (let k = part.node; k >= 0; k = nodes[k].parent, depth++) {
+        const at = data.columnIndex.get(nodes[k].id);
+        if (at !== undefined && !data.columns[at].second) { base = at; break; }
+      }
+      const color = T.parts[base], fill = X.mix(color, T.surface, part.other ? .6 : .22 + .08 * (depth % 3));
+      const path = [];
+      if (!part.other) for (let k = part.node; k >= 0; k = nodes[k].parent) path.unshift(nodes[k].label);
+      return {...part, label:nameOf(part), details:detailOf(part), path, fill, stroke:color};
     });
     const mean = dom.mean.map((row) => Float64Array.from(parts, (part) => part.ks.reduce((a, k) => a + row[k], 0)));
-    return { grid: dom.grid, mean, neff: dom.neff, wide: dom.wide, parts };
+    return {...dom, mean, sourceMean:dom.mean, parts};
   }
 
   // A monotone cubic through the points (Fritsch and Carlson): smooth, and never past its neighbours; flat beyond the
@@ -445,10 +448,8 @@
   // the bands are lightly veiled.
   function dominanceSvg(rc, xOfL, y0, h, W) {
     const dom = rc.dom, parts = dom.parts, out = [], T = X.T, G = dom.grid.length;
-    const mean = new Array(G);
-    for (let j = 0, last = null; j < G; j++) { if (dom.neff[j] >= 1) last = dom.mean[j]; mean[j] = last; }
-    for (let j = G - 1, next = null; j >= 0; j--) { if (mean[j]) next = mean[j]; else mean[j] = next; }
-    if (!mean[0]) return out;
+    const mean = dom.mean;
+    if (!mean.some((row) => row.some((v) => v > 0))) return out;
     const cum = mean.map((m) => { const row = [0]; for (let k = 0; k < parts.length; k++) row.push(row[k] + m[k]); return row; });
     rc.cum = { j0: 0, j1: G - 1, rows: cum };
     const yOf = (v) => y0 + v * h, xa = xOfL(dom.grid[0]), xb = xOfL(dom.grid[G - 1]);
@@ -480,7 +481,8 @@
     for (const { k, y, ly } of at) {
       out.push(`<path d="M${n1(xb + 2)} ${n1(y)}C${n1(xb + 8)} ${n1(y)} ${n1(xb + 6)} ${n1(ly)} ${n1(xb + 12)} ${n1(ly)}" fill="none" stroke="${parts[k].stroke}" stroke-width="1.2"/>`);
       out.push(`<rect x="${n1(xb + 14)}" y="${n1(ly - 4)}" width="8" height="8" rx="2" fill="${parts[k].fill}"/>`);
-      out.push(X.txt(xb + 26, ly, X.fitText(parts[k].label, 11, 400, W - xb - 30), { base: 'central', fill: T.ink, size: 11, extra: ` class="band-label" data-k="${k}"` }));
+      out.push(X.txt(xb + 26, ly, X.fitText(parts[k].label, 11, 400, W - xb - 30), { base: 'central', fill: T.ink, size: 11,
+        extra: ` class="band-label" data-k="${k}" ` }));
     }
     return out;
   }
@@ -505,25 +507,48 @@
     return { x, y, l: rc.lo + clamp((x - rc.PAD) / rc.w, 0, 1) * (rc.hi - rc.lo), px: e.clientX - b.left };
   }
 
+  function partExplanation(dom, k, j, limit = Infinity) {
+    const part = dom.parts[k], support = dom.support[j];
+    const near = support ? `${support.n} compilations, ${X.fmtMs(support.lo)}–${X.fmtMs(support.hi)}${support.edge ? ' · nearest average' : ''}`
+      : 'No compilations here · interpolated between neighbouring averages';
+    const details = part.details.map((d) => ({label:d.label, value:d.ks.reduce((a, q) => a + dom.sourceMean[j][q], 0)}))
+      .filter((d) => d.value > 1e-8).sort((a, b) => b.value - a.value);
+    const explanation = part.kind === 'own' ? 'Time not covered by child steps or dependency groups in this breakdown.'
+      : part.kind === 'steps' ? 'Recorded child steps too small to show separately.'
+      : part.other ? 'Small contributions from across the tree.' : 'Includes these recorded steps and own time.';
+    const rows = details.slice(0, limit).map((d) => `<div class="part-detail"><span>${esc(d.label)}</span><b>${esc(X.fmtPct(d.value))}</b></div>`);
+    if (details.length > limit) rows.push(`<div class="part-detail k"><span>${details.length - limit} smaller contributions</span><b>${esc(X.fmtPct(details.slice(limit).reduce((a, d) => a + d.value, 0)))}</b></div>`);
+    return `<div class="t1">${esc(part.label)} · ${esc(X.fmtPct(dom.mean[j][k]))} of ${esc(X.UNIT)} time</div>`
+      + `<div class="k">At ${esc(X.fmtMs(10 ** dom.grid[j]))}${X.proj() ? ', if the what-if held' : ''}</div>`
+      + `<div class="k">${esc(near)}</div>`
+      + (part.path.length > 1 ? `<div class="part-path k">${esc(part.path.slice(-4).join(' › '))}</div>` : '')
+      + `<div class="part-explanation">${esc(explanation)} Percentages are of ${esc(X.UNIT)} time.</div>${rows.join('')}`;
+  }
+
   function wireCard() {
     const svg = $('range-svg'), cross = $('card-cross');
     svg.addEventListener('pointerdown', (e) => {
       const at = cardPointer(e);
-      if (!at) return;
+      if (!at || at.x < RC.PAD || at.x > RC.PAD + RC.w) return;
       const rc = RC, r = S.range || [10 ** rc.lo, 10 ** rc.hi];
       const xa = rc.xOfL(Math.log10(r[0])), xb = rc.xOfL(Math.log10(r[1]));
-      drag = { which: Math.abs(at.x - xa) <= 9 ? 'a' : Math.abs(at.x - xb) <= 9 ? 'b' : 'new', start: at.l, moved: false, range: r.slice() };
+      drag = { which: Math.abs(at.x - xa) <= 9 ? 'a' : Math.abs(at.x - xb) <= 9 ? 'b' : 'new', start: at.l, moved: false, range: r.slice(),
+        part: e.target.closest('[data-k]') ? Number(e.target.closest('[data-k]').dataset.k) : -1 };
       svg.setPointerCapture(e.pointerId);
       X.hideTip();
       cross.hidden = true;
     });
     svg.addEventListener('pointermove', (e) => {
+      // The stage's violin hover handler clears its tooltip; do that before showing this card's explanation.
+      if (S.view === 'violins') X.violins.leave(e);
+      e.stopPropagation();
       const at = cardPointer(e);
       if (!at) return;
+      svg.style.cursor = at.x >= RC.PAD && at.x <= RC.PAD + RC.w ? 'ew-resize' : 'default';
       if (!drag) {
-        if (RC && at.y >= RC.DOM0 && at.y <= RC.DOM0 + RC.DOMH) {
+        if (RC && (at.x >= RC.PAD && at.x <= RC.PAD + RC.w || e.target.closest('.band-label')) && at.y >= RC.DOM0 && at.y <= RC.DOM0 + RC.DOMH) {
           const b = svg.getBoundingClientRect(), c = $('rangecard').getBoundingClientRect();
-          cross.hidden = false;
+          cross.hidden = at.x < RC.PAD || at.x > RC.PAD + RC.w;
           cross.style.transform = `translateX(${Math.round(b.left - c.left + at.px)}px)`;
           cross.style.top = `${b.top - c.top + RC.DOM0 * b.width / RC.W}px`;
           cross.style.height = `${RC.DOMH * b.width / RC.W}px`;
@@ -533,14 +558,11 @@
             const v = (at.y - RC.DOM0) / RC.DOMH;
             let k = 0;
             while (k < RC.dom.parts.length - 1 && cum[k + 1] <= v) k++;
+            const label = e.target.closest('.band-label');
+            if (label) k = Number(label.dataset.k);
             hoverBand(k);
             const s = $('stage').getBoundingClientRect();
-            const share = (q) => cum[q + 1] - cum[q];
-            const rest = RC.dom.parts.map((p, q) => [q, share(q)]).filter(([q, m]) => q !== k && m >= 0.02).sort((a, b2) => b2[1] - a[1]).slice(0, 2);
-            const near = !dom.neff[j] ? `none around ${X.fmtMs(10 ** dom.grid[j])}: drawn between its neighbours`
-              : `${X.nUnits(dom.neff[j])} around ${X.fmtMs(10 ** dom.grid[j])}${dom.wide[j] ? ', few: from a wider stretch' : ''}${X.proj() ? ', if the what-if held' : ''}`;
-            X.tip([`${RC.dom.parts[k].label} · ${X.fmtPct(share(k))}`, near,
-              ...rest.map(([q, m]) => `${RC.dom.parts[q].label} ${X.fmtPct(m)}`)], e.clientX - s.left, e.clientY - s.top);
+            X.tipHtml(partExplanation(dom, k, j, 8), e.clientX - s.left, e.clientY - s.top);
           } else { hoverBand(-1); X.hideTip(); }
         } else { cross.hidden = true; hoverBand(-1); X.hideTip(); }
         return;
@@ -556,10 +578,11 @@
       if (!drag) return;
       const d = drag;
       drag = null;
-      if (d.moved) setRange(d.range); else renderCard();
+      if (d.moved) setRange(d.range);
+      else renderCard();
     });
     svg.addEventListener('pointerleave', () => { cross.hidden = true; hoverBand(-1); if (!drag) X.hideTip(); });
-    svg.addEventListener('dblclick', () => setRange(null));
+    svg.addEventListener('dblclick', e => { const at=cardPointer(e); if(at && at.x>=RC.PAD && at.x<=RC.PAD+RC.w)setRange(null); });
     for (const [id, k] of [['range-lo', 0], ['range-hi', 1]]) {
       $(id).addEventListener('change', () => {
         const v = parseFloat($(id).value.replace(',', '.'));
@@ -636,6 +659,11 @@
   // Wiring.
 
   function wire() {
+    X.on('history', (event) => {
+      const labels = {merge:'Merged violins', transfer:'Moved violin', hide:'Hidden violin', remove:'Removed violins', exclude:'Updated membership', include:'Updated membership', leave:'Updated membership', ungroup:'Split violin'};
+      if (!event.edit || !X.layout.canUndo || !labels[event.action]) return;
+      X.toast(labels[event.action]);
+    });
     document.querySelectorAll('#views button').forEach((b) => b.addEventListener('click', () => X.go(b.dataset.tab)));
     document.querySelectorAll('#modes button').forEach((b) => b.addEventListener('click', () => { S.mode = b.dataset.mode; X.render(); }));
     document.querySelectorAll('#scales button').forEach((b) => b.addEventListener('click', () => { S.linear = b.dataset.linear === 'true'; X.render(); }));
@@ -648,7 +676,7 @@
 
     const stage = $('stage');
     // By the path the event took, as its target may be gone by now: a card redrawn by its own click.
-    const OWN = '#controls, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-merge, #v-hide, .name-edit';
+    const OWN = '#controls, #layout-menu, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-move, #v-merge, #v-hide, .name-edit';
     const own = (e) => e.composedPath().some((el) => el.matches && el.matches(OWN));
     const at = (e) => { const b = stage.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
     stage.addEventListener('pointermove', (e) => {
@@ -718,8 +746,15 @@
     });
     document.addEventListener('keydown', (e) => {
       const typing = e.target.closest('input, select, textarea');
+      if (!typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault(); X.edit.closeMove();
+        if (e.shiftKey) X.layout.redo(); else X.layout.undo();
+        return;
+      }
       if (e.key === 'Escape') {
-        if (!$('keys').hidden) toggleKeys(false);
+        if (X.edit.closeMove()) { /* closed the destination picker */ }
+        else if (S.view === 'spans' && S.spansMode === 'callers' && X.spans.back()) { /* back within the flame graph */ }
+        else if (!$('keys').hidden) toggleKeys(false);
         else if (!$('rangecard').hidden) toggleRange(false);
         else if (X.edit.closeAdd()) { /* closed the + list */ }
         else if (X.violins.closeMenu()) { /* closed the factors */ }
@@ -775,6 +810,7 @@
     X.violins.init();
     X.edit.init();
     X.download.init();
+    X.layouts.init();
     X.flame.init();
     X.spans.init();
     X.panel.init();

@@ -114,7 +114,7 @@
     if (t) return t;
     const u = data.units[i], chunk = X.chunk(u.k);
     if (!chunk) return null;
-    const flat = chunk.trees[i - u.k * X.meta.chunk].rows, n = flat.length / 5;
+    const tree = chunk.trees[i - u.k * X.meta.chunk], flat = tree.rows, n = flat.length / 5;
     const depth = new Int16Array(n), size = new Int32Array(n).fill(1), kids = new Int32Array(n);
     let end = 0, maxDepth = 0;
     for (let r = 0; r < n; r++) {
@@ -125,7 +125,7 @@
     }
     // Rows are in tree order, so a span's descendants follow it.
     for (let r = n - 1; r > 0; r--) { const p = flat[5 * r + 1]; size[p] += size[r]; kids[p]++; }
-    t = { flat, names: chunk.names, links: chunk.trees[i - u.k * X.meta.chunk].links || [], n, depth, size, kids, end, maxDepth };
+    t = { flat, names: chunk.names, links: tree.links || [], flow: X.traceFlows(tree), n, depth, size, kids, end, maxDepth };
     trees.set(i, t);
     return t;
   }
@@ -157,7 +157,7 @@
     const step = (deadline) => {
       while (i < data.units.length && (!deadline || deadline.timeRemaining() > 2)) treeOf(i++);
       if (i < data.units.length) idle(step);
-      else if (S.view !== 'timeline' && (!M || M.key !== X.viewKey())) M = build();
+      else if (S.view !== 'timeline' && (!M || M.key !== X.nav.model().key)) M = build();
     };
     idle(step);
   }
@@ -166,7 +166,10 @@
   function filter() {
     const w = X.nav.win(), out = new Int32Array(M.n);
     let k = 0;
-    for (let j = 0; j < M.n; j++) if (M.D1[j] >= w[0] && M.D0[j] <= w[1]) out[k++] = j;
+    const included = new Set();
+    // A unit remains in context when any visible span touches the window, including async work after its root ends.
+    for (let j = 0; j < M.n; j++) if (M.D1[j] >= w[0] && M.D0[j] <= w[1]) included.add(M.U[j]);
+    for (let j = 0; j < M.n; j++) if (included.has(M.U[j])) out[k++] = j;
     rows = out.subarray(0, k);
   }
 
@@ -241,7 +244,7 @@
     if (S.view !== 'timeline') return;
     root.style.top = `${X.contentTop()}px`;
     root.style.setProperty('--name', `${clamp(Math.round(root.clientWidth * 0.3), 240, 420)}px`);
-    if (!M || M.key !== X.viewKey()) { M = build(); X.prefetchChunks(); }
+    if (!M || M.key !== X.nav.model().key) { M = build(); X.prefetchChunks(); }
     filter();
     bringUp();
     draw();
@@ -312,6 +315,7 @@
   const pct = (v) => `${v.toFixed(3)}%`;
   // A bar's length label: after the bar, before it near the right edge, or inside its end when it spans the track.
   function durLabel(x0, x1, text) {
+    if (x1 < 0 || x0 > 100) return '';
     if (x1 < 84) return `<span class="tl-dur" style="left:${pct(Math.max(0, x1))}">${text}</span>`;
     if (x0 > 16) return `<span class="tl-dur end" style="right:${pct(clamp(100 - x0, 0, 100))}">${text}</span>`;
     return `<span class="tl-dur in" style="right:${pct(clamp(100 - x1, 0, 100))}">${text}</span>`;
@@ -321,7 +325,7 @@
     const i = M.U[j], r = M.R[j], t = treeOf(i), u = data.units[i], span = w[1] - w[0];
     const flags = t ? t.flat[5 * r + 4] : 0, part = X.layout.partOfRow(i, r), depth = t ? t.depth[r] : 0;
     const color = r === 0 ? (T.scheme === 'dark' ? '#4a505a' : '#a9b0ba') : part >= 0 ? T.cols[part] : T.unowned;
-    const async = r > 0 && (flags & 1);
+    const async = t && t.flow.root[r] > 0;
     const x0 = (M.D0[j] - w[0]) / span * 100, x1 = (M.D1[j] - w[0]) / span * 100;
     const isFolded = folded.has(key(i, r)), kids = t ? t.kids[r] : 0;
     const tw = kids ? `<button type="button" class="tl-tw" data-fold="${j}" aria-expanded="${!isFolded}" aria-label="${isFolded ? 'Open' : 'Fold'}">`
@@ -354,7 +358,7 @@
     for (let q = r + 1; q < r + t.size[r]; q++) if (t.depth[q] === t.depth[r] + 1 && !(f[5 * q + 4] & 1)) inner += f[5 * q + 3] / 1000;
     const lines = [t.names[f[5 * r]], `${X.fmtMs(dur)} · self ${X.fmtMs(Math.max(0, dur - inner))}`, `from ${X.fmtMs(f[5 * r + 2] / 1000)} into ${u.l}`];
     lines.push(part >= 0 ? data.columns[part].label : '');
-    if (flags & 1) lines.push('Runs beside its parent');
+    if (t.flow.root[r] > 0) lines.push(t.flow.start[r] ? 'Starts a separate logical flow' : 'Within a separate logical flow');
     return lines.filter((l, k) => l || k < 3);
   }
 

@@ -43,6 +43,7 @@ async def opened(browser, url, errors, init=None):
         await page.add_init_script(init)
     await page.goto(url)
     await page.wait_for_function(READY, timeout=60000)
+    await page.evaluate('TX.checkLayout = true; TX.layout.check()')
     return page
 
 
@@ -249,7 +250,7 @@ async def main():
           const g = ids.find((id) => T.isMerged(id) && T.members(id).length >= 3);
           if (!g) return null;
           const two = T.members(g).slice(0, 2), id = T.merge(two, 'Inner');
-          return T.parentOf(id) === g && two.every((m) => T.members(g).includes(m));
+          return T.parentOf(id) === g && T.members(g).includes(id) && two.every((m) => T.members(id).includes(m));
         })()""")
         expect(inner is not False, 'merging inside a merged violin did not make its child')
 

@@ -21,6 +21,8 @@
       rebuild = setTimeout(() => { lastKey = null; render(); }, 300);
     });
     root.addEventListener('click', (e) => {
+      const origin = e.target.closest('[data-flow-origin]');
+      if (origin) { pick(origin.dataset.flowOrigin); return; }
       const level = e.target.closest('[data-level]');
       if (level) { setLevel(level.dataset.level); return; }
       const twist = e.target.closest('[data-twist]');
@@ -76,9 +78,10 @@
       for (let j = 0; j < U.ids.length; j++) {
         const p = U.ids[j], name = X.layout.path(p).name, part = X.layout.partOfPath(p);
         let r = into.get(name);
-        if (!r) { r = { name, part: -1, parts: new Map(), self: 0, total: 0, n: 0, groups: new Set() }; into.set(name, r); }
+        if (!r) { r = { name, part: -1, parts: new Map(), self: 0, total: 0, n: 0, flowN: 0, groups: new Set() }; into.set(name, r); }
         r.parts.set(part, (r.parts.get(part) || 0) + U.self[j] + 1e-9);
         r.n += U.cnt[j];
+        r.flowN += U.flows[j];
         r.total += U.dur[j];
         r.self += U.self[j];
         r.groups.add(g);
@@ -86,6 +89,7 @@
     }
     const rows = [...into.values()];
     for (const r of rows) {
+      r.async = r.flowN > 0; r.mixed = r.async && r.flowN < r.n;
       r.total /= 1000; r.self /= 1000;
       r.partList = [...r.parts].filter(([p]) => p >= 0).sort((a, b) => b[1] - a[1]).map(([p]) => p);
       r.part = r.partList.length ? r.partList[0] : -1;
@@ -121,7 +125,7 @@
     if (treeCache && treeCache.key === key) return treeCache;
     const roots = X.TRACKS.map((t, k) => 1 + k);
     const nodes = [0, ...roots].map((r) => ({ name: '', part: -1, depth: -1, async: r > 0, kids: new Map(), dur: 0, n: 0, inner: 0, path: r ? `~${r}` : '' }));
-    const into = (pk, s) => (s.lane >= 0 ? 1 + s.track : pk);
+    const into = (pk, s) => (s.flowStart ? 1 + s.track : pk);
     let loaded = 0;
     for (const i of units) {
       if (!X.hasSpans(i)) continue;
@@ -246,6 +250,8 @@
       return;
     }
     if (S.spansMode === 'callers') { renderCallers(); return; }
+    // Line the search up with the full row of view/mode buttons, including when that row wraps.
+    root.style.setProperty('--spans-find-width', `${$('controls').querySelector('.row').getBoundingClientRect().width}px`);
     const tree = S.tableTree, q = (S.spansQuery || '').trim().toLowerCase();
     // Narrow, the part's name goes: its colour stays beside the span's.
     const compact = root.clientWidth < (S.sel !== null ? 1260 : 980);
@@ -304,14 +310,14 @@
     const oneTime = (v, max) => (v === null ? '<td class="num time mine"><span class="v">–</span><span class="meter"></span></td>'
       : `<td class="num time mine" title="${X.fmtPct(v / u1.ms)} of ${esc(u1.l)}"><span class="v">${v > 0 ? X.fmtUs(v) : '–'}</span><span class="meter"><i style="width:${(v / max * 100).toFixed(1)}%"></i></span></td>`);
     const swatch = (r) => (r.async
-      ? `<i class="async" style="border-color:${r.part >= 0 ? T.cols[r.part] : T.line}" title="Asynchronous: on its own track, beside its parent"></i>`
+      ? `<i class="async${r.mixed ? ' mixed' : ''}" style="--swatch:${r.part >= 0 ? T.cols[r.part] : T.line};border-color:var(--swatch)" title="${r.mixed ? `${X.fmtInt(r.flowN)} of ${X.fmtInt(r.n)} occurrences in separate logical flows` : 'In a separate logical flow'}"></i>`
       : `<i style="background:${r.part >= 0 ? T.cols[r.part] : T.unowned}"></i>`);
     // The selected unit's own name and time are in its chip already.
     const matched = q ? rows.filter((r) => !r.context).length : 0;
-    const scope = `<b>${esc(X.nUnits(units.length))}</b><span>${X.fmtMs(all)} in all</span>`
+    const scope = `<input class="spans-find" data-find type="search" autocomplete="off" spellcheck="false" placeholder="Find a span" aria-label="Find a span" value="${esc(S.spansQuery || '')}">`
+      + `<div class="spans-summary"><span title="${esc(`${X.fmtTotal(all)} total ${X.UNIT} time`)}">${esc(X.nUnits(units.length))}</span>`
       + (note ? `<span class="note">${note}</span>` : '')
-      + (q ? `<span class="found">${tree ? `${X.fmtInt(matched)} ${matched === 1 ? 'path' : 'paths'}` : `${X.fmtInt(matched)} of ${X.fmtInt(found)} names`}</span>` : '')
-      + `<input class="spans-find" data-find type="search" autocomplete="off" spellcheck="false" placeholder="Find a span" aria-label="Find a span" value="${esc(S.spansQuery || '')}">`;
+      + (q ? `<span class="found">${tree ? `${X.fmtInt(matched)} ${matched === 1 ? 'path' : 'paths'}` : `${X.fmtInt(matched)} of ${X.fmtInt(found)} names`}</span>` : '') + '</div>';
     // In the tree, the waterfall's buttons beside "Span": every node shut, a level less, a level more, every node open.
     const fold = (to, label, d) => `<button type="button" data-level="${to}" title="${label}" aria-label="${label}"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
     const folds = '<span class="tl-folds" role="group" aria-label="Open or shut the tree">'
@@ -334,7 +340,7 @@
       + '</tbody></table>';
     // Typing in the filter goes on in the new one.
     const typing = document.activeElement && document.activeElement.matches('[data-find]') ? document.activeElement.selectionStart : null;
-    body.innerHTML = `<div class="spans-wrap"><div class="spans-scope">${scope}</div>${table}`
+    body.innerHTML = `<div class="spans-wrap"><div class="spans-scope table-scope">${scope}</div>${table}`
       + (q && !rows.length ? `<p class="spans-none">No span is called anything with “${esc(S.spansQuery.trim())}” in it.</p>` : '') + '</div>';
     if (typing !== null) { const f = body.querySelector('[data-find]'); f.focus(); f.setSelectionRange(typing, typing); }
     root.scrollTop = scrollTop;
@@ -343,13 +349,14 @@
   // ---------------------------------------------------------------------------------------------------------
   // Callers and callees.
 
-  // Over every compilation in view, each outermost span of the name (one inside another of the same name counts
-  // once): the chain of its ancestors, merged from it upward, and its subtree, merged from it downward. Both are as
-  // wide as the name's whole time.
+  // Within each flow, count outermost occurrences of the name. Boundaries preserve causal relationships through
+  // origin links, and start independent callee graphs; their overlapping durations never divide a parent's width.
   function sandwich(name) {
-    const node = (nm, part) => ({ name: nm, part, dur: 0, n: 0, kids: new Map() });
+    const node = (nm, part) => ({ name: nm, part, dur: 0, n: 0, flowN: 0, kids: new Map() });
     const child = (p, nm, part) => { let c = p.kids.get(nm); if (!c) { c = node(nm, part); p.kids.set(nm, c); } return c; };
+    const add = (n, s, dur = s.dur) => { n.dur += dur; n.n++; if (s.lane >= 0) n.flowN++; n.async = n.flowN > 0; n.mixed = n.async && n.flowN < n.n; };
     const callers = node(name, -1), callees = node(name, -1);
+    const flows = new Map(), origins = new Set();
     let loaded = 0, all = 0;
     for (const i of X.allInView()) {
       all++;
@@ -360,23 +367,31 @@
         const s = rs[r];
         if (s.name !== name) continue;
         let inner = false;
-        for (let p = s.parent; p >= 0 && !inner; p = rs[p].parent) inner = rs[p].name === name;
+        for (let p = s.parent; p >= 0 && rs[p].flowRoot === s.flowRoot && !inner; p = rs[p].parent) inner = rs[p].name === name;
         if (inner) continue;
         callers.part = callees.part = s.part;
-        callers.dur += s.dur; callers.n++;
+        add(callers, s);
         let c = callers;
-        for (let p = s.parent; p >= 0; p = rs[p].parent) { c = child(c, rs[p].name, rs[p].part); c.dur += s.dur; c.n++; }
-        callees.dur += s.dur; callees.n++;
-        const at = new Map([[r, callees]]);
+        for (let p = s.parent; p >= 0 && rs[p].flowRoot === s.flowRoot; p = rs[p].parent) { c = child(c, rs[p].name, rs[p].part); add(c, s); }
+        const origin = rs[s.flowRoot].parent;
+        if (origin >= 0) origins.add(rs[origin].name);
+        add(callees, s);
+        const at = new Map([[r, callees]]), paths = new Map([[r, name]]);
         for (let q = r + 1; q < rs.length && rs[q].depth > s.depth; q++) {
-          const d = child(at.get(rs[q].parent), rs[q].name, rs[q].part);
-          d.dur += rs[q].dur; d.n++;
+          const row = rs[q], path = `${paths.get(row.parent)}\u0001${row.name}`;
+          paths.set(q, path);
+          let d;
+          if (row.flowStart) {
+            if (!flows.has(path)) flows.set(path, {key:path, origin:rs[row.parent].name, tree:node(row.name, row.part)});
+            d = flows.get(path).tree;
+          } else d = child(at.get(row.parent), row.name, row.part);
+          add(d, row);
           at.set(q, d);
         }
       }
     }
     if (loaded < all) X.prefetchChunks();
-    return { callers, callees, loaded, all };
+    return { callers, callees, flows:[...flows.values()], origins:[...origins], loaded, all };
   }
 
   // A merged tree as bars: each as wide as its time against the root's, children heaviest first and squeezed into
@@ -396,73 +411,39 @@
     return { list: out, depth };
   }
 
-  // The picked name's callers and callees, the width of the view, each under its own heading.
+  let graphs = [], activeGraph = null, graphKey = null, graphStates = new Map();
   function renderCallers() {
     if (S.name === null) { body.innerHTML = ''; lastKey = null; return; }
-    const key = `callers|${X.viewKey()}|${S.name}|${X.T.scheme}|${root.clientWidth}|${X.chunksLoaded()}`;
+    const key = `callers|${X.viewKey()}|${S.name}|${X.layout.version}|${X.T.scheme}|${root.clientWidth}|${X.chunksLoaded()}`;
     if (key === lastKey) return;
     lastKey = key;
-    const T = X.T, sw = sandwich(S.name);
-    partial = sw.loaded < sw.all;
+    const identity = `${X.viewKey()}|${S.name}`;
+    if (identity !== graphKey) { graphKey = identity; graphStates = new Map(); }
+    for (const graph of graphs) graph.dispose(); graphs = []; activeGraph = null;
+    const sw = sandwich(S.name); partial = sw.loaded < sw.all;
+    const originLink = (name) => `<button type="button" class="text-btn small" data-flow-origin="${esc(name)}">${esc(name)}</button>`;
     body.innerHTML = `<div class="sw-view"><div class="spans-scope"><b>${esc(S.name)}</b><span>${X.fmtMs(sw.callers.dur)} in ${X.fmtInt(sw.callers.n)} spans</span>`
-      + (partial ? `<span class="note">spans of ${X.fmtInt(sw.loaded)} of ${esc(X.nUnits(sw.all))} in so far</span>` : '') + '</div>'
-      + '<p class="sw-title">Called from</p><canvas class="sw-canvas" data-which="up" aria-label="What calls it, merged: its callers above it"></canvas>'
-      + '<p class="sw-title">Calls</p><canvas class="sw-canvas" data-which="down" aria-label="What it calls, merged below it"></canvas></div>';
-    const w = body.querySelector('.sw-title').clientWidth;
-    const color = (n) => (n.part >= 0 ? T.cols[n.part] : T.unowned);
-    // Callers inverted, the name at the bottom and its parent on it; callees from the name down.
-    for (const [which, tree, inverted] of [['up', sw.callers, true], ['down', sw.callees, false]]) {
-      const canvas = body.querySelector(`[data-which="${which}"]`), b = bars(tree);
-      // A name with no callers, or nothing inside it, shows just its own bar.
-      const h = (b.depth + 1) * ROWH, ctx = canvas.getContext('2d'), hot = [];
-      for (const bar of b.list) {
-        const x = bar.x0 * w, bw = (bar.x1 - bar.x0) * w, y = inverted ? (b.depth - bar.d) * ROWH : bar.d * ROWH;
-        if (bw >= 0.5) hot.push({ x0: x, x1: x + Math.max(1, bw), y0: y, y1: y + ROWH, n: bar.n });
+      + (partial ? `<span class="note">spans of ${X.fmtInt(sw.loaded)} of ${esc(X.nUnits(sw.all))} in so far</span>` : '')
+      + '</div>' + (sw.origins.length ? `<p class="sw-origin">Flow started by ${sw.origins.map(originLink).join(', ')}</p>` : '')
+      + '<div class="sw-half" data-which="up"></div><div class="sw-half" data-which="down"></div>'
+      + (sw.flows.length ? '<p class="sw-flow-note">Separate flows can overlap or outlive their parent. Each graph uses its own total duration.</p>' : '')
+      + sw.flows.map((flow, i) => `<section class="sw-flow" data-flow="${esc(flow.tree.name)}"><div class="sw-flow-head"><b>${esc(flow.tree.name)}</b>`
+        + `<span>${X.fmtMs(flow.tree.dur)} · started by ${originLink(flow.origin)}</span></div><div data-flow-graph="${i}"></div></section>`).join('') + '</div>';
+    const views = [{key:'up', tree:sw.callers, selector:'[data-which="up"]', inverted:true},
+      {key:'down', tree:sw.callees, selector:'[data-which="down"]', inverted:false},
+      ...sw.flows.map((f,i)=>({key:`flow:${f.key}`, tree:f.tree, selector:`[data-flow-graph="${i}"]`, inverted:false}))];
+    for (const {key, tree, selector, inverted} of views) {
+      if (inverted && !tree.kids.size) {
+        body.querySelector(selector).innerHTML = '<p class="sw-origin">No callers in this flow.</p>';
+        continue;
       }
-      // Drawn as the flame graph draws its bars; the name picked outlined, and the bar under the pointer too.
-      let over = null;
-      const draw = () => {
-        ctx.setTransform(...X.toView(X.fitCanvas(canvas, w, h)));
-        ctx.clearRect(0, 0, w, h);
-        ctx.font = `500 11px ${X.SANS}`;
-        ctx.textBaseline = 'middle';
-        for (const q of hot) {
-          const c = color(q.n), bw = q.x1 - q.x0;
-          ctx.fillStyle = c;
-          ctx.fillRect(q.x0, q.y0, Math.max(1, bw - (bw > 3 ? 1 : 0)), ROWH - 1);
-          if (q.n === tree || q === over) {
-            ctx.strokeStyle = T.ink; ctx.lineWidth = q === over && q.n !== tree ? 1 : 1.5;
-            ctx.strokeRect(q.x0 + 0.75, q.y0 + 0.75, Math.max(1, bw - 2.5), ROWH - 2.5);
-          }
-          if (bw > 26) {
-            const t = X.fitText(q.n.name, 11, 500, bw - 8);
-            if (t) { ctx.fillStyle = X.inkOn(c); ctx.fillText(t, q.x0 + 4, q.y0 + ROWH / 2); }
-          }
-        }
-      };
-      draw();
-      const at = (e) => {
-        const r = canvas.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
-        return hot.find((q) => px >= q.x0 && px <= q.x1 && py >= q.y0 && py < q.y1);
-      };
-      canvas.onpointermove = (e) => {
-        const bar = at(e) || null;
-        if (bar !== over) { over = bar; draw(); }
-        canvas.style.cursor = bar && bar.n.name !== S.name ? 'pointer' : '';
-        if (!bar) { X.hideTip(); return; }
-        const st = $('stage').getBoundingClientRect();
-        X.tip([bar.n.name, `${X.fmtMs(bar.n.dur)} · ${X.fmtPct(bar.n.dur / tree.dur)} of ${S.name}'s time`, `${X.fmtInt(bar.n.n)} spans`,
-          bar.n.part >= 0 ? data.columns[bar.n.part].label : ''], e.clientX - st.left, e.clientY - st.top);
-      };
-      canvas.onpointerleave = () => { X.hideTip(); if (over) { over = null; draw(); } };
-      // A bar's name becomes the one picked; empty space lets it go.
-      canvas.onclick = (e) => {
-        const bar = at(e);
-        if (!bar) pick(null);
-        else if (bar.n.name !== S.name) pick(bar.n.name);
-      };
+      const graph = X.flameView(body.querySelector(selector), tree, bars(tree), {
+        inverted, label:inverted ? 'Called from · same flow' : 'Calls · same flow', state:graphStates.get(key),
+        activate: (g) => {activeGraph=g;}, pick: (name)=>pick(name),
+      });
+      graphs.push(graph); graphStates.set(key, graph.state);
     }
   }
 
-  X.spans = { init, render, pick, invalidate() { lastKey = null; } };
+  X.spans = { init, render, pick, back: () => activeGraph ? activeGraph.back() : false, invalidate() { lastKey = null; } };
 })();

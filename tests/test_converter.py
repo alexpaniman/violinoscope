@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -16,7 +17,7 @@ LABELS = r'^--\s*(?P<group>\S+)\s+(?P<label>\S+), level'
 
 
 def read_js(path):
-    text = open(path).read()
+    text = Path(path).read_text()
     return json.loads(text[text.index('=') + 1:].rstrip().rstrip(';'))
 
 
@@ -30,7 +31,7 @@ class Converter(unittest.TestCase):
                         '--seed', '2'], check=True)
         cls.spans = {}
         for name in ('a', 'b'):
-            for line in open(f'{d}/{name}.jsonl'):
+            for line in Path(f'{d}/{name}.jsonl').read_text().splitlines():
                 s = json.loads(line)
                 cls.spans.setdefault(s['traceId'], []).append(s)
         subprocess.run([sys.executable, os.path.join(ROOT, 'violinoscope.py'), f'one={d}/a.jsonl', f'two={d}/b.jsonl',
@@ -44,7 +45,7 @@ class Converter(unittest.TestCase):
         cls.chunks = []
         k = 0
         while os.path.exists(f'{d}/out/data/trees-{k:04d}.js'):
-            text = open(f'{d}/out/data/trees-{k:04d}.js').read()
+            text = Path(f'{d}/out/data/trees-{k:04d}.js').read_text()
             cls.chunks.append(json.loads(text[text.index(']=') + 2:].rstrip().rstrip(';')))
             k += 1
 
