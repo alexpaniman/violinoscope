@@ -1,14 +1,24 @@
 # Time and layouts
 
-A unit is one occurrence of the span selected with `--unit`. A violin describes a call path or a combination of paths and shows its distribution across units. The root gives the elapsed-time budget; it is not a measurement of CPU consumption.
+A unit is one occurrence of the span selected with `--unit`. Each unit is analyzed separately, even when units overlap in clock time. Labels come from the unit, its enclosing request, then its descendants; another request in the same trace cannot supply its label. The root is a fixed elapsed-time budget, not CPU consumption.
 
-The main tree partitions that budget. Extracting paths into another main-tree violin transfers their coverage out of their former owners. Intermediate parents measure their remaining coverage. A merged violin retains its parts and their exclusions; overlapping intervals count once. Projections measure independent combinations and take nothing from the main tree.
+A violin is the union of its inputs, minus its span exclusions. **Recorded span** inputs read a complete call path from the recording. **Violin** inputs follow another violin's edited definition by identity. They can be mixed in the same recipe. Made of marks the two kinds and offers an explicit replacement picker with a time preview; matching names never create a dependency.
 
-Opening, closing and hiding change what is displayed. Hidden intermediate and merged violins retain their definitions and assignments; the **+** picker restores them. Empty definitions also survive. Taking a member out through **Made of**, excluding a span, splitting a merge, or moving a projection into the main tree changes the model. A main-tree move offers only destinations that contain all its spans, with a preview of the transfer. Keyboard undo restores exact layout snapshots.
+The main analysis transfers extracted coverage out of former branches. A recorded parent keeps its recorded basis minus those transfers. A parent defined by other violins follows changes to those inputs. Each projection is an independent analysis: overlapping projections neither steal inputs nor reduce the main tree. Moving a projection into the main tree adopts that tree's ownership rule.
 
-A merge retains the effective definitions selected, including exclusions inherited from a level they leave. Exclusions subtract intervals after union: excluding a part is not equivalent to removing its input when another input overlaps it. Taking an input out changes all derived ancestors that depend on it; it is not silently inserted into an outer merge.
+There are two distinct measures. The violin curves show **coverage**: a union of intervals, clipped to its containing context and reduced by exclusions and transfers. Sibling coverage can overlap. **Own parts** assign each moment to one deepest modeled or displayed owner; only these attributed parts, together with the remainder, sum to 100%. For example, recorded A (60 ms) and B (50 ms) overlapping by 20 ms have a 90 ms union. Their attributed parts can be 60 and 30 ms, plus a root remainder of 10 ms. The tool does not silently relabel B's recorded 50 ms as 30 ms.
 
-Own time belongs to the deepest shown violin covering an interval. What nothing covers completes the elapsed-time budget. The automatic time breakdown uses the whole underlying tree, independently of which violins are open.
+Opening, closing, reordering, renaming and hiding change presentation. Hidden definitions and intermediate levels survive; restore them with **+** or the card's breadcrumbs. Empty definitions survive too. Row order and names never decide which overlapping branch gets attributed time.
+
+Merge keeps complete typed inputs and places the new definition at their common containing level, including hidden levels. Moving or copying preserves inherited exclusions, containing bounds and transferred holes. Captured cuts are small interval recipes, not dataset-specific numeric samples. Copies remain independent of later edits to the original. Explicit exclusions are applied after union: excluding A is different from removing A when B also covers A's intervals.
+
+Removing an input changes the recipe and its dependent ancestors; it does not silently insert that input into an outer merge. Split up dissolves an unmodified wrapper while preserving input types. A wrapper with exclusions or captured constraints instead offers **Show parts**: its display level disappears, while the definition continues enforcing its constraints. This avoids losing cuts or applying them to unrelated siblings. The previous implicit Make it conversion is replaced by the explicit input picker.
+
+Placement stays fixed when a recipe becomes smaller or empty. A released input returns to its recorded parent when that parent can still contain it; otherwise it returns to a supporting ancestor. If that would create a cycle, it uses the former owner's surrounding level. It retains the bounds and exclusions of the context it leaves.
+
+**Rest of P** is available only for a recorded input. It is that input's remaining coverage outside its model children, regardless of which children are visible. Removing or replacing the recorded input removes its Rest row. Rest cannot be merged or used as an input. A source replacement that would put an edited source violin outside its new containing recipe is rejected with an explanation; restore that violin's source input first.
+
+Undo and redo restore complete snapshots, including hidden definitions, placement and what-if factors. Hidden factors remain active. Factors within one analysis follow its attribution; factors from independent analyses multiply on their interval intersections. This is a latency scenario, not a simulation of scheduling or a critical path.
 
 ## Automatic time breakdown
 
@@ -32,8 +42,10 @@ Independent work has no individual latency what-if without a critical-path model
 
 ## Saved layouts
 
-The icon opens a small layout library. Save updates the entered name; entering a different name makes a new preset. Switching presets is undoable. The dot beside the icon means the working layout differs from its saved preset.
+The layout icon opens a compact list. Edits autosave into the selected layout. **+** creates another layout from the current state; double-click its name or press F2 to rename it. Drag its handle, or use Alt+↑/↓ on its name, to reorder. The row's × removes the saved entry.
 
-Browser storage keeps the working copy and presets locally. File exports keep only the layout definition: its name, root span, paths, merges, exclusions, ordering and visibility. They contain no traces or query text. Paths absent from a dataset are retained in the exported definition so the layout can be reused on a fuller dataset. A different root span is rejected.
+Header icons copy or paste a portable JSON layout. Shift-click them to download or open a file; browsers without clipboard access fall back to files. Dropping a layout file onto the page also imports it. The picture button copies a PNG including visible what-if factors; Shift-click downloads it.
 
-Reports embed their default layout. An existing local working copy takes precedence only when it belongs to the same embedded default. For a report you intend to share, use the download icon to capture the current definition.
+Layout files contain names, paths, typed inputs, captured cuts, ordering and visibility, with no traces or query text. Absent paths remain editable zero-valued inputs. Removing one removes it from subsequent exports. A different unit root is rejected. Runtime source descriptors from one preset do not leak into another preset's picker.
+
+Reports embed their default layout. An existing local working copy takes precedence only when it belongs to the same embedded default. The download icon captures the current layout in a self-contained HTML report.
