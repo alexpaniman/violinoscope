@@ -76,6 +76,17 @@ class Portable(unittest.TestCase):
         self.assertEqual(span['dataset'], 'Service')
         self.assertEqual(span['links'], [('3','follows_from')])
 
+    def test_large_collector_batches_and_legacy_cycles(self):
+        large = {**self.root, 'attributes':[{'key':'large','value':{'stringValue':'x'*100000}}]}
+        doc = {'resourceSpans':[{'scopeSpans':[{'spans':[large]}]}]}
+        file = self.folder/'large.jsonl'
+        file.write_text('\n'+json.dumps(doc)+'\n'+json.dumps(doc)+'\n')
+        self.assertEqual(len(list(violinoscope.read_file(str(file)))), 2)
+        with self.assertRaisesRegex(ValueError, 'cycle'):
+            layouts.decode({'unit':'Request','layout':{'groups':[
+                ['g1','First',['Request\x01A'],{'parent':'g2'}],
+                ['g2','Second',['Request\x01B'],{'parent':'g1'}]]}})
+
     def test_flow_attributes_are_configurable(self):
         child = {**self.root,'spanId':'fedcba9876543210','parentSpanId':self.root['spanId'],'name':'Job',
                  'attributes':[{'key':'custom.flow','value':{'stringValue':'async'}}]}

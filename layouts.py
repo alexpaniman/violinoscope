@@ -82,6 +82,15 @@ def decode(value):
         refs(members)
         for member in members:
             parents[member] = group
+    for group in state.get('groups', []):
+        more = group[3] if len(group) > 3 else {}
+        if more.get('parent'):
+            refs([more['parent']])
+            parents[group[0]] = more['parent']
+        if more.get('match'):
+            refs([more['match'].get('under')])
+            if not isinstance(more['match'].get('text'), str):
+                raise ValueError('Invalid span filter')
     for start in parents:
         seen, node = set(), start
         while node:

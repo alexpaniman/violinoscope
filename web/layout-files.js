@@ -25,6 +25,10 @@
     }
     const parents = new Map(s.parents || []);
     for (const [g,members] of groups) { refs(members); for (const m of members) parents.set(m,g); }
+    for(const [id,,,more={}] of s.groups || []) {
+      if(more.parent) {refs([more.parent]);parents.set(id,more.parent);}
+      if(more.match) {refs([more.match.under]);if(typeof more.match.text!=='string')throw Error('Invalid span filter');}
+    }
     for (const id of parents.keys()) {
       const seen = new Set();
       for (let p=id; p; p=parents.has(p) ? parents.get(p) : p.includes(SEP) ? p.slice(0,p.lastIndexOf(SEP)) : null) { if (seen.has(p)) throw Error('Layout contains a cycle'); seen.add(p); }

@@ -116,9 +116,11 @@ def spans_from_document(doc, relation_attr="span.link.relation"):
 def read_file(path, relation_attr="span.link.relation"):
     opener = gzip.open if path.endswith('.gz') else open
     with opener(path, 'rt', encoding='utf-8') as f:
-        head = f.read(1 << 16)
+        head = f.readline()
+        while head and not head.strip():
+            head = f.readline()
         f.seek(0)
-        lines = '\n' in head.strip() and head.lstrip().startswith('{') and _first_line_parses(head)
+        lines = bool(head.strip()) and _first_line_parses(head)
         if lines:
             for number, line in enumerate(f, 1):
                 line = line.strip()
