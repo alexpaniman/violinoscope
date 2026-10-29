@@ -180,7 +180,9 @@ async def main():
         await page.mouse.move(x1, y1, steps=12)
         await page.mouse.up()
         await page.wait_for_timeout(400)
-        expect(await second() == n + 1, 'carrying a name onto the second tree copied nothing')
+        # Copying an open branch can also bring its visible children.
+        expect(await second() > n and await page.evaluate("TX.data.columns.some(c => c.second && c.label === 'Renamed here')"),
+               'carrying a name onto the second tree did not copy the selected violin')
         expect(await page.evaluate('TX.data.units.every((u) => Math.abs(u.p.reduce((a, b) => a + b, 0) - 1) < 1e-6)'),
                "the second tree changed the first tree's split of unit time")
         # A what-if on a violin of each tree: both apply where they meet, and nothing goes negative or undefined.
