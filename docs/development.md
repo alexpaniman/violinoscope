@@ -25,7 +25,7 @@ python3 tests/flows_check.py
 Measure a real report with:
 
 ```sh
-python3 tests/performance_check.py report.html --output performance.json
+python3 tests/performance_check.py report.html --stress --output performance.json
 ```
 
-A Chromium run on 822,426 occurrences, 6,586 units and 190 call paths loaded in 4.1 seconds. Single addition took 83 ms including rendering; expansion 71 ms, reordering 110 ms, movement 189 ms and grouping 264 ms. Adding eight columns took 445 ms; restoring the 27-column layout took 881 ms. Pointer drag handling peaked below 1 ms. These are machine-specific observations, not hard limits. Roughly one million occurrences with hundreds of paths is the tested scale; large numbers of distinct names or visible columns need their own measurements.
+A Chromium run on 822,426 occurrences, 6,586 units and 190 call paths loaded in 4.6 seconds. Single addition took 77 ms including rendering; expansion and reordering 33 ms, movement 116 ms and grouping 100 ms. Adding eight columns took 216 ms; restoring the 27-column layout took 500 ms. Adding 75 distinct projection names took 1.17 seconds; reopening them took 116 ms and deleting them 34 ms. Pointer drag handling peaked below 2 ms. These are machine-specific observations, not hard limits. Roughly one million occurrences with hundreds of paths is the tested scale; larger recordings and more visible columns need their own measurements.

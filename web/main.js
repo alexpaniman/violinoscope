@@ -826,9 +826,8 @@
       X.panel.renderCard();
     });
     X.prefetchChunks();
-    // The other measure and scale, in the background, once the violins are there.
-    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 300));
-    X.on('layout', () => idle(() => { for (const [mode, linear] of [['ms', false], ['share', true], ['ms', true]]) X.prepare(mode, linear); }));
+    // Prepare another measure only when selected. Warming every scale after each edit
+    // stalls large trees and evicts the currently visible columns from their cache.
   }
 
   const faces = ['400 12.5px "IBM Plex Sans"', '600 12.5px "IBM Plex Sans"', '500 11px "IBM Plex Sans"'];

@@ -13,6 +13,7 @@ async def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('report')
     ap.add_argument('--output', default='performance.json')
+    ap.add_argument('--stress', action='store_true', help='Also add and expand up to 75 distinct names')
     args = ap.parse_args()
     errors = []
     async with async_playwright() as p:
@@ -23,9 +24,9 @@ async def main():
         await page.goto(Path(args.report).resolve().as_uri())
         await page.wait_for_function('TX.layout?.version>0', timeout=60000)
         load_ms = (time.perf_counter() - started) * 1000
-        # Finish background view warming before measuring interactions with the ready page.
+        # Let the initial paint and GPU uploads finish before measuring interactions.
         await page.wait_for_timeout(1200)
-        timings = await page.evaluate('''async()=>{
+        timings = await page.evaluate('''async(stress)=>{
           const T=TX.layout,original=T.state(),out={},time=async(name,f)=>{
             const start=performance.now();f();out[name+'Model']=performance.now()-start;
             await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
@@ -37,6 +38,11 @@ async def main():
           await time('collapse',()=>T.collapse(projection));await time('expand',()=>T.expand(projection));
           await time('hide',()=>T.hide(projection));await time('reveal',()=>T.add([projection],TX.ROOT2));
           child=T.configuredChildren(projection)[0];await time('move',()=>T.transfer(child,TX.ROOT2));await time('undo',()=>T.undo());
+          await time('rename',()=>T.rename(projection,'Renamed'));T.undo();
+          await time('deleteChild',()=>T.remove([child]));T.undo();
+          await time('redo',()=>T.redo());T.undo();
+          await time('clearChildren',()=>T.clearChildren(projection));T.undo();
+          await time('dissolveGroup',()=>T.remove([projection]));T.undo();
           await time('mainPicker',()=>{rows=T.candidates(T.rootKey());});
           await time('addSingle',()=>T.add([rows[0].id],T.rootKey()));
           await time('addEight',()=>T.add(rows.slice(1,9).map(r=>r.id),T.rootKey()));
@@ -44,8 +50,16 @@ async def main():
           await time('reorder',()=>T.move(siblings[0],siblings[1],true));
           await time('merge',()=>T.merge(siblings.slice(0,2),'Combined'));
           await time('default',()=>T.load(original));await time('breakdown',()=>T.breakdown());T.check();
+          if(stress){
+            T.fresh();const names=T.candidates(TX.ROOT2).slice(0,75).map(r=>r.id);let many;
+            window.stressNames=names.length;
+            await time('add75Names',()=>{many=T.addGroup(names,TX.ROOT2,'Many names');});
+            await time('collapse75Names',()=>T.collapse(many));
+            await time('expand75Names',()=>T.expand(many));
+            await time('delete75Names',()=>{T.collapse(many);T.remove([many]);});T.check();T.load(original);
+          }
           return out;
-        }''')
+        }''', args.stress)
         await page.evaluate('''()=>{
           window.dragCosts=[];const move=TX.violins.move;
           TX.violins.move=(...args)=>{const start=performance.now();const result=move(...args);dragCosts.push(performance.now()-start);return result;};
@@ -65,6 +79,7 @@ async def main():
             'loadMs': load_ms, 'actionsMs': timings,
             'maxDragHandlerMs': await page.evaluate('Math.max(0,...dragCosts)'),
             'usedHeapBytes': usage['usedSize'],
+            'stressNames': await page.evaluate('window.stressNames || 0'),
             'index': await page.evaluate('TX.layout.stats()'),
             'units': await page.evaluate('TX.data.units.length'),
             'columns': await page.evaluate('TX.data.columns.length'),

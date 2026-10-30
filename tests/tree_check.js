@@ -12,6 +12,11 @@ function simple(names, rows, count = 1) {
   const { T, X } = fixture({ names, rows, count });
   return { T, X, add: (n, p = 'Compile') => T.add([pick(n)], p)[0], ms: (id) => T.msOf(id)[0] };
 }
+// Independent interval-union calculation in the what-if engine, with identity factors.
+function checkPartition(T, X) {
+  const projected = T.project(new Map());
+  X.data.units.forEach((u, i) => u.p.forEach((v, k) => near(v, projected.own[i * projected.P + k])));
+}
 function malloc() {
   return simple(
     ['Compile', 'Work', 'malloc', 'Elsewhere'],
@@ -234,7 +239,7 @@ test('display undo and redo preserve exact snapshots', () => {
 
 test('fuzz: every edit conserves time, survives roundtrip and undoes exactly', () => {
   for (let seed = 1; seed <= Number(process.env.FUZZ_SEEDS || 50); seed++) {
-    const { T, add } = malloc();
+    const { T, X, add } = malloc();
     let random = seed;
     const rand = (k) => {
       random = (Math.imul(random, 1664525) + 1013904223) >>> 0;
@@ -278,6 +283,7 @@ test('fuzz: every edit conserves time, survives roundtrip and undoes exactly', (
       }
       try {
         T.check();
+        checkPartition(T, X);
       } catch (error) {
         console.error('fuzz', seed, step, op, id, JSON.stringify(T.state()));
         throw error;

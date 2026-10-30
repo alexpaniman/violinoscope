@@ -997,7 +997,8 @@
       .concat([{ id: '~none', label: 'Under no violin', family: 'other', from: [] }]);
     const NC = cols.length,
       made = cols.map((c) => nodeData(c.id)),
-      order = cols.map((_, k) => k).sort((a, b) => cols[b].depth - cols[a].depth),
+      positions = new Map(cols.map((c, k) => [c.id, k])),
+      parents = cols.map((c) => positions.get(c.parent) ?? -1),
       counts = new Uint8Array(NC);
     for (let i = 0; i < X.NU; i++) {
       const u = data.units[i],
@@ -1005,23 +1006,26 @@
         o = u.o?.length === NC ? u.o : new Float64Array(NC),
         c = u.c?.length === NC ? u.c : new Int32Array(NC),
         fr = u.f?.length === NC ? u.f : new Array(NC),
-        p = u.p?.length === N1 + 1 ? u.p : new Float64Array(N1 + 1),
-        taken = new Map();
+        p = u.p?.length === N1 + 1 ? u.p : new Float64Array(N1 + 1);
       for (let k = 0; k < NC; k++) {
-        s[k] = made[k].s[i];
+        s[k] = o[k] = made[k].s[i];
         fr[k] = made[k].f[i];
         c[k] = made[k].c[i];
         if (c[k] > 1) counts[k] = 1;
       }
-      for (const k of order) {
-        const context = cols[k].analysis,
-          used = taken.get(context) || EMPTY,
-          iv = made[k].iv[i];
-        o[k] = lengthOf(subtract(iv, used)) / units[i].L;
-        taken.set(context, unite(used, iv));
+      // The allocation already makes sibling subtrees disjoint. Visible own time
+      // is coverage minus direct visible children, including any revealed Rest.
+      // Hidden intermediate nodes are lifted by visit(), so the same rule holds.
+      let covered = 0;
+      for (let k = 0; k < NC; k++) {
+        if (parents[k] >= 0) o[parents[k]] -= s[k];
+        else if (k < N1) covered += s[k];
+      }
+      for (let k = 0; k < NC; k++) {
+        o[k] = Math.max(0, o[k]);
         if (k < N1) p[k] = o[k];
       }
-      p[N1] = lengthOf(outside(taken.get('main') || EMPTY, units[i].L)) / units[i].L;
+      p[N1] = Math.max(0, 1 - covered);
       u.s = s;
       u.o = o;
       u.c = c;
