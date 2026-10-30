@@ -1,51 +1,57 @@
 # Time and layouts
 
-A unit is one occurrence of the span selected with `--unit`. Each unit is analyzed separately, even when units overlap in clock time. Labels come from the unit, its enclosing request, then its descendants; another request in the same trace cannot supply its label. The root is a fixed elapsed-time budget, not CPU consumption.
+Each occurrence of the chosen `--unit` span is one measurement, even when units overlap. Its label comes from that span, its enclosing request, then its descendants. The root is elapsed time, not CPU consumption.
 
-A violin is the union of its inputs, minus its span exclusions. **Recorded span** inputs read a complete call path from the recording. **Violin** inputs follow another violin's edited definition by identity. They can be mixed in the same recipe. Made of marks the two kinds and offers an explicit replacement picker with a time preview; matching names never create a dependency.
+## The tree
 
-The main analysis transfers extracted coverage out of former branches. A recorded parent keeps its recorded basis minus those transfers. A parent defined by other violins follows changes to those inputs. Each projection is an independent analysis: overlapping projections neither steal inputs nor reduce the main tree. Moving a projection into the main tree adopts that tree's ownership rule.
+A normal violin selects **one recorded span name within its scope**. A group contains other nodes and has a small group mark. Both can have aliases; Made of shows the recorded name or the group's immediate members.
 
-There are two distinct measures. The violin curves show **coverage**: a union of intervals, clipped to its containing context and reduced by exclusions and transfers. Sibling coverage can overlap. **Own parts** assign each moment to one deepest modeled or displayed owner; only these attributed parts, together with the remainder, sum to 100%. For example, recorded A (60 ms) and B (50 ms) overlapping by 20 ms have a 90 ms union. Their attributed parts can be 60 and 30 ms, plus a root remainder of 10 ms. The tool does not silently relabel B's recorded 50 ms as 30 ms.
+Higher selections take precedence over lower occurrences of the same name. Adding `malloc` beside `Compile` extracts malloc from Compile. Deleting that selection returns its time. Inside a group `{Compile, malloc}`, malloc selects only calls within that group's Compile domain. A root malloc selection shadows the inner one; deleting it makes the local selection count again.
 
-Opening, closing, reordering, renaming and hiding change presentation. Hidden definitions and intermediate levels survive; restore them with **+** or the card's breadcrumbs. Empty definitions survive too. Row order and names never decide which overlapping branch gets attributed time.
+Group domains come from their broader members. Broader/narrower relationships use the complete recording's name-ancestry graph; recursive names form one component. Removing Compile from `{Compile, malloc}` leaves an ordinary malloc domain. There is no remembered boundary. A different recording can establish different name relationships, so inspect imported layouts when instrumentation changes.
 
-Merge keeps complete typed inputs and places the new definition at their common containing level, including hidden levels. Moving or copying preserves inherited exclusions, containing bounds and transferred holes. Captured cuts are small interval recipes, not dataset-specific numeric samples. Copies remain independent of later edits to the original. Explicit exclusions are applied after union: excluding A is different from removing A when B also covers A's intervals.
+Allocation follows actual call occurrences, including recursion. For `A[0,100] → B[20,80] → A[40,60]`, an A→B layout gives A100, B40 and Rest of A60. Recursive re-entry belongs to the upper A. A further A selected beneath B remains visible at zero.
 
-Removing an input changes the recipe and its dependent ancestors; it does not silently insert that input into an outer merge. Split up dissolves an unmodified wrapper while preserving input types. A wrapper with exclusions or captured constraints instead offers **Show parts**: its display level disappears, while the definition continues enforcing its constraints. This avoids losing cuts or applying them to unrelated siblings. The previous implicit Make it conversion is replaced by the explicit input picker.
+Sibling allocations are disjoint. Parents contain their children's allocations plus their own remainder; groups are the union of their members. For truly overlapping calls, the deepest selected occurrence wins, then latest start, earliest end and binary call-path order break ties. This is deterministic attribution, not a critical-path calculation. Unselected instrumentation cannot steal time from a selection.
 
-Placement stays fixed when a recipe becomes smaller or empty. A released input returns to its recorded parent when that parent can still contain it; otherwise it returns to a supporting ancestor. If that would create a cycle, it uses the former owner's surrounding level. It retains the bounds and exclusions of the context it leaves.
+Each top-level projection is an independent analysis with the same rules and no visible unit root. Copies contain the configured subtree, evaluated afresh in their destination. Grouping projections combines them into one analysis. No projection changes the main tree.
 
-**Rest of P** is available only for a recorded input. It is that input's remaining coverage outside its model children, regardless of which children are visible. Removing or replacing the recorded input removes its Rest row. Rest cannot be merged or used as an input. A source replacement that would put an edited source violin outside its new containing recipe is rejected with an explanation; restore that violin's source input first.
+## Editing
 
-Undo and redo restore complete snapshots, including hidden definitions, placement and what-if factors. Hidden factors remain active. Factors within one analysis follow its attribution; factors from independent analyses multiply on their interval intersections. This is a latency scenario, not a simulation of scheduling or a critical path.
+| Action | Result |
+| --- | --- |
+| + → Spans | Add exact names from the scope, largest proposed share first. New nodes have no children. A group's picker uses its containing scope so broader members can be added. |
+| + → Hidden | Reveal existing hidden nodes or Rest. |
+| Triangle | Open or close the display; measurements stay fixed. |
+| Hide | Keep the node in the calculation and lift its children visually. Reveal it from + or the connection marker; its previous collapse state returns. |
+| × on a span or closed group | Delete that subtree and its exploration. |
+| × on an open group / Split up | Remove the wrapper, promote its base members, discard local refiners. An existing same-name destination source is kept; independent projection roots remain separate. |
+| Drag onto a sibling | Group them. Drag near a column edge to reorder. |
+| Drag into another node / Move to | Reparent the subtree and recompute scope. Drop on the projection + to copy from the main tree. |
+| Shift-select → Group | Lift selected branches to their common containing level and group them. Conflicting duplicate names are rejected. |
+| Branch × | Delete all configured children, including hidden ones. |
+| Layout's clear icon | Keep only the expanded unit root. |
 
-## Automatic time breakdown
+Reordering, aliases, collapse and hiding do not change allocation. Hidden contributors can mark + subtly; zero-valued selections remain available to inspect or delete. Undo/redo restores exact snapshots, including what-if factors. Deleted nodes cannot pass factors to newly created nodes.
 
-A part normally earns a label if its mean share reaches 10% somewhere along the duration axis, or averages 5% across that axis. The same rule applies recursively. A child covering at least two thirds of a meaningful remainder can explain it more specifically than its parent.
+**Rest of P** is P minus all configured children, including hidden ones. Every span node has one, initially hidden. It can only be hidden or revealed; groups have none. It never claims time or highlights +.
 
-Small contributions collect in Other. If Other averages at least 15% and has enough vertical label space, up to two more named parts can be shown, each averaging at least 1.5%. The remaining Other still contains every unlabelled interval. Hover a band or label to see its contributions. These are descriptive heuristics, not statistical significance tests.
+**Not covered by spans** is a fixed virtual source: the unit interval minus all recorded proper descendant intervals. It behaves like a name selector and does not change when the layout changes.
 
-## Async work
+## Async and what-if
 
-Ordinary OpenTelemetry parent/child relationships do not specify whether the parent waits or continues running. No span name is special-cased.
+Parent/child links alone do not tell whether a parent waits. The optional custom attribute `span.flow=async` starts a logical flow; descendants inherit it. `--flow-attr` changes the imported attribute. No recorded name is special-cased.
 
-The optional custom attribute `span.flow=async` starts a logical flow; unmarked descendants inherit it. This does not prove parallel execution. A marked unit root still defines its own budget. `--flow-attr` changes the attribute name when importing existing instrumentation.
+A flow explicitly linked with `span.link.relation=depends_on` to its direct child flows represents a dependency group. Its coverage can count inside an enclosing main phase, clipped to that occurrence. It does not establish exact blocked time. Individual child flows are independent projections, including tails beyond the unit. Nested selections cannot borrow another occurrence's containing interval.
 
-Links can use the custom `span.link.relation` attribute with `depends_on` or `follows_from`. `--link-relation-attr` changes that name. Neither custom attribute is an OpenTelemetry semantic convention.
+What-if factors scale attributed main-flow intervals. Independent measurements remain unchanged, including inside mixed groups. Factors from independent analyses multiply where their eligible intervals intersect. Hidden factors still apply. This estimates latency under an assumption; it does not simulate scheduling.
 
-A flow with explicit `depends_on` links to its direct child flows is treated as a dependency group. Under a main-flow phase, its elapsed coverage is clipped to that phase and can appear beneath it. This does not infer the precise interval during which the parent was suspended. The child requests remain independent measurements in Projections, including their tails beyond the parent. Groups under an independent flow remain independent too.
+Flame charts, waterfall, callers/callees and the table retain logical flow boundaries. Selecting a query scrolls the waterfall; zoom and selection keep its row list stable. Filtering datasets and folding branches still changes the list deliberately.
 
-Flame charts, waterfall rows and the spans table keep flow boundaries and inherited membership. Callers/callees split independent flows into separate graphs, with links back to their starting context. A half-filled indicator in the table means a name has occurrences in both main and separate flows. Zooming changes the time scale; it does not remove waterfall rows belonging to selected units.
+## Automatic breakdown and saved layouts
 
-Independent work has no individual latency what-if without a critical-path model. A factor on an enclosing main-tree phase still applies to all its coverage, including dependency groups.
+The duration chart also explains unexpanded recorded steps. Its recursive heuristic labels a part when its mean share reaches 10% somewhere on the axis or averages 5%. A child covering two thirds of a meaningful remainder can replace a broader label. When Other averages 15% and has room, up to two more parts averaging at least 1.5% get labels. Hover shows contributions.
 
-## Saved layouts
+The layout menu autosaves edits to the selected entry. Double-click or F2 renames it; drag its handle or use Alt+↑/↓ to reorder. Header icons copy/paste JSON; Shift-click uses files. The picture icon copies PNG including what-if labels; Shift-click downloads it. Successful copies briefly show ✓.
 
-The layout icon opens a compact list. Edits autosave into the selected layout. **+** creates another layout from the current state; double-click its name or press F2 to rename it. Drag its handle, or use Alt+↑/↓ on its name, to reorder. The row's × removes the saved entry.
-
-Header icons copy or paste a portable JSON layout. Shift-click them to download or open a file; browsers without clipboard access fall back to files. Dropping a layout file onto the page also imports it. The picture button copies a PNG including visible what-if factors; Shift-click downloads it.
-
-Layout files contain names, paths, typed inputs, captured cuts, ordering and visibility, with no traces or query text. Absent paths remain editable zero-valued inputs. Removing one removes it from subsequent exports. A different unit root is rejected. Runtime source descriptors from one preset do not leak into another preset's picker.
-
-Reports embed their default layout. An existing local working copy takes precedence only when it belongs to the same embedded default. The download icon captures the current layout in a self-contained HTML report.
+Portable layouts store only names, group structure, aliases and display flags. No traces, query text, exclusions or captured cuts. Missing names stay at zero. Legacy path layouts import as name trees, so repeated paths coalesce and historical path constraints are not retained; review their broader name matching. Reports embed a default; a local working copy takes precedence only for that same default. Without a supplied layout, a new report starts with only its expanded unit root.

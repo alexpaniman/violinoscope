@@ -16,6 +16,8 @@ The layout icon between the picture and download buttons manages named layouts. 
 python3 violinoscope.py spans.jsonl --unit "Handle request" --layout overview.layout.json
 ```
 
+Start at the unit root and use **+** to explore. Drag siblings together to group them, move a span upward to extract its share, or use Projections for an independent view. × deletes; hide keeps a node in the calculation.
+
 The default output is `violinoscope.html`. Downloading from the page includes its current layout. Ctrl+Z undoes edits; Ctrl+Shift+Z redoes them.
 
 [Collect local or cluster traces](docs/collecting.md) · [How time is counted](docs/model.md) · [Development and tests](docs/development.md)
