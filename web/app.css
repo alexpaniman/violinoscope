@@ -75,8 +75,6 @@ button { cursor: pointer; }
 .stage { position: relative; min-width: 0; overflow: hidden; }
 .view { position: absolute; inset: 0; }
 .layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; pointer-events: none; user-select: none; }
-svg.layer.fade { animation: fade-in .2s ease-out; }
-@keyframes fade-in { from { opacity: .25; } }
 #v-over .hit, #v-over .hit * { pointer-events: all; }
 #v-over [data-col], #v-over [data-fold], #v-over [data-unextra] { cursor: pointer; }
 .hitpad { position: absolute; left: 0; top: 0; contain: strict; }
@@ -192,9 +190,6 @@ svg.layer.fade { animation: fade-in .2s ease-out; }
 #range-svg .band-label:focus { outline: 1px solid var(--sel); }
 
 /* Changing the violins: the × by a name, the + list, the bar that merges picked violins */
-.hide-x { position: absolute; left: 0; top: 0; z-index: 2; width: 16px; height: 16px; padding: 0; border: 1px solid var(--line); border-radius: 50%;
-  background: var(--surface); color: var(--muted); font-size: 12px; line-height: 1; }
-.hide-x:hover { color: var(--ink); background: var(--raised); }
 .add-menu {
   position: absolute; left: 0; top: 0; z-index: 6; width: 380px; max-height: min(440px, calc(100% - 24px));
   background: var(--surface); border: 1px solid var(--edge); border-radius: 12px; box-shadow: var(--shadow);
@@ -231,7 +226,7 @@ svg.layer.fade { animation: fade-in .2s ease-out; }
 /* Part card */
 .card-pop {
   position: absolute; left: 0; top: 0; z-index: 5; width: 352px; max-height: calc(100% - 20px); overflow: hidden;
-  background: var(--surface); border: 1px solid var(--edge); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 14px;
+  background: var(--surface); border: 1px solid var(--edge); border-radius: 12px; box-shadow: var(--shadow); padding: 12px 22px;
   display: flex; flex-direction: column; gap: 10px;
 }
 .card-top { display: flex; align-items: flex-start; gap: 8px; }
@@ -444,9 +439,6 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
   .search, #export { display: none; }
   .controls { max-width: calc(100% - 32px); }
 }
-@media (prefers-reduced-motion: reduce) {
-  svg.layer.fade { animation: none; }
-}
 
 /* Carrying a name onto another violin, typing over a name, a renamed violin's own spans */
 .lifting, .lifting * { cursor: grabbing !important; }
@@ -532,13 +524,6 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .add-section .add-row.all .pct { color: var(--muted); font-size: 11.5px; }
 
 /* Editing and independent flame-graph navigation. */
-.move-menu { width: min(340px, calc(100% - 24px)); }
-.move-menu .add-head { display: flex; gap: 8px; align-items: center; }
-.move-menu .add-head input { min-width: 0; }
-.move-choice { display: block; width: 100%; text-align: left; border: 0; background: none; color: var(--ink); }
-.move-choice[aria-selected="true"] { background: var(--raised); }
-.move-preview { margin: 8px 12px; color: var(--muted); font-size: 12px; line-height: 1.4; }
-.move-menu .add-count { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .member-name { display: flex; align-items: center; min-width: 0; }
 .member-name .text-btn { overflow: hidden; text-overflow: ellipsis; text-align: left; }
 
@@ -553,32 +538,30 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .sw-flow { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
 .sw-flow-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; font-size: 12px; }
 .sw-flow-head span { color: var(--muted); }
-
-.move-menu .add-head { display: flex; gap: 12px; }
-.move-menu .add-head [data-move-cancel] { margin-left: auto; }
-
-.layout-menu { position: absolute; z-index: 12; top: 54px; right: 42px; width: min(290px, calc(100vw - 32px)); box-sizing: border-box; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); }
-.layout-head { display: flex; align-items: center; gap: 6px; }
+.layout-menu { position: absolute; z-index: 12; top: 54px; right: 42px; width: min(290px, calc(100vw - 32px)); box-sizing: border-box; padding: 10px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); }
+.layout-head { display: flex; flex: none; align-items: center; gap: 6px; }
 .layout-head b { font-size: 12px; font-weight: 500; margin-right: auto; }
-.layout-list { max-height: 220px; overflow: auto; margin: 8px -4px; }
+.layout-list { max-height: 220px; min-height: 0; overflow: auto; margin: 0 -4px; padding: 2px 4px; }
 .layout-row { display: grid; grid-template-columns: 14px minmax(0,1fr) 22px; align-items: center; gap: 5px; border-radius: 4px; padding: 1px 4px; }
 .layout-row:hover, .layout-row.on { background: var(--raised); }
 .layout-choice { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; padding: 7px 0; text-align: left; border: 0; background: none; font: inherit; font-size: 12px; }
 .layout-grip { cursor: grab; color: var(--muted); opacity: 0; }
 .layout-row .quiet-btn { opacity: 0; }
 .layout-row:hover .quiet-btn, .layout-row:focus-within .quiet-btn, .layout-row:hover .layout-grip { opacity: 1; }
-.layout-name { min-width: 0; width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 5px 0; font: inherit; font-size: 12px; }
+.layout-name { min-width: 0; width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 4px 5px; height: 28px; font: inherit; font-size: 12px; }
+.layout-name:focus { outline: 2px solid var(--sel); outline-offset: -1px; }
 @media(hover:none) { .layout-row .quiet-btn, .layout-grip { opacity: 1; } }
 .layout-choice span, .layout-note { color: var(--muted); font-size: 11px; }
 #layouts { position: relative; }
 #layouts.modified::after { content: ''; position: absolute; width: 3px; height: 3px; border-radius: 50%; background: var(--muted); right: 1px; top: 1px; }
 
 /* Tree controls share the same small action columns as the card and layout list. */
-.tree-actions { position: absolute; top: 0; left: 0; display: flex; gap: 3px; z-index: 4; align-items: center; background: var(--surface); border-radius: 4px; }
+.tree-actions { position: absolute; top: 0; left: 0; display: flex; flex-direction: column; gap: 0; padding: 2px; z-index: 4; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
 .tree-actions[hidden] { display: none; }
-.tree-actions .quiet-btn { width: 18px; min-width: 18px; padding: 0; height: 18px; }
+.tree-actions .quiet-btn { width: 18px; min-width: 18px; padding: 0; height: 18px; border-radius: 3px; font-size: 14px; line-height: 1; }
+.tree-actions svg { display: block; }
 .made-toggle { position: relative; }
-.made-toggle > svg { position: absolute; left: -15px; }
+.made-toggle > svg { position: absolute; left: -16px; }
 .made-tools .quiet-btn, .made-tools .action-space { width: 20px; min-width: 20px; }
 .group-mark { margin-right: 5px; color: var(--muted); }
 .branch-clear { opacity: 0; }

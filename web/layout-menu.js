@@ -22,7 +22,11 @@
       +icon('close','Close layouts','M4 4l8 8M12 4l-8 8')+'</div>'
       +`<div class="layout-list">${library.map((d,i)=>`<div class="layout-row${d.id===active?' on':''}" data-layout-row="${i}"><span class="layout-grip" draggable="true" data-layout-drag="${i}" title="Drag to reorder · Alt+↑/↓ on the name">⠿</span><button type="button" class="layout-choice" data-layout-load="${i}" title="${esc(d.name)} · double-click or F2 to rename">${esc(d.name)}</button><button type="button" class="quiet-btn" data-layout-delete="${i}" title="Remove ${esc(d.name)}" aria-label="Remove ${esc(d.name)}">×</button></div>`).join('')}</div>`
       +(X.layoutFiles.missing(current()).length?`<p class="layout-note">${X.layoutFiles.missing(current()).length} span names aren’t in this dataset. Their definitions are kept.</p>`:'');
-    const anchor=button.getBoundingClientRect();menu.style.position='fixed';menu.style.top=`${anchor.bottom+8}px`;menu.style.left=`${Math.max(12,Math.min(anchor.right-menu.offsetWidth,innerWidth-menu.offsetWidth-12))}px`;menu.style.right='auto';
+    place();
+  }
+  function place() {
+    const menu=$('layout-menu');if(menu.hidden)return;
+    const anchor=$('layouts').getBoundingClientRect();menu.style.position='fixed';menu.style.top=`${anchor.bottom+8}px`;menu.style.left=`${Math.max(12,Math.min(anchor.right-menu.offsetWidth,innerWidth-menu.offsetWidth-12))}px`;menu.style.right='auto';menu.style.maxHeight=`${Math.max(60,innerHeight-anchor.bottom-20)}px`;
   }
   function apply(doc) {
     if(doc.unit!==X.UNIT)throw Error(`This layout is for ${doc.unit}; this page contains ${X.UNIT}`);
@@ -38,7 +42,7 @@
     let finished=false;
     const finish=cancel=>{if(finished)return;finished=true;if(!cancel && input.value.trim())doc.name=input.value.trim();store();render();};
     input.onkeydown=e=>{if(e.key==='Enter'||e.key==='Escape'){e.preventDefault();e.stopPropagation();finish(e.key==='Escape');}};
-    input.onblur=()=>finish(false);input.focus();input.select();
+    input.onblur=()=>finish(false);input.focus({preventScroll:true});input.scrollIntoView({block:'nearest'});input.select();
   }
   function create() {
     saveCurrent();const doc={...current(),id:newId(),name:'New layout'};library.push(doc);active=doc.id;store();render();rename(library.length-1);
@@ -70,6 +74,7 @@
     library.splice(to,0,library.splice(from,1)[0]);store();render();
   }
   function init() {
+    window.addEventListener('resize',place);
     $('layouts').onclick=()=>{const open=$('layout-menu').hidden;$('layout-menu').hidden=!open;$('layouts').setAttribute('aria-expanded',String(open));render();};
     const menu=$('layout-menu');
     menu.onclick=e=>{

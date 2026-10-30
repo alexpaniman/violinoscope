@@ -76,6 +76,19 @@ async def main():
             await page.evaluate('doc=>TX.layouts.importFile(new File([JSON.stringify(doc)],"bad.json"))',bad)
             assert await page.evaluate('JSON.stringify(TX.layout.state())') == before
             assert 'cycle' in await page.locator('#toast').inner_text()
+            # New-name editing stays within the scrollable list, even in a short window.
+            await page.set_viewport_size({'width':1000,'height':480})
+            for i in range(12):
+                await page.click('[data-layout-new]')
+                menu=await page.locator('#layout-menu').bounding_box()
+                field=await page.locator('.layout-name').bounding_box()
+                assert field['x']>menu['x'] and field['y']>menu['y']
+                assert field['x']+field['width']<menu['x']+menu['width']
+                assert field['y']+field['height']<menu['y']+menu['height']<=480
+                await page.fill('.layout-name',f'Layout {i}')
+                await page.press('.layout-name','Enter')
+            assert await page.locator('.layout-list').evaluate('(el)=>el.scrollHeight>el.clientHeight')
+            await page.set_viewport_size({'width':1440,'height':900})
             # Image export includes HTML factor labels and copies a real PNG.
             await page.click('#layouts')
             await page.evaluate("""() => {

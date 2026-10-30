@@ -271,6 +271,8 @@
       if (parent !== ROOT2 && (!this.nodes.has(parent) || isRest(parent))) throw Error('Unknown destination');
       if (!this.get(id) || id === this.unit || isRest(id) || id === parent || this.inside(parent, id))
         throw Error('Choose a destination outside this subtree');
+      const previousParent = this.parents.get(id);
+      if (previousParent === parent && before === id) return id;
       const n = this.get(id),
         same = parent === ROOT2 ? null : this.children(parent).find((c) => c.id !== id && c.span && c.span === n.span);
       if (same) throw Error('This span is already at that level');
@@ -279,7 +281,7 @@
         at = list.findIndex((c) => c.id === before);
       list.splice(at < 0 ? list.length : at, 0, n);
       n.hidden = false;
-      if (this.get(parent)) this.get(parent).open = true;
+      if (previousParent !== parent && this.get(parent)) this.get(parent).open = true;
       this.refresh();
       return id;
     }

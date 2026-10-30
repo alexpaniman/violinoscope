@@ -56,7 +56,7 @@
     const p = X.prepare(S.mode, S.linear);
     const key = `${p.key}|${W}x${H}|${T.scheme}|${TOP}|${[...X.picked].join(',')}`;
     if (key === lastKey && !(opts && opts.force)) { drawHover(); return; }
-    const glide = !!(G && G.p.cols.length === p.cols.length && G.p.vk === p.vk && G.p.cols.every((c, i) => c.id === p.cols[i].id));
+    const glide = !!(G && G.layoutVersion === X.layout.version && !matchMedia('(prefers-reduced-motion: reduce)').matches && G.p.cols.length === p.cols.length && G.p.vk === p.vk && G.p.cols.every((c, i) => c.id === p.cols[i].id));
     lastKey = key;
 
     // Columns keep their width until there are more than fit, so opening one moves only the columns after it and no
@@ -80,10 +80,10 @@
     const countW = counts.map((t) => (t ? X.textWidth(t, COUNT, 400) + 4 : 0));
     const maxD = Math.max(0, ...depth);
 
-    // Slanted labels all start on one line below the tree, so neighbours never cross; above it, room for the × that
-    // hides a violin, clear of the last row of triangles. A deeper tree packs its levels closer and takes more room, so
+    // Slanted labels all start on one line below the tree, so neighbours never cross; above it, room for the hide and
+    // delete controls, clear of the last row of triangles. A deeper tree packs its levels closer and takes more room, so
     // the names below it keep theirs.
-    const ROW = maxD > 3 ? 12 : 15, NODE0 = 8, labelY = NODE0 + maxD * ROW + 26;
+    const ROW = maxD > 3 ? 12 : 15, NODE0 = 8, labelY = NODE0 + maxD * ROW + 48;
     const cap = clamp(H * 0.19, 90, 180) + Math.max(0, maxD - 2) * ROW;
     const labels = p.cols.map((col, c) => X.fitText(col.label, SIZE, 400, (cap - labelY - 8) / Math.sin(ANGLE) - countW[c]));
     const lens = labels.map((s, c) => X.textWidth(s, SIZE, 400) + countW[c]);
@@ -260,7 +260,7 @@
       }
       if(chCount(col.id)>0 && open[c])o.push(`<g class="hit branch-clear" data-clear-children="${esc(col.id)}"><title>Delete all children</title><rect x="${n1(x+9)}" y="${n1(y-7)}" width="14" height="14" fill="${T.surface}"/><path d="M${n1(x+13)} ${n1(y-3)}l6 6m0-6-6 6" stroke="${T.muted}" stroke-width="1.2"/></g>`);
       const hidden=X.layout.skippedAbove(col.id);
-      if(hidden.length)o.push(`<g class="hit" data-unhide="${esc(col.id)}"><title>Reveal hidden parents</title><circle cx="${n1(x)}" cy="${n1(y-10)}" r="5" fill="${T.surface}" stroke="${T.muted}"/><path d="M${n1(x-2)} ${n1(y-10)}h4" stroke="${T.muted}"/></g>`);
+      if(hidden.length)o.push(`<g class="hit" data-unhide="${esc(col.id)}" style="color:${T.muted}"><title>${hidden.length === 1 ? 'Reveal ' + esc(X.layout.label(hidden[0])) : 'Reveal hidden parents'}</title><rect x="${n1(x-9)}" y="${n1(y-26)}" width="18" height="18" rx="4" fill="${T.surface}"/><g transform="translate(${n1(x-7)} ${n1(y-24)})">${X.visibilityIcon()}</g></g>`);
       // Picked to merge, on a tint.
       o.push(`<g class="hit" data-col="${c}" transform="translate(${n1(x + 3)} ${n1(TR.y0 + labelY)}) rotate(${deg})">`
         + `<rect x="${n1(-lens[c] - 4)}" y="-3" width="${n1(lens[c] + 8)}" height="${n1(SIZE + 6)}" rx="4" fill="${picked ? T.sel : 'transparent'}" fill-opacity="${picked ? 0.22 : 0}"${picked ? ` stroke="${T.sel}"` : ''}/>`
@@ -284,10 +284,9 @@
 
     under.innerHTML = u.join('');
     over.innerHTML = o.join('');
-    if (glide) for (const el of [under, over]) { el.classList.remove('fade'); void el.getBoundingClientRect(); el.classList.add('fade'); }
-    points.resize(W, H, view(W, H));
+    points.resize(W, H, view(W, H), false);
     points.set(pos, rgba, size, { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 }, glide);
-    G = { W, H, n, two, colW, xOf, ends, V, TR, TL, MD, yOfU, p, pts, where, half, labelY, lens, END, deg, pad: { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 } };
+    G = { W, H, n, two, colW, xOf, ends, nodeY, depth, plusX, layoutVersion: X.layout.version, V, TR, TL, MD, yOfU, p, pts, where, half, labelY, lens, END, deg, pad: { x: AX, y: V.y0 - 6, w: END - AX, h: vH + 12 } };
     placeLayers();
     drawHeat();
     drawHover();
@@ -359,10 +358,13 @@
     if (lift && lift.moved) {
       tint(lift.c, 0.05);
       if (lift.to !== null && lift.to >= 0) tint(lift.to, 0.14);
-      if (lift.move) {
-        const { to, after } = lift.move, x = after ? G.xOf(G.ends[to]) + G.colW / 2 : G.xOf(to) - G.colW / 2;
-        ctx.fillStyle = T.sel;
-        ctx.fillRect(x - 1, G.V.y0 - 8, 2, G.TR.y0 + G.labelY - G.V.y0 + 8);
+      if (lift.insert) {
+        const { x, y, parent } = lift.insert;
+        ctx.strokeStyle = T.sel; ctx.lineWidth = 1.5;
+        ctx.beginPath();ctx.moveTo(x, G.V.y0 - 8);ctx.lineTo(x, G.TR.y0 + G.labelY - 2);
+        const pi = G.p.cols.findIndex(col => col.id === parent || (col.root && parent === X.layout.rootKey()));
+        if (pi >= 0) {ctx.moveTo(G.xOf(pi) + 7, y);ctx.lineTo(x, y);}
+        ctx.moveTo(x - 5, y);ctx.lineTo(x + 5, y);ctx.stroke();
       }
     }
     if (lit) {
@@ -484,7 +486,8 @@
     if (hit) X.tipHtml(dotTip(hit), px, py); else X.hideTip();
     showPill(col !== null ? col : lx >= AX && lx < G.END && ly >= G.V.y0 - 6 && ly <= G.V.y1 + 6 ? colOfX(lx) : null);
     const along = col !== null ? col : colAt(lx, ly);
-    X.edit.showHide(along !== null && !G.p.cols[along].root ? Object.assign({ id: G.p.cols[along].id, label: G.p.cols[along].label }, tipOf(along)) : null);
+    const treeButton = e.target.closest?.('[data-open],[data-add],[data-unhide],[data-clear-children]');
+    X.edit.showHide(!treeButton && along !== null && !G.p.cols[along].root ? Object.assign({ id: G.p.cols[along].id, label: G.p.cols[along].label }, tipOf(along)) : null);
     pad.classList.toggle('on-col', !hit && lit !== null);
     if (dirty) X.schedule(drawHover);
   }
@@ -685,33 +688,90 @@
     drag = null;
     root.classList.remove('panning');
   }
-  // A name carried onto a sibling moves past it, with what is under it; onto the second tree, it is copied there.
+  // Names group or receive a subtree. Between-column drops insert at the selected
+  // branch level; ordinary column bodies retain the broad sibling-reorder target.
   let lift = null;
+  function insertionSlots() {
+    const slots = [], cols = G.p.cols;
+    const add = (parent, children, y, end) => {
+      children.forEach((c) => slots.push({ parent, before: cols[c].id, x: G.xOf(c) - G.colW / 2, y }));
+      slots.push({ parent, before: null, x: end, y });
+    };
+    cols.forEach((col, c) => {
+      if (X.layout.isRest(col.id) || (!col.root && !X.layout.open(col.id))) return;
+      const children = cols.flatMap((child, j) => child.parent === col.id && !X.layout.isRest(child.id) ? [j] : []);
+      add(col.root ? X.layout.rootKey() : col.id, children, G.nodeY(G.depth[c]), G.plusX(c));
+    });
+    const projections = cols.flatMap((col, c) => col.parent === X.ROOT2 && !X.layout.isRest(col.id) ? [c] : []);
+    if (projections.length) add(X.ROOT2, projections, G.nodeY(0), G.xOf(G.ends[projections.at(-1)]) + G.colW / 2);
+    return slots;
+  }
   function carry(e, px, py) {
     const dx = px - lift.px, dy = py - lift.py;
     if (!lift.moved && dx * dx + dy * dy < 25) return;
+    const from = G.p.cols[lift.c];
     if (!lift.moved) {
       lift.moved = true;
+      lift.allowed = new Set(X.layout.destinations(from.id).map(d => d.id));
+      lift.allowed.add(X.layout.modelParent(from.id));
+      lift.slots = insertionSlots();
       root.classList.add('lifting');
       X.hideTip();
       pill.hidden = true;
-      X.edit.showHide(null);
+      X.edit.showHide(null, true);
       clearTimeout(cardSoon);
     }
-    const [lx, ly] = toLayer(px, py), from = G.p.cols[lift.c];
-    const el = e.target.closest && e.target.closest('[data-col]');
-    const c = el ? Number(el.dataset.col) : colAt(lx, ly), onto = c !== null ? G.p.cols[c] : null;
-    const add=e.target.closest?.('[data-add]'),start=add?.dataset.add===X.ROOT2;
-    const sibling=onto&&c!==lift.c&&onto.parent===from.parent&&!X.layout.isRest(onto.id);
-    const edge=sibling&&!el&&Math.abs(lx-G.xOf(c))>G.colW*.28;
-    lift.move=edge?{to:c,after:lx>G.xOf(c)}:null;
-    lift.merge=sibling&&!edge?onto.id:null;lift.target=null;lift.copy=false;lift.to=null;
-    let say=null;
-    if(lift.move)say=`Move ${lift.move.after?'after':'before'} ${onto.label}`;
-    else if(lift.merge){say=`Group with ${onto.label}`;lift.to=c;}
-    else if(start){lift.copy=!from.second;lift.target=X.ROOT2;lift.to=-1;say=lift.copy?'Copy to Projections':'Move to Projections';}
-    else if(onto&&onto.id!==from.id&&!X.layout.isRest(onto.id)&&X.layout.destinations(from.id).some(d=>d.id===(onto.root?X.layout.rootKey():onto.id))){lift.target=onto.root?X.layout.rootKey():onto.id;lift.to=c;say=`Move into ${onto.label}`;}
-    X.edit.showLift(from.label,px,py,lift.target,say);
+    const [lx, ly] = toLayer(px, py), cols = G.p.cols;
+    const el = e.target.closest?.('[data-col]'), add = e.target.closest?.('[data-add]');
+    const c = el ? Number(el.dataset.col) : colAt(lx, ly), onto = c !== null ? cols[c] : null;
+    lift.insert = null; lift.merge = null; lift.target = null; lift.copy = false; lift.to = null;
+    let say = null;
+    const insert = (slot) => {
+      if (!lift.allowed.has(slot.parent) || slot.before === from.id) return false;
+      lift.insert = slot;
+      lift.copy = slot.parent === X.ROOT2 && !from.second;
+      const children = X.layout.configuredChildren(slot.parent).filter(id => id !== from.id);
+      const last = children.at(-1);
+      const where = slot.before ? `before ${X.layout.label(slot.before)}` : last ? `after ${X.layout.label(last)}` : 'at the start';
+      say = `${lift.copy ? 'Copy' : 'Move'} ${where} · ${X.layout.label(slot.parent)}`;
+      return true;
+    };
+    if (el && onto && onto.id !== from.id && !X.layout.isRest(onto.id)) {
+      if (X.layout.modelParent(onto.id) === X.layout.modelParent(from.id) && X.layout.canMerge(from.id, onto.id)) {
+        lift.merge = onto.id; lift.to = c; say = `Group with ${onto.label}`;
+      } else {
+        const parent = onto.root ? X.layout.rootKey() : onto.id;
+        if (lift.allowed.has(parent)) { lift.target = parent; lift.to = c; say = `Move into ${onto.label}`; }
+      }
+    } else if (add) {
+      const parent = add.dataset.add === X.ROOT ? X.layout.rootKey() : add.dataset.add;
+      if (lift.allowed.has(parent)) {
+        lift.target = parent; lift.copy = parent === X.ROOT2 && !from.second;
+        say = `${lift.copy ? 'Copy to' : 'Move into'} ${X.layout.label(parent)}`;
+        lift.to = cols.findIndex(col => col.id === parent || (col.root && parent === X.layout.rootKey()));
+      }
+    } else {
+      // Near a horizontal branch, y chooses the level and x the insertion gap.
+      let closest = null, distance = Infinity;
+      for (const slot of lift.slots) {
+        if (!lift.allowed.has(slot.parent)) continue;
+        const dx = Math.abs(lx - slot.x), dy = Math.abs(ly - slot.y);
+        if (dx > G.colW * .55 || dy > 7) continue;
+        const d = dx / G.colW + dy / 7;
+        if (d < distance) { closest = slot; distance = d; }
+      }
+      if (closest) insert(closest);
+      else if (onto && !onto.root && onto.id !== from.id && !X.layout.isRest(onto.id)) {
+        const parent = X.layout.modelParent(onto.id), siblings = X.layout.configuredChildren(parent);
+        const after = Math.abs(lx - G.xOf(c)) < G.colW * .15 ? c > lift.c : lx > G.xOf(c);
+        const next = siblings[siblings.indexOf(onto.id) + 1];
+        const pi = cols.findIndex(col => col.id === parent || (col.root && parent === X.layout.rootKey()));
+        insert({ parent, before: after ? next || null : onto.id,
+          x: after ? G.xOf(G.ends[c]) + G.colW / 2 : G.xOf(c) - G.colW / 2,
+          y: pi < 0 ? G.nodeY(0) : G.nodeY(G.depth[pi]) });
+      }
+    }
+    X.edit.showLift(from.label, px, py, lift.target, say);
     X.schedule(drawHover);
   }
   function letGo(drop) {
@@ -722,15 +782,14 @@
     if (!l.moved) return;
     dragged = true;
     X.schedule(drawHover);
-    if(!drop)return;
-    const a=G.p.cols[l.c].id;
+    if (!drop) return;
+    const a = G.p.cols[l.c].id;
     try {
-      if(l.move){X.layout.move(a,G.p.cols[l.move.to].id,l.move.after);flash(a);}
-      else if(l.merge)flash(X.layout.merge([a,l.merge],X.layout.suggestName([a,l.merge])));
-      else if(l.copy)flash(X.layout.copyOver(a));
-      else if(l.target)flash(X.layout.transfer(a,l.target));
-    }catch(error){X.toast(error.message);}
-
+      if (l.insert) flash(l.copy ? X.layout.copyOver(a, l.insert.before) : X.layout.transfer(a, l.insert.parent, l.insert.before));
+      else if (l.merge) flash(X.layout.merge([a, l.merge], X.layout.suggestName([a, l.merge])));
+      else if (l.copy) flash(X.layout.copyOver(a));
+      else if (l.target) flash(X.layout.transfer(a, l.target));
+    } catch (error) { X.toast(error.message); }
   }
   // Where a change landed, lit for a moment.
   let lit = null;

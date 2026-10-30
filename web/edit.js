@@ -34,8 +34,8 @@
     controls.appendChild(hideBtn);
     hideBtn.hidden = false;
     controls.insertAdjacentHTML(
-      'beforeend',
-      '<button type="button" class="quiet-btn" data-hide-node title="Hide, keeping its share" aria-label="Hide violin">◌</button>',
+      'afterbegin',
+      `<button type="button" class="quiet-btn" data-hide-node title="Hide, keeping its share" aria-label="Hide violin">${X.visibilityIcon(true)}</button>`,
     );
     ghost = document.createElement('div');
     ghost.className = 'lift-ghost';
@@ -97,6 +97,7 @@
       }
     };
     controls.onclick = (e) => {
+      if (!e.target.closest('button')) return;
       const id = hideBtn.dataset.id;
       showHide(null, true);
       safely(() => (e.target.closest('[data-hide-node]') ? X.layout.hide(id) : X.layout.remove([id])));
@@ -117,7 +118,9 @@
       syncBar();
     });
   }
-  function openAdd(id, rect, what) {
+  function openAdd(id, rect, what, ancestors = null) {
+    delete menu.dataset.ancestors;
+    if (ancestors) menu.dataset.ancestors = JSON.stringify(ancestors);
     under = id;
     query = '';
     ticked.clear();
@@ -135,11 +138,9 @@
     menu.querySelector('[data-filter]').focus({ preventScroll: true });
   }
   function openHidden(ids, rect) {
-    openAdd(X.layout.modelParent(ids[0]), rect, 'hidden');
-    rows = ids.map((id) => ({ id, label: X.layout.label(id), share: NaN, seen: 1 }));
-    // Intermediate ancestors are restored without altering their children or calculation.
-    menu.dataset.ancestors = JSON.stringify(ids);
-    renderList();
+    closeAdd();
+    if (ids.length === 1) { X.layout.unskip(ids[0]); return; }
+    if (ids.length) openAdd(X.layout.modelParent(ids[0]), rect, 'hidden', ids);
   }
   function placeAdd() {
     if (!at || menu.hidden) return;
@@ -156,7 +157,7 @@
   }
   function renderHead() {
     menu.querySelector('.add-head').innerHTML =
-      `<div class="seg add-mode" role="group" aria-label="Add or reveal"><button type="button" data-mode="spans" aria-pressed="${mode === 'spans'}">Spans</button><button type="button" data-mode="hidden" aria-pressed="${mode === 'hidden'}">Hidden</button></div><input data-filter type="search" autocomplete="off" spellcheck="false" placeholder="Find in ${esc(X.layout.label(under))}" aria-label="Find a span" value="${esc(query)}">`;
+      (menu.dataset.ancestors ? '' : `<div class="seg add-mode" role="group" aria-label="Add or reveal"><button type="button" data-mode="spans" aria-pressed="${mode === 'spans'}">Spans</button><button type="button" data-mode="hidden" aria-pressed="${mode === 'hidden'}">Hidden</button></div>`) + `<input data-filter type="search" autocomplete="off" spellcheck="false" placeholder="${menu.dataset.ancestors ? 'Find hidden parents' : 'Find in ' + esc(X.layout.label(under))}" aria-label="${mode === 'hidden' ? 'Find hidden items' : 'Find a span'}" value="${esc(query)}">`;
   }
   function closeAdd() {
     if (menu.hidden) return false;
@@ -227,11 +228,9 @@
     hideBtn.dataset.id = at.id;
     hideBtn.title = X.layout.lifts(at.id) ? 'Dissolve group; keep its base members' : 'Delete this subtree';
     hideBtn.setAttribute('aria-label', `Delete ${at.label}`);
-    hideBtn.style.transform = 'none';
-    hideBtn.style.position = 'static';
     hideBtn.hidden = X.layout.isRest(at.id);
-    controls.style.transform = `translate(${Math.round(at.x - 9)}px,${Math.round(at.y - 18)}px)`;
     controls.hidden = false;
+    controls.style.transform = `translate(${Math.round(at.x - controls.offsetWidth / 2)}px,${Math.round(at.y - controls.offsetHeight)}px)`;
   }
   function showLift(name, px, py, onto, say) {
     if (name === null) {
@@ -243,10 +242,6 @@
     ghost.style.transform = `translate(${Math.round(px + 14)}px,${Math.round(py + 12)}px)`;
     ghost.hidden = false;
   }
-  const cardAt = () => {
-    const b = $('card-pop').getBoundingClientRect();
-    return { left: b.left, right: b.left, top: b.top, bottom: b.top };
-  };
   function rename(id) {
     const at = X.violins.nameAt(id);
     if (!at) return;
@@ -281,99 +276,7 @@
     input.select();
   }
 
-  let moving = null;
-  function openMove(id) {
-    const options = X.layout.destinations(id),
-      el = $('v-move');
-    if (!options.length) return;
-    closeAdd();
-    moving = id;
-    const anchor = cardAt(),
-      stage = $('stage').getBoundingClientRect(),
-      card = $('card-pop').getBoundingClientRect();
-    let selected = options[0].id;
-    el.innerHTML =
-      '<div class="add-head"><input type="search" data-move-find placeholder="Move to…" aria-label="Find a destination" autocomplete="off"><button type="button" class="quiet-btn" data-move-cancel aria-label="Close">×</button></div>' +
-      '<div class="add-list" role="listbox" aria-label="Destinations"></div><p class="move-preview" data-move-preview></p>' +
-      '<div class="add-foot"><span class="add-count"></span><button type="button" class="text-btn primary" data-move-apply>Move</button></div>';
-    const input = el.querySelector('[data-move-find]');
-    const place = () => {
-      const w = el.offsetWidth,
-        h = el.offsetHeight;
-      const left =
-        card.right - stage.left + 8 + w <= stage.width - 12
-          ? card.right - stage.left + 8
-          : card.left - stage.left - w - 8;
-      el.style.transform = `translate(${Math.round(clamp(left, 12, Math.max(12, stage.width - w - 12)))}px, ${Math.round(clamp(card.top - stage.top, 12, Math.max(12, stage.height - h - 12)))}px)`;
-    };
-    const render = () => {
-      const found = options.filter((d) => d.label.toLocaleLowerCase().includes(input.value.trim().toLocaleLowerCase()));
-      if (!found.some((d) => d.id === selected)) selected = found[0]?.id;
-      el.querySelector('.add-list').innerHTML =
-        found
-          .map(
-            (d) =>
-              `<button type="button" class="add-row move-choice" role="option" aria-selected="${d.id === selected}" data-move-target="${esc(d.id)}"><span class="nm">${esc(d.label)}</span></button>`,
-          )
-          .join('') || '<p class="add-none">No matching destination</p>';
-      el.querySelector('[data-move-preview]').textContent = selected ? X.layout.transferPreview(id, selected) : '';
-      el.querySelector('[data-move-apply]').disabled = !selected;
-      el.querySelector('.add-count').textContent = X.layout.label(id);
-      place();
-    };
-    const apply = () => {
-      if (!selected) return;
-      closeMove();
-      X.panel.closeCard();
-      safely(() => {
-        const out = X.layout.transfer(id, selected);
-        if (out) X.openCard(out, anchor);
-      });
-    };
-    input.oninput = render;
-    el.onclick = (e) => {
-      if (e.target.closest('[data-move-cancel]')) closeMove();
-      const row = e.target.closest('[data-move-target]');
-      if (row) {
-        selected = row.dataset.moveTarget;
-        render();
-      }
-      if (e.target.closest('[data-move-apply]')) apply();
-    };
-    el.onkeydown = (e) => {
-      if (e.key === 'Escape') {
-        closeMove();
-        e.stopPropagation();
-      }
-      if (e.key === 'Enter' && e.target === input) {
-        apply();
-        e.preventDefault();
-      }
-      if (['ArrowDown', 'ArrowUp'].includes(e.key)) {
-        const found = options.filter((d) =>
-          d.label.toLocaleLowerCase().includes(input.value.trim().toLocaleLowerCase()),
-        );
-        const at = found.findIndex((d) => d.id === selected),
-          delta = e.key === 'ArrowDown' ? 1 : -1;
-        selected = found[Math.max(0, Math.min(found.length - 1, at + delta))]?.id;
-        render();
-        e.preventDefault();
-      }
-    };
-    el.hidden = false;
-    render();
-    input.focus({ preventScroll: true });
-  }
-  function closeMove() {
-    if (moving === null) return false;
-    moving = null;
-    $('v-move').hidden = true;
-    return true;
-  }
-
   X.edit = {
-    openMove,
-    closeMove,
     init,
     openAdd,
     openHidden,

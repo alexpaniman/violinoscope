@@ -87,6 +87,43 @@ test('aliases, order, collapse and hide do not alter computation', () => {
   assert.deepEqual([ms(a), ms(b)], before);
   T.check();
 });
+test('sibling insertion and adjacent no-ops preserve allocation and collapse', () => {
+  const { T } = fixture(),
+    ids = T.add(['Prepare', 'Optimize', 'Other'].map(pick), 'Compile'),
+    before = JSON.stringify(T.state()),
+    times = ids.map(id => Array.from(T.msOf(id)));
+  T.move(ids[1], ids[0], true);
+  assert.equal(JSON.stringify(T.state()), before);
+  T.transfer(ids[2], 'Compile', ids[0]);
+  assert.deepEqual(Array.from(T.configuredChildren('Compile')), [ids[2], ids[0], ids[1]]);
+  assert.deepEqual(ids.map(id => Array.from(T.msOf(id))), times);
+  T.undo();
+  assert.equal(JSON.stringify(T.state()), before);
+  const group = T.merge(ids, 'Phases');
+  T.collapse(group);
+  T.transfer(ids[2], group, ids[0]);
+  assert.equal(T.open(group), false);
+  T.check();
+});
+test('insertion across levels recomputes scope and cannot move independent work into main', () => {
+  const { T, add, ms } = malloc(),
+    a = add('Work'), b = add('malloc'), g = T.merge([a, b], 'Local');
+  near(ms(b), 10);
+  T.transfer(b, 'Compile', g);
+  assert.deepEqual(Array.from(T.configuredChildren('Compile')), [b, g]);
+  near(ms(b), 30);
+  near(ms(g), 90);
+  T.transfer(b, g, a);
+  near(ms(b), 10);
+  near(ms(g), 100);
+  T.check();
+  const { T: other } = fixture(),
+    main = other.add([pick('Prepare')], 'Compile')[0],
+    job = other.add([pick('Async')], '~two')[0];
+  assert.throws(() => other.move(job, main, true), /Independent work/);
+  assert.equal(other.treeOf(job), 2);
+  other.check();
+});
 test('projections are independent and moving re-evaluates current scope', () => {
   const { T, add, ms } = malloc(),
     a = add('Work'),
@@ -99,6 +136,17 @@ test('projections are independent and moving re-evaluates current scope', () => 
   T.remove([a]);
   T.transfer(p, 'Compile');
   near(ms(p), 90);
+  T.check();
+});
+test('copy insertion orders independent projections and undoes as one edit', () => {
+  const { T, add, ms } = malloc(),
+    work = add('Work'), other = add('Elsewhere', '~two'),
+    before = JSON.stringify(T.state()), copy = T.copyOver(work, other);
+  assert.deepEqual(Array.from(T.configuredChildren('~two')), [copy, other]);
+  assert.equal(T.treeOf(work), 1);
+  near(ms(copy), 100);
+  T.undo();
+  assert.equal(JSON.stringify(T.state()), before);
   T.check();
 });
 test('Rest is a diagnostic of all children and never an input', () => {
@@ -268,7 +316,12 @@ test('fuzz: every edit conserves time, survives roundtrip and undoes exactly', (
         else if (op === 6) T.clearChildren(id);
         else if (op === 7) {
           const ds = T.destinations(id);
-          if (ds.length) T.transfer(id, ds[rand(ds.length)].id);
+          const current = T.modelParent(id);
+          if (current) ds.push({ id: current });
+          if (ds.length) {
+            const parent = ds[rand(ds.length)].id, children = T.configuredChildren(parent);
+            T.transfer(id, parent, children[rand(children.length + 1)]);
+          }
         } else if (op === 8) {
           const choices = nodes.filter((c) => T.canMerge(id, c.id));
           if (choices.length) T.merge([id, choices[rand(choices.length)].id], 'Group');

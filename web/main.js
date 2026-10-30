@@ -671,7 +671,7 @@
 
     const stage = $('stage');
     // By the path the event took, as its target may be gone by now: a card redrawn by its own click.
-    const OWN = '#controls, #layout-menu, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-move, #v-merge, #v-hide, #v-actions, .name-edit';
+    const OWN = '#controls, #layout-menu, #overview, #rangecard, #tip, #card-pop, #spans, #timeline, #keys, #toast, #v-add, #v-merge, #v-hide, #v-actions, .name-edit';
     const own = (e) => e.composedPath().some((el) => el.matches && el.matches(OWN));
     const at = (e) => { const b = stage.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
     stage.addEventListener('pointermove', (e) => {
@@ -730,10 +730,9 @@
     document.addEventListener('pointerdown', (e) => {
       if (!$('keys').hidden && !e.target.closest('#keys')) toggleKeys(false);
       if (!$('rangecard').hidden && !e.target.closest('#rangecard') && !e.target.closest('#range-chip')) toggleRange(false);
-      if (S.card !== null && !e.target.closest('#card-pop, #v-add, #v-move') && !e.target.closest('[data-col]')) X.panel.closeCard();
+      if (S.card !== null && !e.target.closest('#card-pop, #v-add') && !e.target.closest('[data-col]')) X.panel.closeCard();
       if (!e.target.closest('#v-factor-menu, [data-pill]')) X.violins.closeMenu();
       if (!e.target.closest('#v-add, [data-add], [data-made-add]')) X.edit.closeAdd();
-      if (!e.target.closest('#v-move, [data-act="move"]')) X.edit.closeMove();
     });
     $('whatif-clear').addEventListener('click', () => { X.layout.clearFactors();renderWhatif(); });
     document.addEventListener('paste', (e) => {
@@ -743,13 +742,12 @@
     document.addEventListener('keydown', (e) => {
       const typing = e.target.closest('input, select, textarea');
       if (!typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault(); X.edit.closeMove();
+        e.preventDefault();
         if (e.shiftKey) X.layout.redo(); else X.layout.undo();
         return;
       }
       if (e.key === 'Escape') {
-        if (X.edit.closeMove()) { /* closed the destination picker */ }
-        else if (S.view === 'spans' && S.spansMode === 'callers' && X.spans.back()) { /* back within the flame graph */ }
+        if (S.view === 'spans' && S.spansMode === 'callers' && X.spans.back()) { /* back within the flame graph */ }
         else if (!$('keys').hidden) toggleKeys(false);
         else if (!$('rangecard').hidden) toggleRange(false);
         else if (X.edit.closeAdd()) { /* closed the + list */ }

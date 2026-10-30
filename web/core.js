@@ -10,6 +10,7 @@
   const X = window.TX = { R, M, data, meta, summaryText };
 
   X.SANS = "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif";
+  X.visibilityIcon = (hide = false) => `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8s2.3-4.2 6.5-4.2S14.5 8 14.5 8 12.2 12.2 8 12.2 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="1.8"/>${hide ? '<path d="M2 2l12 12"/>' : ''}</svg>`;
   X.MONO = "'IBM Plex Mono', ui-monospace, Menlo, monospace";
   X.MS_FLOOR = 0.01;
   X.NU = data.units.length;

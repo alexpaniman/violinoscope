@@ -39,7 +39,6 @@
       else if (act.dataset.act === 'reset') { closeCard(); X.layout.fresh(); }
       else if (act.dataset.act === 'saved') { closeCard(); X.layout.reset(); }
       else if (act.dataset.act === 'spans') { const name = X.layout.spanNames(id)[0]; closeCard(); X.spans.pick(name); X.go('profile', 'callers'); }
-      else if (act.dataset.act === 'move') { X.edit.openMove(id); }
       else if (act.dataset.act === 'split') { closeCard(); X.layout.ungroup(id); }
       else if (act.dataset.act === 'rename' || act.dataset.rename !== undefined) {
         const h = card.querySelector('h3');
@@ -124,9 +123,8 @@
     // Its one span name, also when merged from spans of one name: what calls it and what it calls, in Spans.
     const names = root ? [] : X.layout.spanNames(col.id);
     const tools = root ? [] : [
-      X.layout.destinations(col.id).length ? '<button type="button" class="text-btn small" data-act="move">Move to…</button>' : X.layout.transferProblem(col.id) ? `<button type="button" class="text-btn small" disabled title="${esc(X.layout.transferProblem(col.id))}">Move to…</button>` : '',
       col.merged ? '<button type="button" class="text-btn small" data-act="split">Split up</button>' : '',
-      '<button type="button" class="quiet-btn" data-act="hide" title="Hide, keeping its share" aria-label="Hide violin">◌</button>',
+      `<button type="button" class="quiet-btn" data-act="hide" title="Hide, keeping its share" aria-label="Hide violin">${X.visibilityIcon(true)}</button>`,
       names.length === 1 ? `<button type="button" class="text-btn small" data-act="spans" title="${esc(names[0])} in the Spans tab: what calls it and what it calls">In Spans</button>` : ''];
     const title = root ? esc(col.label) : `${col.merged?typeIcon():''}<button type="button" class="title-edit" data-rename title="Rename it">${esc(col.label)}</button>`;
     let html = `<div class="card-top"><div class="card-id"><h3>${title}</h3>${where.length ? `<div class="crumbs">${where.join(' › ')}</div>` : ''}</div>`
@@ -182,7 +180,7 @@
   function madeOf(id,halves){
     const group=X.layout.isMerged(id),members=X.layout.members(id),units=halves.flatMap(([,u])=>u);
     const share=id=>{const ms=X.layout.msOf(id);return units.length?units.reduce((s,i)=>s+ms[i]/data.units[i].ms,0)/units.length:0;};
-    const rows=members.map(m=>`<div class="member"><span class="member-name">${group&&X.layout.isMerged(m)?typeIcon():''}${group?`<button type="button" class="text-btn input-label" data-reveal-part="${esc(m)}" title="Reveal and inspect">${esc(X.layout.label(m))}</button>`:`<span class="input-label">${esc(X.layout.spanName(id))}</span>`}</span><span class="pct">${X.fmtPct(share(m))}</span><span class="member-actions">${group?`<button type="button" class="quiet-btn" data-member-hide="${esc(m)}" title="Hide, keeping its share" aria-label="Hide member">◌</button><button type="button" class="quiet-btn" data-member-remove="${esc(m)}" title="Delete member" aria-label="Delete member">×</button>`:''}</span></div>`).join('');
+    const rows=members.map(m=>`<div class="member"><span class="member-name">${group&&X.layout.isMerged(m)?typeIcon():''}${group?`<button type="button" class="text-btn input-label" data-reveal-part="${esc(m)}" title="Reveal and inspect">${esc(X.layout.label(m))}</button>`:`<span class="input-label">${esc(X.layout.spanName(id))}</span>`}</span><span class="pct">${X.fmtPct(share(m))}</span><span class="member-actions">${group?`<button type="button" class="quiet-btn" data-member-hide="${esc(m)}" title="Hide, keeping its share" aria-label="Hide member">${X.visibilityIcon(true)}</button><button type="button" class="quiet-btn" data-member-remove="${esc(m)}" title="Delete member" aria-label="Delete member">×</button>`:''}</span></div>`).join('');
     return `<div class="made${madeOpen?' open':''}"><div class="made-head"><button type="button" class="made-toggle" data-made aria-expanded="${madeOpen}"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l3.5 3L3 8" fill="none" stroke="currentColor" stroke-width="1.4"/></svg><span class="section-title">Made of</span><span class="n">${group?members.length:''}</span></button>${group?'<span class="made-tools"><button type="button" class="quiet-btn" data-made-add title="Add a member" aria-label="Add a member">+</button><span class="action-space"></span></span>':''}</div>${madeOpen?`<div class="members">${rows}</div>`:''}</div>`;
   }
 

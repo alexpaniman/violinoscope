@@ -1180,6 +1180,12 @@
     if (id) node(id).open = keep;
     return id;
   }
+  function moveTo(id, parent, before = null) {
+    parent = normal(parent);
+    if (independent(id) && parent !== ROOT2 && treeOf(parent) === 1)
+      throw Error('Independent work belongs in Projections');
+    return tree.move(id, parent, before);
+  }
   X.layout = {
     stats: () => ({
       paths: paths.length,
@@ -1266,21 +1272,19 @@
     merge: change(merge),
     canMerge,
     suggestName,
-    copyOver: change((id) => tree.duplicate(id)),
+    copyOver: change((id, before = null) => {
+      const copy = tree.duplicate(id);
+      if (copy && before) tree.move(copy, ROOT2, before);
+      return copy;
+    }),
     move: change((id, next, after) => {
       const parent = modelParent(next),
         list = tree.children(parent),
         index = list.findIndex((n) => n.id === next);
-      return tree.move(id, parent, after ? list[index + 1]?.id : next);
+      return moveTo(id, parent, after ? list[index + 1]?.id : next);
     }),
-    transfer: change((id, parent) => {
-      if (independent(id) && parent !== ROOT2 && treeOf(parent) === 1)
-        throw Error('Independent work belongs in Projections');
-      return tree.move(id, normal(parent));
-    }),
+    transfer: change(moveTo),
     destinations,
-    transferProblem: () => '',
-    transferPreview: (id, parent) => `Move ${label(id)} into ${label(parent)}; match its name in that scope.`,
     rename: change((id, name) => {
       if (isRest(id)) return;
       const n = node(id);

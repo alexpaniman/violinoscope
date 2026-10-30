@@ -23,11 +23,12 @@ Each top-level projection is an independent analysis with the same rules and no 
 | + → Spans | Add exact names from the scope, largest proposed share first. New nodes have no children. A group's picker uses its containing scope so broader members can be added. |
 | + → Hidden | Reveal existing hidden nodes or Rest. |
 | Triangle | Open or close the display; measurements stay fixed. |
-| Hide | Keep the node in the calculation and lift its children visually. Reveal it from + or the connection marker; its previous collapse state returns. |
+| Hide | Keep the node in the calculation and lift its children visually. Reveal it from + or the eye on its connection; one hidden parent returns immediately, several offer a searchable list. Its previous collapse state returns. |
 | × on a span or closed group | Delete that subtree and its exploration. |
 | × on an open group / Split up | Remove the wrapper, promote its base members, discard local refiners. An existing same-name destination source is kept; independent projection roots remain separate. |
-| Drag onto a sibling | Group them. Drag near a column edge to reorder. |
-| Drag into another node / Move to | Reparent the subtree and recompute scope. Drop on the projection + to copy from the main tree. |
+| Drag onto a sibling's name | Group them. |
+| Drag between columns or across a column's body | Insert at the marked position and branch level. Within siblings this only reorders; changing parent recomputes scope. |
+| Drag onto another parent's name or + | Move the subtree into that parent. Drop on the projection + to copy from the main tree. |
 | Shift-select → Group | Lift selected branches to their common containing level and group them. Conflicting duplicate names are rejected. |
 | Branch × | Delete all configured children, including hidden ones. |
 | Layout's clear icon | Keep only the expanded unit root. |

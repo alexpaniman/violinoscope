@@ -145,9 +145,9 @@
 
     return {
       gpu: !!gl,
-      resize(w, h, view) {
+      resize(w, h, view, redraw = true) {
         state.view = X.fitCanvas(canvas, w, h, view);
-        draw();
+        if (redraw) draw();
       },
       // positions: Float32Array of x, y pairs; glide from the dots' current places when `glide` holds and the counts
       // match.
