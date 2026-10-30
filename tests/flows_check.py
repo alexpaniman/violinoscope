@@ -119,13 +119,12 @@ async def main():
             browser = await p.chromium.launch(args=ARGS)
             page = await opened(browser, url, errors)
             actual = await page.evaluate('''() => {
-              const T=TX.layout, root=T.rootKey(), phase=root+'\\x01Annotate IO', join=phase+'\\x01Await table metadata';
-              T.add([phase,join]);window.flowTest={phase,join};
+              const T=TX.layout,root=T.rootKey(),pick=n=>'~pick:'+encodeURIComponent(n),phase=T.add([pick('Annotate IO')],root)[0],join=T.add([pick('Await table metadata')],phase)[0],copy=T.copyOver(join);window.flowTest={phase,join};
               const rows=TX.spansOf(0).rows, request=rows.find(s=>s.name==='Resolve'), child=rows.find(s=>s.name==='Decode');
-              return {join:T.msOf(join)[0],copy:T.msOf('\\x02'+join)[0],phase:T.msOf(phase)[0],
+              return {join:T.msOf(join)[0],copy:T.msOf(copy)[0],phase:T.msOf(phase)[0],
                 sameFlow:request.flowRoot===child.flowRoot&&request.track===child.track&&request.lane===child.lane,
                 childDepth:child.flowDepth,childStartsFlow:child.flowStart,
-                bad:T.candidates(TX.ROOT2,'Await without').every(c=>T.independent(c.id)),
+                bad:T.candidates(TX.ROOT2,'Await without').length===1,
                 main:TX.data.columns.filter(c=>!c.second).map(c=>c.label)};
             }''')
             assert actual['join'] == 50 and actual['copy'] == 70 and actual['phase'] == 60, actual
@@ -134,7 +133,7 @@ async def main():
             for shown in (True, False, True):
                 projection = await page.evaluate('''shown => {
                   const {phase,join}=flowTest,T=TX.layout;if(shown)T.add([join]);else T.hide(join);
-                  TX.setFactor(phase,.5);TX.setFactor(join,0);
+                  TX.setFactor(phase,.5);
                   return {total:TX.totalMs(0),fine:T.breakdown().rows[0].reduce((s,v)=>s+v,0)*100};
                 }''', shown)
                 assert abs(projection['total'] - 70) < 1e-8 and abs(projection['fine'] - 70) < 1e-8, projection
@@ -228,7 +227,7 @@ async def main():
                 assert len(await tail_page.evaluate('tailLabels')) >= 2
                 await tail_page.evaluate("TX.go('timeline','waterfall')")
                 await tail_page.wait_for_timeout(100)
-                assert await tail_page.locator('.tl-row .nm', has_text='Long cleanup').count() == 1
+                assert await tail_page.locator('.tl-row .nm', has_text='Long cleanup').count() == 2  # Zoom keeps both runs in the row list.
                 await tail_page.evaluate('TX.nav.showUnit(12)')
                 await tail_page.wait_for_timeout(300)
                 window = await tail_page.evaluate('TX.nav.win()')

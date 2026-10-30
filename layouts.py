@@ -56,10 +56,77 @@ def map_expression(expression, ref, depth=0):
     raise ValueError('Invalid retained coverage')
 
 
+def validate_tree(unit, state):
+    if not isinstance(unit, str) or not unit or not isinstance(state, dict) or state.get('v') != 7 or state.get('unit') != unit:
+        raise ValueError('Invalid tree layout')
+    if set(state) - {'v', 'unit', 'main', 'projections'}:
+        raise ValueError('Unexpected layout state')
+    ids = set()
+    def node(n, depth=0):
+        if not isinstance(n, dict) or depth > 150 or len(ids) >= 20000:
+            raise ValueError('Invalid tree node')
+        if set(n) - {'id', 'span', 'group', 'name', 'children', 'open', 'hidden', 'rest'}:
+            raise ValueError('Unexpected layout state')
+        identity = n.get('id')
+        if not isinstance(identity, str) or not identity or identity in ids or identity == '~two' or identity.startswith(('~rest:', '~pick:')):
+            raise ValueError('Duplicate or invalid violin identity')
+        ids.add(identity)
+        if sum(k in n for k in ('span', 'group')) != 1 or not isinstance(n.get('span', n.get('group')), str) or not n.get('span', n.get('group')):
+            raise ValueError('A violin needs one span or group name')
+        if 'span' in n and (not n['span'] or any(ord(c) < 4 for c in n['span'])):
+            raise ValueError('Invalid span name')
+        if 'name' in n and not isinstance(n['name'], str):
+            raise ValueError('Invalid violin label')
+        for flag in ('open', 'hidden', 'rest'):
+            if flag in n and not isinstance(n[flag], bool):
+                raise ValueError('Invalid display flag')
+        if 'group' in n and n.get('rest'):
+            raise ValueError('Groups do not have Rest rows')
+        children = n.get('children')
+        if not isinstance(children, list):
+            raise ValueError('A violin needs a child list')
+        names = set()
+        for child in children:
+            if isinstance(child, dict) and 'span' in child:
+                if child['span'] in names:
+                    raise ValueError('This span is already at this level')
+                names.add(child['span'])
+            node(child, depth + 1)
+    node(state.get('main'))
+    if not isinstance(state.get('projections'), list):
+        raise ValueError('Invalid projection list')
+    for projection in state['projections']:
+        node(projection)
+    root = state['main']
+    if root['id'] != unit or root.get('span') != unit or root.get('hidden'):
+        raise ValueError('The unit root is fixed')
+    return state
+
+
+def decode_tree(doc):
+    unit = doc.get('unit')
+    next_id = 0
+    def node(n, root=False):
+        nonlocal next_id
+        if not isinstance(n, dict) or set(n) - {'span', 'group', 'name', 'children', 'open', 'hidden', 'rest'}:
+            raise ValueError('Invalid tree node')
+        next_id += 1
+        identity = unit if root else f'n{next_id-1}'
+        return {**n, 'id': identity, 'children': [node(c) for c in n.get('children', [])]}
+    state = {'v': 7, 'unit': unit, 'main': node(doc.get('tree'), True),
+             'projections': [node(n) for n in doc.get('projections', [])]}
+    return {'unit': unit, 'name': doc.get('name', 'Imported layout'), 'layout': validate_tree(unit, state)}
+
+
 def decode(value):
     doc = copy.deepcopy(value)
     if not isinstance(doc, dict):
         raise ValueError('Expected a layout object')
+    if doc.get('format') == 'violinoscope-layout' and doc.get('version') == 4:
+        return decode_tree(doc)
+    if isinstance(doc.get('layout'), dict) and doc['layout'].get('v') == 7:
+        validate_tree(doc.get('unit'), doc['layout'])
+        return doc
     if doc.get('format') == 'violinoscope-layout':
         if doc.get('version') not in (1, 2, 3) or not isinstance(doc.get('paths'), list):
             raise ValueError('Unsupported layout format')

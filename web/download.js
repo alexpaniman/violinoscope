@@ -85,7 +85,7 @@
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
     if (blob) {
       if (!downloadFile && navigator.clipboard?.write && window.ClipboardItem) try {
-        await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);X.toast('Picture copied');return;
+        await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);X.copied($('picture'));return;
       } catch (_) { /* File URLs and browser permissions may prevent clipboard access. */ }
       await save(blob, fileName('png'));
     }
@@ -147,5 +147,6 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   }
 
+  X.copied=button=>{if(!button)return;const original=button.innerHTML,title=button.title;button.innerHTML='✓';button.title='Copied';setTimeout(()=>{button.innerHTML=original;button.title=title;},1400);};
   X.download = { init, build, picture, save };
 })();

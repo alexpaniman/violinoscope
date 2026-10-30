@@ -8,11 +8,17 @@
   const mapInput=(input,ref)=>({...input,...(input.span ? {span:ref(input.span)} : {violin:ref(input.violin)}),...(input.cuts ? {cuts:input.cuts.map(cut=>D.mapExpression(cut,ref))} : {})});
   function validate(doc) {
     if (!doc || typeof doc.unit !== 'string' || !doc.unit || !doc.layout) throw Error('Unsupported layout file');
-    return {unit:doc.unit, name:typeof doc.name==='string' ? doc.name : 'Imported layout', layout:D.validate(doc.unit,doc.layout)};
+    const old=doc.layout.v===7?doc.layout:D.validate(doc.unit,doc.layout);
+    return {unit:doc.unit,name:typeof doc.name==='string'?doc.name:'Imported layout',layout:window.ViolinTree.migrate(doc.unit,old)};
   }
   function decode(input) {
     const doc = typeof input==='string' ? JSON.parse(input) : clone(input);
     if (doc.format!=='violinoscope-layout') return validate(doc);
+    if(doc.version===4){
+      let next=1;
+      const node=(n,root=false)=>{if(!n||typeof n!=='object'||Array.isArray(n)||Object.keys(n).some(k=>!['span','group','name','children','hidden','open','rest'].includes(k)))throw Error('Invalid tree node');return {...n,id:root?doc.unit:'n'+next++,children:(n.children||[]).map(c=>node(c))};};
+      return validate({unit:doc.unit,name:doc.name,layout:{v:7,unit:doc.unit,main:node(doc.tree,true),projections:(doc.projections||[]).map(n=>node(n))}});
+    }
     if (![1,2,3].includes(doc.version) || !Array.isArray(doc.paths)) throw Error('Unsupported layout format');
     const paths = doc.paths.map(p=>{
       if (!Array.isArray(p) || !p.length || p[0]!==doc.unit || p.some(n=>typeof n!=='string' || /[\u0001-\u0003]/.test(n))) throw Error('Invalid span path');
@@ -35,48 +41,12 @@
     s.next=1+Math.max(0,...s.groups.map(g=>Number(g[0].slice(1))));
     return validate({unit:doc.unit,name:doc.name,layout:s});
   }
-  function encode(input) {
-    const doc=validate(input),s=doc.layout,paths=[],ids=new Map();
-    const ref=r=>{
-      const rest=D.restParts(r);if(rest)return D.rest(...rest.map(ref));
-      const copy=r.startsWith(COPY),key=D.source(r),scope=D.scope(r);
-      if (key!==doc.unit && !key.startsWith(doc.unit+SEP)) return r;
-      if (!ids.has(key)) { ids.set(key,paths.length); paths.push(key.split(SEP)); }
-      return `${copy ? 'p'+(scope ? scope+':' : '') : 's'}${ids.get(key)}`;
-    };
-    const out={format:'violinoscope-layout',version:3,name:doc.name,unit:doc.unit,paths};
-    for (const k of lists) if(s[k]?.length) out[k]=s[k].map(ref);
-    for (const k of pairs) if(s[k]?.length) out[k]=Object.fromEntries(s[k].map(([a,b])=>[ref(a),k==='names' ? b : ref(b)]));
-    for (const k of many) if(s[k]?.length) out[k]=Object.fromEntries(s[k].map(([a,b])=>[ref(a),b.map(ref)]));
-    if(s.retained?.length) out.retained=Object.fromEntries(s.retained.map(([id,cuts])=>[ref(id),cuts.map(cut=>D.mapExpression(cut,ref))]));
-    if(s.definitions?.length) out.definitions=Object.fromEntries(s.definitions.map(([id,inputs])=>[ref(id),inputs.map(input=>mapInput(input,ref))]));
-    if(s.groups?.length) out.groups=s.groups.map(([id,name,inputs,more={}])=>({id,name,inputs:inputs.map(input=>mapInput(input,ref)),
-      ...(more.tree===2 ? {tree:'projections',...(more.scope ? {scope:more.scope} : {})} : {}),...(more.match ? {match:{...more.match,under:ref(more.match.under)}} : {})}));
-    return out;
+  function encode(input){
+    const doc=validate(input),node=n=>{const out=n.span?{span:n.span}:{group:n.group};if(n.name)out.name=n.name;for(const flag of ['open','hidden','rest'])if(n[flag])out[flag]=true;if(n.children.length)out.children=n.children.map(node);return out;};
+    return {format:'violinoscope-layout',version:4,name:doc.name,unit:doc.unit,tree:node(doc.layout.main),...(doc.layout.projections.length?{projections:doc.layout.projections.map(node)}:{})};
   }
-  const missing=doc=>encode(doc).paths.map(p=>p.join(SEP)).filter(p=>!X.layout.hasPath(p));
-  function preserveMissing(source,current) {
-    if(!source || current.v>=5) return current;
-    const absent=new Set(missing(source)),out=clone(current),old=source.layout;
-    const lost=id=>absent.has(D.source(id));
-    for(let changed=true;changed;){changed=false;for(const [id,,members] of old.groups || []) if(!absent.has(id) && members.length && members.every(lost)){absent.add(id);changed=true;}}
-    for(const k of lists) out[k]=[...new Set([...(out[k] || []),...(old[k] || []).filter(lost)])];
-    const groups=new Map((out.groups || []).map(g=>[g[0],g]));
-    for(const g of old.groups || []) {
-      if(groups.has(g[0])) groups.get(g[0])[2]=[...new Set([...groups.get(g[0])[2],...g[2].filter(lost)])];
-      else if(lost(g[0])) { groups.set(g[0],clone(g)); if(old.shown?.includes(g[0])) out.shown.push(g[0]); }
-    }
-    out.groups=[...groups.values()];
-    for(const k of [...pairs,...many]) {
-      const entries=new Map(out[k] || []);
-      for(const [a,b] of old[k] || []) {
-        if(lost(a)) entries.set(a,clone(b));
-        else if(many.includes(k)) { const keep=b.filter(lost); if(keep.length) entries.set(a,[...new Set([...(entries.get(a)||[]),...keep])]); }
-      }
-      out[k]=[...entries];
-    }
-    return out;
-  }
+  const missing=doc=>{const names=new Set(),visit=n=>{if(n.span&&n.span!==window.ViolinTree.GAP&&!X.layout.hasName(n.span))names.add(n.span);n.children.forEach(visit);};const s=validate(doc).layout;visit(s.main);s.projections.forEach(visit);return [...names];};
+  const preserveMissing=(_,current)=>clone(current);
   function stringify(doc) {
     const pretty=(value,depth=0)=>{
       if(!value || typeof value!=='object')return JSON.stringify(value);

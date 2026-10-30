@@ -2,7 +2,7 @@
 // another in the order they ran, run after run, each followed by its spans in tree order, on a wall-clock axis with
 // long idle stretches folded and each run on its own clock. Spans fold into their parents, one at a time or a level
 // at a time; asynchronous ones are hollow. The stretch of time shown is the one the flame chart shares (X.nav), and
-// only the spans in it are listed. Rows are drawn only where the list is scrolled to.
+// zoom changes the scale without changing the rows. Rows are drawn only where the list is scrolled to.
 (function () {
   'use strict';
   const X = window.TX, S = X.S, data = X.data;
@@ -164,13 +164,7 @@
 
   // The rows in the stretch shown.
   function filter() {
-    const w = X.nav.win(), out = new Int32Array(M.n);
-    let k = 0;
-    const included = new Set();
-    // A unit remains in context when any visible span touches the window, including async work after its root ends.
-    for (let j = 0; j < M.n; j++) if (M.D1[j] >= w[0] && M.D0[j] <= w[1]) included.add(M.U[j]);
-    for (let j = 0; j < M.n; j++) if (included.has(M.U[j])) out[k++] = j;
-    rows = out.subarray(0, k);
+    if(!rows||rows.length!==M.n)rows=Int32Array.from({length:M.n},(_,i)=>i);
   }
 
   // The model again, keeping the row at the top of the list where it is.

@@ -572,3 +572,14 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .layout-choice span, .layout-note { color: var(--muted); font-size: 11px; }
 #layouts { position: relative; }
 #layouts.modified::after { content: ''; position: absolute; width: 3px; height: 3px; border-radius: 50%; background: var(--muted); right: 1px; top: 1px; }
+
+/* Tree controls share the same small action columns as the card and layout list. */
+.tree-actions { position: absolute; top: 0; left: 0; display: flex; gap: 3px; z-index: 4; align-items: center; background: var(--surface); border-radius: 4px; }
+.tree-actions[hidden] { display: none; }
+.tree-actions .quiet-btn { width: 18px; min-width: 18px; padding: 0; height: 18px; }
+.made-toggle { position: relative; }
+.made-toggle > svg { position: absolute; left: -15px; }
+.made-tools .quiet-btn, .made-tools .action-space { width: 20px; min-width: 20px; }
+.group-mark { margin-right: 5px; color: var(--muted); }
+.branch-clear { opacity: 0; }
+.branch-clear:hover, .branch-clear:focus-visible { opacity: 1; }

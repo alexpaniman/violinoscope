@@ -27,22 +27,23 @@ async def main():
         assert labels and not any(label.startswith('Rest of ') for label in labels)
         measured = await page.evaluate('''() => {
           const d=TX.layout.breakdown(), {parts,args:[mean]}=partsProbe;
-          const ks=parts.flatMap(p=>p.ks), cbo=d.nodes.some(n=>n.label==='RBO stage: Invoke CBO');
+          const ks=parts.flatMap(p=>p.ks),cboNode=d.nodes.findIndex(n=>n.label==='RBO stage: Invoke CBO'),cbo=cboNode>=0;
+          const underCbo=k=>{for(;k>=0;k=d.nodes[k].parent)if(k===cboNode)return true;return false;};
+          window.cboPart=parts.findIndex(p=>!p.other&&underCbo(p.node));
           return {nodes:d.nodes.length,unique:new Set(ks).size,count:ks.length,
             maxError:Math.max(...d.rows.map(row=>Math.abs(row.reduce((a,b)=>a+b,0)-1))),
-            cbo,cboShown:parts.some(p=>!p.other&&d.nodes[p.node].id.includes('Invoke CBO')),
+            cbo,cboShown:window.cboPart>=0,
             bandError:Math.max(...mean.map(row=>Math.abs(parts.reduce((a,p)=>a+p.ks.reduce((s,k)=>s+row[k],0),0)-1)))};
         }''')
         assert measured['nodes'] == measured['unique'] == measured['count']
         assert measured['maxError'] < 1e-8 and measured['bandError'] < 1e-8
         if measured['cbo']:
             assert measured['cboShown'], 'CBO remains hidden by its parent'
-            cbo = await page.evaluate('''() => {
-              const d=TX.layout.breakdown();return partsProbe.parts.findIndex(p=>!p.other&&d.nodes[p.node].id.includes('Invoke CBO'));
-            }''')
+            cbo=await page.evaluate('window.cboPart')
             await page.locator(f'.band-label[data-k="{cbo}"]').hover()
             assert await page.locator('#tip').is_visible()
-            assert 'Invoke CBO' in await page.locator('#tip').inner_text()
+            label=await page.evaluate('TX.layout.breakdown().nodes[partsProbe.parts[window.cboPart].node].label')
+            assert label in await page.locator('#tip').inner_text()
             if args.shots:
                 Path(args.shots).mkdir(parents=True, exist_ok=True)
                 await page.screenshot(path=f'{args.shots}/cbo.png')

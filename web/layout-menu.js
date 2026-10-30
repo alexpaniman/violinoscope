@@ -15,12 +15,13 @@
     const button=$('layouts'),menu=$('layout-menu');button.disabled=false;button.title=selected()?.name || 'Layouts';
     if(menu.hidden)return;
     menu.innerHTML='<div class="layout-head"><b>Layouts</b>'
+      +icon('clear','Clear layout','M3 5h10M6 5V3h4v2M5 7v6h6V7')
       +icon('new','Save as a new layout','M8 3v10M3 8h10')
       +icon('import','Paste layout · Shift-click to open a file','M6 3H3v11h10V3h-3M6 2h4v3H6zM8 7v5M6 10l2 2 2-2')
       +icon('export','Copy layout · Shift-click to download a file','M6 6h8v8H6zM10 3V2H2v8h1')
       +icon('close','Close layouts','M4 4l8 8M12 4l-8 8')+'</div>'
       +`<div class="layout-list">${library.map((d,i)=>`<div class="layout-row${d.id===active?' on':''}" data-layout-row="${i}"><span class="layout-grip" draggable="true" data-layout-drag="${i}" title="Drag to reorder · Alt+↑/↓ on the name">⠿</span><button type="button" class="layout-choice" data-layout-load="${i}" title="${esc(d.name)} · double-click or F2 to rename">${esc(d.name)}</button><button type="button" class="quiet-btn" data-layout-delete="${i}" title="Remove ${esc(d.name)}" aria-label="Remove ${esc(d.name)}">×</button></div>`).join('')}</div>`
-      +(X.layoutFiles.missing(current()).length?`<p class="layout-note">${X.layoutFiles.missing(current()).length} referenced paths aren’t in this dataset. Their definitions are kept.</p>`:'');
+      +(X.layoutFiles.missing(current()).length?`<p class="layout-note">${X.layoutFiles.missing(current()).length} span names aren’t in this dataset. Their definitions are kept.</p>`:'');
     const anchor=button.getBoundingClientRect();menu.style.position='fixed';menu.style.top=`${anchor.bottom+8}px`;menu.style.left=`${Math.max(12,Math.min(anchor.right-menu.offsetWidth,innerWidth-menu.offsetWidth-12))}px`;menu.style.right='auto';
   }
   function apply(doc) {
@@ -61,7 +62,7 @@
   }
   async function copy(file) {
     const doc=current(),text=X.layoutFiles.stringify(doc);
-    if(!file)try{await navigator.clipboard.writeText(text);X.toast('Layout copied');return;}catch(_){}
+    if(!file)try{await navigator.clipboard.writeText(text);X.copied($('layout-menu').querySelector('[data-layout-export]'));return;}catch(_){}
     await X.download.save(new Blob([text],{type:'application/json'}),doc.name.replace(/[\\/:*?"<>|]/g,'-')+'.layout.json');
   }
   function reorder(from,to) {
@@ -75,6 +76,7 @@
       const el=e.target.closest('button');if(!el)return;
       if(el.hasAttribute('data-layout-close'))close();
       if(el.hasAttribute('data-layout-new'))create();
+      if(el.hasAttribute('data-layout-clear'))X.layout.fresh();
       if(el.hasAttribute('data-layout-load'))try{apply(library[Number(el.dataset.layoutLoad)]);}catch(err){X.toast(err.message);}
       if(el.hasAttribute('data-layout-import'))paste(e.shiftKey);
       if(el.hasAttribute('data-layout-export'))copy(e.shiftKey);

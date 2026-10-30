@@ -68,12 +68,12 @@
     // The unit's own span is the root the columns branch from; in Share it is 100% everywhere, so it shows only its
     // median time.
     const depth = p.cols.map((col) => (col.root ? 0 : X.depthIdx[col.base] + 1));
-    const isParent = p.cols.map((col) => X.layout.kids(col.id).some(id=>!X.layout.isRest(id) || X.layout.shown(id)));
+    const isParent = p.cols.map(col=>X.layout.addable(col.id));
     const bare = (c) => p.cols[c].root && S.mode === 'share';
     const visKids = p.cols.map((col) => p.cols.map((_, j) => j).filter((j) => p.cols[j].parent === col.id));
     // An open column with anything under it off screen has a + at the end of what it shows.
     // Open with none of them shown too: its + is how to add just the ones wanted.
-    const open = p.cols.map((col, c) => visKids[c].length > 0 || (!col.root && X.layout.open(col.id)));
+    const open = p.cols.map((col, c) => visKids[c].length > 0 || X.layout.open(col.id));
     const more = p.cols.map((col, c) => open[c] && X.layout.addable(col.id));
     // A merged violin's name is followed by how many spans it merges, small and muted.
     const counts = p.cols.map((col) => (col.merged ? String(X.layout.size(col.id)) : ''));
@@ -242,6 +242,7 @@
       lines += `M${n1(xOf(c))} ${n1(y + (isParent[c] ? 5 : 0))}V${n1(TR.y0 + labelY - 2)}`;
     });
     o.push(`<path d="${lines}" fill="none" stroke="${T.line}"/>`);
+    const chCount=id=>X.layout.configuredChildren(id).length;
     const deg = n1(-ANGLE * 180 / Math.PI);
     p.cols.forEach((col, c) => {
       const x = xOf(c), y = nodeY(depth[c]), picked = X.picked.has(col.id);
@@ -253,14 +254,17 @@
       } else o.push(`<circle cx="${n1(x)}" cy="${n1(y)}" r="2" fill="${T.line}"/>`);
       if (more[c]) {
         const px = plusX(c);
-        o.push(`<g class="hit add" data-add="${esc(col.id)}"><title>${esc(`Add what ${col.label} has that is not shown: its children, or anything deeper inside`)}</title>`
-          + `<circle cx="${n1(px)}" cy="${n1(y)}" r="5.5" fill="${T.surface}" stroke="${T.line}"/>`
+        o.push(`<g class="hit add" data-add="${esc(col.id)}"><title>${esc(`Add spans or reveal hidden children of ${col.label}`)}</title>`
+          + `<circle cx="${n1(px)}" cy="${n1(y)}" r="5.5" fill="${T.surface}" stroke="${X.layout.hiddenImpact(col.id)?T.sel:T.line}"/>`
           + `<path d="M${n1(px - 2.6)} ${n1(y)}h5.2M${n1(px)} ${n1(y - 2.6)}v5.2" stroke="${T.muted}" stroke-width="1.4" stroke-linecap="round"/></g>`);
       }
+      if(chCount(col.id)>0 && open[c])o.push(`<g class="hit branch-clear" data-clear-children="${esc(col.id)}"><title>Delete all children</title><rect x="${n1(x+9)}" y="${n1(y-7)}" width="14" height="14" fill="${T.surface}"/><path d="M${n1(x+13)} ${n1(y-3)}l6 6m0-6-6 6" stroke="${T.muted}" stroke-width="1.2"/></g>`);
+      const hidden=X.layout.skippedAbove(col.id);
+      if(hidden.length)o.push(`<g class="hit" data-unhide="${esc(col.id)}"><title>Reveal hidden parents</title><circle cx="${n1(x)}" cy="${n1(y-10)}" r="5" fill="${T.surface}" stroke="${T.muted}"/><path d="M${n1(x-2)} ${n1(y-10)}h4" stroke="${T.muted}"/></g>`);
       // Picked to merge, on a tint.
       o.push(`<g class="hit" data-col="${c}" transform="translate(${n1(x + 3)} ${n1(TR.y0 + labelY)}) rotate(${deg})">`
         + `<rect x="${n1(-lens[c] - 4)}" y="-3" width="${n1(lens[c] + 8)}" height="${n1(SIZE + 6)}" rx="4" fill="${picked ? T.sel : 'transparent'}" fill-opacity="${picked ? 0.22 : 0}"${picked ? ` stroke="${T.sel}"` : ''}/>`
-        + (!col.root ? `<g transform="translate(${n1(-lens[c]-17)} 1)" opacity=".7"><title>${X.layout.kind(col.id)==='span'?'Recorded span':'Violin definition'}</title><path d="${X.layout.kind(col.id)==='span'?'M2 2h8v8H2zM4 5h4M4 7h3':'M1 1h3v3H1zM1 8h3v3H1zM9 4.5h3v3H9zM4 2.5h2v7H4M6 6h3'}" fill="none" stroke="${T.muted}" stroke-width="1.1"/></g>` : '')
+        + (col.merged ? `<g transform="translate(${n1(-lens[c]-17)} 1)" opacity=".7"><title>Group</title><path d="M1 1h3v3H1zM1 8h3v3H1zM9 4.5h3v3H9zM4 2.5h2v7H4M6 6h3" fill="none" stroke="${T.muted}" stroke-width="1.1"/></g>` : '')
         + `<text text-anchor="end" dominant-baseline="hanging" font-family="${X.SANS}" font-size="${SIZE}" fill="${T.ink}">${esc(labels[c])}`
         + `${counts[c] ? `<tspan dx="4" dy="${n1((SIZE - COUNT) * 0.8)}" font-size="${COUNT}" fill="${T.muted}">${counts[c]}</tspan>` : ''}</text></g>`);
     });
@@ -490,7 +494,7 @@
     if (S.hover !== null || S.hoverCol !== null) { S.hover = null; S.hoverCol = null; X.schedule(drawHover); }
     X.hideTip();
     showPill(null);
-    if (!(e && e.target && e.target.closest && e.target.closest('#v-hide'))) X.edit.showHide(null);
+    if (!(e && e.target && e.target.closest && e.target.closest('#v-actions'))) X.edit.showHide(null);
   }
 
   // ---------------------------------------------------------------------------------------------------------
@@ -505,7 +509,7 @@
 
   function showPill(c) {
     const col = c === null || !G ? null : G.p.cols[c];
-    if (!col || col.root || col.async || drag || menuId !== null || factorOf(col.id) !== 1) { pill.hidden = true; return; }
+    if (!col || col.root || col.independent || X.layout.isRest(col.id) || drag || menuId !== null || factorOf(col.id) !== 1) { pill.hidden = true; return; }
     if (!pill.hidden && pill.dataset.pill === String(c)) return;
     pill.dataset.pill = String(c);
     pill.title = pillTitle(col);
@@ -518,7 +522,7 @@
     const top = Math.round(pillTop());
     let html = '';
     G.p.cols.forEach((col, c) => {
-      const f = col.root || col.async ? 1 : factorOf(col.id);
+      const f = col.root || col.independent || X.layout.isRest(col.id) ? 1 : factorOf(col.id);
       if (f === 1 || col.id === menuId) return;
       html += `<button type="button" class="whatif-pill set" data-pill="${c}" title="${esc(pillTitle(col))}" style="left:${Math.round(pillX(c))}px;top:${top}px">${X.fmtFactor(f)}</button>`;
     });
@@ -546,7 +550,7 @@
     menu.style.top = `${Math.round(pillTop() - 4)}px`;
   }
   function openMenu(c) {
-    if (G.p.cols[c].async) return;
+    if (G.p.cols[c].independent || X.layout.isRest(G.p.cols[c].id)) return;
     menuId = G.p.cols[c].id;
     pill.hidden = true;
     placePills();
@@ -577,6 +581,8 @@
     const step = e.target.closest && e.target.closest('[data-step]');
     if (step) { stepFactor(Number(step.dataset.step)); return; }
     if (e.target.closest && e.target.closest('#v-factor-menu')) return;
+    const clear=e.target.closest?.('[data-clear-children]');if(clear){X.layout.clearChildren(clear.dataset.clearChildren);return;}
+    const unhide=e.target.closest?.('[data-unhide]');if(unhide){X.edit.openHidden(X.layout.skippedAbove(unhide.dataset.unhide),unhide.getBoundingClientRect());return;}
     const open = e.target.closest && e.target.closest('[data-open]');
     if (open) {
       const id = open.dataset.open;
@@ -659,7 +665,7 @@
   function down(e, px, py) {
     dragged = false;
     const name = e.target.closest && e.target.closest('[data-col]');
-    if (name && G && !e.shiftKey && !G.p.cols[Number(name.dataset.col)].root) { lift = { c: Number(name.dataset.col), px, py, moved: false, to: null }; return false; }
+    if (name && G && !e.shiftKey && !G.p.cols[Number(name.dataset.col)].root && !X.layout.isRest(G.p.cols[Number(name.dataset.col)].id)) { lift = { c: Number(name.dataset.col), px, py, moved: false, to: null }; return false; }
     if (Z.z === 1 || (e.target.closest && e.target.closest('.hit, [data-pill], #v-factor-menu'))) return false;
     drag = { px, py, x: Z.x, y: Z.y, moved: false };
     return true;
@@ -695,14 +701,17 @@
     const [lx, ly] = toLayer(px, py), from = G.p.cols[lift.c];
     const el = e.target.closest && e.target.closest('[data-col]');
     const c = el ? Number(el.dataset.col) : colAt(lx, ly), onto = c !== null ? G.p.cols[c] : null;
-    // Onto a sibling, its name or anywhere along it: moved past it, with what is under it. From the first tree onto
-    // the second, or onto the + that starts it: a copy at its top. Merging is the menu's.
-    const sibling = !!(onto && c !== lift.c && onto.parent === from.parent);
-    lift.move = sibling ? { to: c, after: c > lift.c } : null;
-    const start = !!(e.target.closest && e.target.closest(`[data-add="${X.ROOT2}"]`));
-    lift.copy = !sibling && !from.second && (start || !!(onto && onto.second));
-    lift.to = lift.copy ? (onto && onto.second ? c : -1) : null;
-    X.edit.showLift(from.label, px, py, lift.copy ? X.ROOT2 : null, sibling ? `Move ${lift.move.after ? 'after' : 'before'} ${onto.label}` : null);
+    const add=e.target.closest?.('[data-add]'),start=add?.dataset.add===X.ROOT2;
+    const sibling=onto&&c!==lift.c&&onto.parent===from.parent&&!X.layout.isRest(onto.id);
+    const edge=sibling&&!el&&Math.abs(lx-G.xOf(c))>G.colW*.28;
+    lift.move=edge?{to:c,after:lx>G.xOf(c)}:null;
+    lift.merge=sibling&&!edge?onto.id:null;lift.target=null;lift.copy=false;lift.to=null;
+    let say=null;
+    if(lift.move)say=`Move ${lift.move.after?'after':'before'} ${onto.label}`;
+    else if(lift.merge){say=`Group with ${onto.label}`;lift.to=c;}
+    else if(start){lift.copy=!from.second;lift.target=X.ROOT2;lift.to=-1;say=lift.copy?'Copy to Projections':'Move to Projections';}
+    else if(onto&&onto.id!==from.id&&!X.layout.isRest(onto.id)&&X.layout.destinations(from.id).some(d=>d.id===(onto.root?X.layout.rootKey():onto.id))){lift.target=onto.root?X.layout.rootKey():onto.id;lift.to=c;say=`Move into ${onto.label}`;}
+    X.edit.showLift(from.label,px,py,lift.target,say);
     X.schedule(drawHover);
   }
   function letGo(drop) {
@@ -713,10 +722,15 @@
     if (!l.moved) return;
     dragged = true;
     X.schedule(drawHover);
-    if (drop && l.move) { const a = G.p.cols[l.c].id; X.layout.move(a, G.p.cols[l.move.to].id, l.move.after); flash(a); return; }
-    if (!drop || l.to === null) return;
-    const a = G.p.cols[l.c].id;
-    if (l.copy) flash(X.layout.copyOver(a));
+    if(!drop)return;
+    const a=G.p.cols[l.c].id;
+    try {
+      if(l.move){X.layout.move(a,G.p.cols[l.move.to].id,l.move.after);flash(a);}
+      else if(l.merge)flash(X.layout.merge([a,l.merge],X.layout.suggestName([a,l.merge])));
+      else if(l.copy)flash(X.layout.copyOver(a));
+      else if(l.target)flash(X.layout.transfer(a,l.target));
+    }catch(error){X.toast(error.message);}
+
   }
   // Where a change landed, lit for a moment.
   let lit = null;

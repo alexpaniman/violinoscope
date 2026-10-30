@@ -49,3 +49,23 @@ class LayoutValidation(unittest.TestCase):
         decoded=layouts.decode(doc)['layout']
         self.assertEqual(decoded['groups'][0][2][0],{'span':'R\x01A','cuts':[['span','R\x01A\x01X']]})
         self.assertEqual(layouts.rest_parts(decoded['shown'][1]),['g1','R\x01A'])
+
+    def test_name_trees_share_strict_validation_and_portable_roundtrip(self):
+        root={'span':'R','open':True,'children':[{'group':'Phase','children':[{'span':'A'},{'span':'B','hidden':True}]}]}
+        good={'format':'violinoscope-layout','version':4,'unit':'R','name':'Names','tree':root,
+              'projections':[{'span':'A','rest':True}]}
+        import copy
+        cases=[good]
+        for update in ({'span':'R','group':False},{'span':'R','cuts':[]},{'span':'R','hidden':True},
+                       {'span':'R','children':[{'span':'A'},{'span':'A'}]}, {'group':'R'}):
+            doc=copy.deepcopy(good);doc['tree']=update;cases.append(doc)
+        script="""const fs=require('fs'),vm=require('vm');const c={window:{TX:{}}};
+        for(const file of ['definition-model.js','tree-model.js','layout-files.js'])vm.runInNewContext(fs.readFileSync('web/'+file,'utf8'),c);
+        const docs=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(docs.map(d=>{try{return c.window.TX.layoutFiles.decode(d);}catch(e){return null;}})));"""
+        result=subprocess.run(['node','-e',script],cwd=ROOT,input=json.dumps(cases),text=True,capture_output=True,check=True)
+        js=json.loads(result.stdout)
+        self.assertEqual(layouts.decode(good),js[0])
+        for i,doc in enumerate(cases[1:],1):
+            with self.subTest(case=i):
+                self.assertIsNone(js[i])
+                with self.assertRaises(ValueError):layouts.decode(doc)

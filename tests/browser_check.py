@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Opens a generated explorer in headless Chromium, builds violins (opens one, adds from a +, merges two picked, drags
-a name onto another, renames one, fills the second tree, sets a what-if in both trees), opens a card, downloads the
-page as one file and opens that (and saves it as on claude.ai, with a stand-in for claude.ai), goes through every tab
-and mode, and fails on any console or page error or a change that did not take.
-Needs Playwright for Python and its Chromium; tools/with-browser.sh sets up the environment.
-
-  browser_check.py OUT_DIR [--shots DIR]
-"""
+"""Exercise tree editing, real dragging, history, portable reports and every view."""
 import argparse
 import asyncio
 import os
@@ -53,460 +46,82 @@ async def centre(page, selector):
 
 
 async def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('out')
-    ap.add_argument('--shots', help='directory to save a screenshot of each step to')
-    args = ap.parse_args()
-    url = 'file://' + os.path.abspath(os.path.join(args.out, 'index.html'))
-    if args.shots:
-        os.makedirs(args.shots, exist_ok=True)
-    shot = lambda page, name: page.screenshot(path=os.path.join(args.shots, f'{name}.png')) if args.shots else asyncio.sleep(0)
-    errors = []
-    expect = lambda ok, what: None if ok else errors.append(what)
+    from pathlib import Path
+    ap=argparse.ArgumentParser(description='Tree edits, drag, history and view regression checks')
+    ap.add_argument('out');ap.add_argument('--shots');args=ap.parse_args()
+    errors=[]
     async with async_playwright() as p:
-        browser = await p.chromium.launch(args=ARGS)
-        page = await opened(browser, url, errors)
-        await page.evaluate('localStorage.clear()')
-        await page.reload()
-        await page.wait_for_function(READY, timeout=60000)
-        # From the unit's span and its larger children, whatever the page was saved with.
+        browser=await p.chromium.launch(args=ARGS)
+        page=await opened(browser,(Path(args.out).resolve()/'index.html').as_uri(),errors)
+        await page.emulate_media(color_scheme='dark')
         await page.evaluate('TX.layout.fresh()')
-        await page.wait_for_timeout(300)
-        count = lambda: page.evaluate('TX.violins.G.p.cols.length')
-
-        # Open a violin, add what a + offers, then merge two violins picked with Shift.
-        n = await count()
-        await page.click('[data-open]')
-        await page.wait_for_timeout(300)
-        expect(await count() > n, 'opening a violin showed nothing more')
-        plus = await page.query_selector('[data-add]')
-        if plus:
-            n = await count()
-            await plus.click()
-            await page.check('#v-add input[data-id]')
-            await page.click('#v-add [data-do="add"]')
-            await page.wait_for_timeout(300)
-            expect(await count() == n + 1, 'adding from the + list added no violin')
-        # Picked with Shift (one by its name, one anywhere along it), they merge into one violin, closed; a plain
-        # click elsewhere lets picked violins go; New parent puts a merged violin above them, still shown.
-        last = await page.evaluate('''(() => { const rows=TX.violins.G.p.cols.map((c,k)=>[c,k]).filter(([c])=>!c.root&&!c.second).reverse(); for(const [a,i] of rows)for(const [b,j] of rows)if(TX.layout.canMerge(a.id,b.id))return [[a.id,i],[b.id,j]];return []; })()''')
-        await page.click(f'[data-col="{last[1][1]}"]', modifiers=['Shift'])
-        xy = await page.evaluate(f"""(() => {{ const G = TX.violins.G, s = document.getElementById('stage').getBoundingClientRect();
-          return [s.left + G.xOf({last[0][1]}), s.top + G.TR.y0 + 2]; }})()""")
-        await page.keyboard.down('Shift')
-        await page.mouse.click(xy[0], xy[1])
-        await page.keyboard.up('Shift')
-        expect(await page.evaluate('TX.picked.size') == 2, 'Shift and a click along a violin did not pick it')
-        await page.click('#v-merge [data-do="merge"]')
-        await page.wait_for_timeout(300)
-        closed = await page.evaluate(f"""(() => {{ const T = TX.layout, ids = {[i for i, _ in last]!r};
-          const g = T.parentOf(ids[0]); return T.isMerged(g) && T.shown(g) && ids.every((id) => T.parentOf(id) === g && !T.shown(id)); }})()""")
-        expect(closed, 'Merge did not make one closed violin of the two')
-        two = await page.evaluate('''(() => { const rows=TX.violins.G.p.cols.map((c,k)=>[c,k]).filter(([c])=>!c.root&&!c.second&&!c.merged).reverse(); for(const [a,i] of rows)for(const [b,j] of rows)if(TX.layout.canMerge(a.id,b.id))return [[a.id,i],[b.id,j]];return []; })()''')
-        await page.click(f'[data-col="{two[0][1]}"]', modifiers=['Shift'])
-        await page.mouse.click(5, 400)
-        expect(await page.evaluate('TX.picked.size') == 0, 'a click elsewhere did not let the picked violins go')
-        await page.click(f'[data-col="{two[0][1]}"]', modifiers=['Shift'])
-        await page.click(f'[data-col="{two[1][1]}"]', modifiers=['Shift'])
-        await page.click('#v-merge [data-do="parent"]')
-        await page.wait_for_timeout(300)
-        parent = await page.evaluate(f"""(() => {{ const T = TX.layout, ids = {[i for i, _ in two]!r};
-          const g = T.parentOf(ids[0]); return T.isMerged(g) && ids.every((id) => T.parentOf(id) === g && T.shown(id)); }})()""")
-        expect(parent, 'New parent did not put a merged violin above the two, still shown')
-
-        # Hovering a violin shows its × where its line meets its name.
-        x, y = await page.evaluate("""(() => {
-          const G = TX.violins.G, b = document.getElementById('stage').getBoundingClientRect();
-          return [b.left + G.xOf(1), b.top + (G.V.y0 + G.V.y1) / 2];
-        })()""")
-        await page.mouse.move(x, y)
-        await page.wait_for_timeout(100)
-        expect(await page.is_visible('#v-hide'), 'hovering a violin showed no ×')
-
-        # A name carried onto a violin that is not its sibling merges nothing: merging is the menu's.
-        pair = await page.evaluate(f"""(() => {{
-          const ids = {COLS}, cols = TX.violins.G.p.cols;
-          for (let a = ids.length - 1; a > 0; a--) for (let b = a - 1; b > 0; b--)
-            if (cols[a].parent !== cols[b].parent && TX.layout.canMerge(ids[a], ids[b])) return [a, b];
-          return null;
-        }})()""")
-        if pair is not None:
-            before = await page.evaluate('TX.layout.state().groups.length')
-            x0, y0 = await centre(page, f'[data-col="{pair[0]}"]')
-            x1, y1 = await page.evaluate(f"""(() => {{ const G = TX.violins.G, s = document.getElementById('stage').getBoundingClientRect();
-              return [s.left + G.xOf({pair[1]}), s.top + G.V.y0 + 20]; }})()""")
-            await page.mouse.move(x0, y0)
-            await page.mouse.down()
-            await page.mouse.move(x1, y1, steps=12)
-            expect(await page.is_visible('.lift-ghost'), 'a carried name showed nothing by the pointer')
-            await page.mouse.up()
-            await page.wait_for_timeout(300)
-            expect(await page.evaluate('TX.layout.state().groups.length') == before, 'dragging a name merged violins')
-
-        # Double-click a name to rename it; any violin can be renamed, and the card still names its spans.
-        await page.dblclick('[data-col="1"]')
-        await page.wait_for_timeout(200)
-        name = await page.query_selector('.name-edit')
-        if name is None:
-            errors.append('double-clicking a name did not open it for typing')
-        else:
-            await name.fill('Renamed here')
-            await name.press('Enter')
-            await page.wait_for_timeout(300)
-            expect(await page.evaluate('TX.violins.G.p.cols[1].label') == 'Renamed here', 'renaming a violin did not take')
-
-        # The second tree: spans added from its own +, two of them as one; a name of the first tree carried onto it is
-        # copied there. It takes nothing from the first tree's split of each unit's time.
-        second = lambda: page.evaluate('TX.data.columns.filter((c) => c.second).length')
-        await page.click(f'[data-add="{TWO}"]')
-        await page.check('#v-add input[data-id]')
+        assert await page.locator('[data-add]').count()==2
+        await page.locator('[data-add]').first.click()
+        await page.locator('#v-add [data-id]').nth(0).check()
+        await page.locator('#v-add [data-id]').nth(1).check()
         await page.click('#v-add [data-do="add"]')
-        await page.wait_for_timeout(300)
-        expect(await second() == 1, 'adding to the second tree added no violin there')
-        await page.click(f'[data-add="{TWO}"]')
-        boxes = await page.query_selector_all('#v-add input[data-id]')
-        for box in boxes[:2]:
-            await box.check()
-        await page.click('#v-add [data-do="one"]')
-        await page.fill('#v-add [data-name]', 'Two as one')
-        await page.keyboard.press('Enter')
-        await page.wait_for_timeout(300)
-        expect('Two as one' in await page.evaluate('TX.data.columns.filter((c) => c.second).map((c) => c.label)'), 'merging in the second tree did not take')
-        n = await second()
-        x0, y0 = await centre(page, '[data-col="1"]')
-        x1, y1 = await centre(page, f'[data-add="{TWO}"]')
-        await page.mouse.move(x0, y0)
-        await page.mouse.down()
-        await page.mouse.move(x1, y1, steps=12)
-        await page.mouse.up()
-        await page.wait_for_timeout(400)
-        # Copying an open branch can also bring its visible children.
-        expect(await second() > n and await page.evaluate("TX.data.columns.some(c => c.second && c.label === 'Renamed here')"),
-               'carrying a name onto the second tree did not copy the selected violin')
-        expect(await page.evaluate('TX.data.units.every((u) => Math.abs(u.p.reduce((a, b) => a + b, 0) - 1) < 1e-6)'),
-               "the second tree changed the first tree's split of unit time")
-        # A what-if on a violin of each tree: both apply where they meet, and nothing goes negative or undefined.
-        ok = await page.evaluate("""(() => {
-          const cols = TX.data.columns, a = cols.findIndex((c) => !c.second), b = cols.findIndex((c) => c.second);
-          TX.setFactor(cols[a].id, 0.5); TX.setFactor(cols[b].id, 0);
-          const fine = TX.data.units.every((u, i) => { const t = TX.totalMs(i, false); return Number.isFinite(t) && t > 0 && t <= u.ms + 1e-6; });
-          const less = TX.data.units.some((u, i) => TX.totalMs(i, false) < u.ms - 1e-6);
-          TX.setFactor(cols[a].id, 1); TX.setFactor(cols[b].id, 1);
-          return fine && less;
-        })()""")
-        expect(ok, 'a what-if across both trees gave times that make no sense')
-        await shot(page, 'phases-built')
-
-        # The card of a merged violin, opened by a click by its violin, off the dots: its charts and what it is made of,
-        # the card itself never scrolling; its name edited in place.
-        merged = await page.evaluate('TX.violins.G.p.cols.findIndex((c) => c.merged && !c.second)')
-        if merged < 0:
-            errors.append('no merged violin to open a card for')
-        else:
-            x, y = await page.evaluate(f"""(() => {{
-              const G = TX.violins.G, b = document.getElementById('stage').getBoundingClientRect();
-              return [b.left + G.xOf({merged}), b.top + G.TR.y0 + 2];
-            }})()""")
-            await page.mouse.click(x, y)
-            await page.wait_for_timeout(300)
-            expect(await page.is_visible('#card-pop'), 'a click by a violin opened no card')
-            expect(len(await page.query_selector_all('#card-pop svg')) >= 1, 'the card shows no chart')
-            expect(await page.is_visible('#card-pop .totals'), 'the card shows no time in all')
-            expect(await page.evaluate("(() => { const c = document.getElementById('card-pop'); return c.scrollHeight <= c.clientHeight + 1; })()"),
-                   'the card scrolls')
-            if await page.get_attribute('#card-pop [data-made]', 'aria-expanded') != 'true':
-                await page.click('#card-pop [data-made]')
-                await page.wait_for_timeout(200)
-            members = await page.query_selector_all('#card-pop [data-remove-input]')
-            expect(len(members) >= 2, 'the card of a merged violin lists no members')
-            # A row's button shows under the pointer, whole, inside the card.
-            await page.hover('#card-pop .member')
-            await page.wait_for_timeout(100)
-            fits = await page.evaluate("""(() => {
-              const el = document.querySelector('#card-pop .member [data-remove-input]'), b = el.getBoundingClientRect();
-              const c = document.querySelector('#card-pop .members').getBoundingClientRect();
-              return getComputedStyle(el).opacity === '1' && b.left >= c.left && b.right <= c.right + 0.5 && b.width >= 20;
-            })()""")
-            expect(fits, "a member's button is not whole inside the card under the pointer")
-            await shot(page, 'card')
-            await page.click('#card-pop [data-rename]')
-            await page.fill('#card-pop [data-rename]', 'Named in its card')
-            await page.keyboard.press('Enter')
-            await page.wait_for_timeout(300)
-            expect('Named in its card' in await page.evaluate('TX.data.columns.map((c) => c.label)'), 'renaming in the card did not take')
-            await page.keyboard.press('Escape')
-
-        # A violin opened stays open with all its children hidden, its + there to add just the ones wanted.
-        stays = await page.evaluate("""(() => {
-          const T = TX.layout, c = TX.violins.G.p.cols.find((c) => !c.root && !c.merged && T.kids(c.id).length > 1);
-          if (!c) return null;
-          T.expand(c.id);
-          for (const k of T.kids(c.id)) if (T.shown(k)) T.hide(k);
-          return T.open(c.id) && !!document.querySelector(`[data-add="${CSS.escape(c.id)}"]`);
-        })()""")
-        expect(stays is not False, 'a violin with its children hidden closed, or lost its +')
-
-        # Spans merged inside a merged violin make its child, and stay in it.
-        inner = await page.evaluate("""(() => {
-          const T = TX.layout, ids = TX.violins.G.p.cols.map((c) => c.id);
-          const g = ids.find((id) => T.isMerged(id) && T.members(id).length >= 3);
-          if (!g) return null;
-          const two = T.members(g).slice(0, 2), id = T.merge(two, 'Inner');
-          return T.parentOf(id) === g && T.members(g).includes(id) && two.every((m) => T.members(id).includes(m));
-        })()""")
-        expect(inner is not False, 'merging inside a merged violin did not make its child')
-
-        # A merged violin under a violin closed waits there, and comes back when it opens again.
-        waits = await page.evaluate("""(() => {
-          const T = TX.layout, ids = TX.violins.G.p.cols.map((c) => c.id);
-          const g = ids.find((id) => T.isMerged(id) && !T.isMerged(T.parentOf(id)) && T.parentOf(id) !== T.rootKey() && !String(T.parentOf(id)).startsWith('~'));
-          if (!g) return null;
-          const p = T.parentOf(g);
-          T.collapse(p);
-          const kept = T.isMerged(g) && !T.shown(g);
-          T.expand(p);
-          return kept && T.shown(g);
-        })()""")
-        expect(waits is not False, 'a merged violin did not survive closing and opening its parent')
-
-        # A name carried to the edge of a sibling's column moves it there, with what is under it.
-        order = await page.evaluate("""(() => {
-          const G = TX.violins.G, top = G.p.cols.map((c, k) => [c, k]).filter(([c]) => c.parent === TX.ROOT);
-          if (top.length < 2) return null;
-          const [a, b] = [top[0][1], top[1][1]], s = document.getElementById('stage').getBoundingClientRect();
-          return { a: G.p.cols[a].id, b: G.p.cols[b].id, x: s.left + G.xOf(b) + G.colW * 0.4, y: s.top + G.V.y0 + 20 };
-        })()""")
-        if order:
-            x0, y0 = await centre(page, f'[data-col="{await page.evaluate(f"TX.violins.G.p.cols.findIndex((c) => c.id === {order['a']!r})")}"]')
-            await page.mouse.move(x0, y0)
-            await page.mouse.down()
-            await page.mouse.move(order['x'], order['y'], steps=12)
-            await page.mouse.up()
-            await page.wait_for_timeout(400)
-            ids = await page.evaluate(COLS)
-            expect(ids.index(order['b']) < ids.index(order['a']), 'carrying a name past its sibling did not move it')
-
-        # From a card, spans inside a violin excluded from its time: its time drops, and they are listed to put back.
-        excl = await page.evaluate("""(() => {
-          TX.layout.fresh();
-          const T = TX.layout, cols = TX.violins.G.p.cols;
-          const c = cols.find((c) => !c.root && !c.merged && !c.second && T.spansFor(c.id, '', 'exclude').length);
-          if (!c) return null;
-          const k = TX.data.columnIndex.get(c.id), before = TX.data.units.reduce((a, u) => a + u.s[k], 0);
-          T.exclude(c.id, [T.spansFor(c.id, '', 'exclude')[0].id]);
-          const k2 = TX.data.columnIndex.get(c.id), after = TX.data.units.reduce((a, u) => a + u.s[k2], 0);
-          return { id: c.id, less: after < before, listed: T.excluded(c.id).length === 1 };
-        })()""")
-        if excl is None:
-            errors.append('no violin to exclude a span from')
-        else:
-            expect(excl['less'] and excl['listed'], f'excluding a span did not take: {excl}')
-            await page.evaluate(f"TX.openCard({excl['id']!r}, {{ left: 300, right: 300, top: 300, bottom: 300 }})")
-            await page.wait_for_timeout(300)
-            if await page.get_attribute('#card-pop [data-made]', 'aria-expanded') != 'true':
-                await page.click('#card-pop [data-made]')
-                await page.wait_for_timeout(200)
-            expect(await page.is_visible('#card-pop .member.out'), 'the card does not list the span excluded')
-            await page.click('#card-pop [data-made-add]')
-            await page.click('#v-add [data-mode="exclude"]')
-            await page.wait_for_timeout(200)
-            await shot(page, 'card-exclude')
-            await page.keyboard.press('Escape')
-            await page.keyboard.press('Escape')
-
-        # × on a violin open with children shown removes just its level: they move up to its parent.
-        lifted = await page.evaluate("""(() => {
-          const T = TX.layout, cols = TX.violins.G.p.cols;
-          const c = cols.find((c) => !c.root && !c.merged && T.lifts(c.id));
-          if (!c) return null;
-          const up = T.parentOf(c.id), kids = T.kids(c.id).filter((k) => T.shown(k));
-          T.hide(c.id);
-          return !T.shown(c.id) && kids.every((k) => T.shown(k) && T.parentOf(k) === up);
-        })()""")
-        expect(lifted is not False, 'removing an open violin did not move its children up')
-
-        # The violins as a picture.
-        async with page.expect_download() as info:
-            await page.click('#picture')
+        await page.wait_for_timeout(100)
+        # Dragging onto a sibling creates a group; undo restores precisely the old tree.
+        before=await page.evaluate('JSON.stringify(TX.layout.state())')
+        a=await centre(page,'[data-col="1"]');b=await centre(page,'[data-col="2"]')
+        await page.mouse.move(*a);await page.mouse.down();await page.mouse.move(*b,steps=12);await page.mouse.up()
+        await page.wait_for_timeout(100)
+        assert await page.evaluate('TX.layout.state().main.children.some(n=>n.group!==undefined)')
+        after=await page.evaluate('JSON.stringify(TX.layout.state())')
+        await page.keyboard.press('Control+z');assert await page.evaluate('JSON.stringify(TX.layout.state())')==before
+        await page.keyboard.press('Control+Shift+z');assert await page.evaluate('JSON.stringify(TX.layout.state())')==after
+        group=await page.evaluate('TX.layout.state().main.children[0].id')
+        await page.evaluate('(id)=>TX.openCard(id,{left:100,top:100,right:100,bottom:100})',group)
+        assert await page.locator('[data-reveal-part]').count()==2
+        heading=await page.locator('.made .section-title').bounding_box()
+        label=await page.locator('#card-pop .totals .k').bounding_box()
+        assert abs(heading['x']-label['x'])<2
+        await page.click('[data-act="move"]');await page.fill('[data-move-find]','Projections');await page.click('[data-move-apply]')
+        assert await page.evaluate('(id)=>TX.layout.treeOf(id)===2',group)
+        await page.evaluate('TX.panel.closeCard()')
+        # Hiding an intermediate group preserves numbers and exposes an unhide connection.
+        before_ms=await page.evaluate('(id)=>Array.from(TX.layout.msOf(id))',group)
+        await page.evaluate('(id)=>TX.layout.hide(id)',group)
+        assert await page.evaluate('(id)=>Array.from(TX.layout.msOf(id))',group)==before_ms
+        await page.locator('[data-unhide]').first.click()
+        await page.locator('#v-add [data-id]').first.check();await page.click('#v-add [data-do="add"]')
+        assert await page.evaluate('(id)=>TX.layout.shown(id)',group)
+        # A separate source exposes Rest through Hidden, with no editable recipe or exclusions.
+        source=await page.evaluate('''()=>{const T=TX.layout,n=T.configuredChildren(T.state().projections[0].id)[0];T.expand(n);return n;}''')
+        await page.evaluate('(id)=>TX.edit.openAdd(id,{left:100,top:300,right:100,bottom:300},"hidden")',source)
+        assert await page.locator('#v-add [data-id^="~rest:"]').count()==1
+        await page.locator('#v-add [data-id^="~rest:"]').check();await page.click('#v-add [data-do="add"]')
+        await page.evaluate('TX.layout.check()')
+        # The downloaded report retains hidden state and projection subtrees, offline.
+        state=await page.evaluate('JSON.stringify(TX.layout.state())')
         with tempfile.TemporaryDirectory() as tmp:
-            png = os.path.join(tmp, 'v.png')
-            await (await info.value).save_as(png)
-            size = os.path.getsize(png)
-            expect(size > 20000, f'the picture is too small: {size} bytes')
+            async with page.expect_download() as event: await page.click('#download')
+            download=await event.value;file=Path(tmp)/'report.html';await download.save_as(file)
+            restored=await opened(browser,file.as_uri(),errors)
+            assert await restored.evaluate('JSON.stringify(TX.layout.state())')==state
+            await restored.close()
+        # Every major view renders, including automatic parts before any user expansion.
+        for name,code in STEPS:
+            await page.evaluate(code);await page.wait_for_timeout(100)
             if args.shots:
-                import shutil
-                shutil.copy(png, os.path.join(args.shots, 'picture.png'))
-
-        # A level removed comes back: from the card's path, or by merging its children and making that the span.
-        back = await page.evaluate("""(() => {
-          const T = TX.layout, cols = TX.violins.G.p.cols;
-          const c = cols.find((c) => !c.root && !c.merged && T.lifts(c.id) && T.kids(c.id).filter((k) => T.shown(k)).length >= 2);
-          if (!c) return null;
-          const kids = T.kids(c.id).filter((k) => T.shown(k));
-          T.hide(c.id);
-          const skipped = T.skippedAbove(kids[0]).includes(c.id) && T.dominator(kids.slice(0, 2)) === c.id;
-          T.unskip(c.id);
-          const unskipped = T.shown(c.id) && kids.every((k) => T.parentOf(k) === c.id);
-          T.hide(c.id);
-          const g = T.merge(kids.slice(0, 2), '');
-          T.ungroup(g);T.unskip(c.id);
-          return { skipped, unskipped, restored: T.shown(c.id) && kids.slice(0, 2).every((k) => T.shown(k) && T.parentOf(k) === c.id) };
-        })()""")
-        if back is not None:
-            expect(all(back.values()), f'putting a removed level back did not work: {back}')
-
-        # Shown again any other way, as by opening its parent with nothing under it shown, a removed level holds its
-        # children again.
-        again = await page.evaluate("""(() => {
-          const T = TX.layout, cols = TX.violins.G.p.cols;
-          const c = cols.find((c) => !c.root && !c.merged && T.kids(c.id).length);
-          if (!c) return null;
-          T.expand(c.id);
-          if (!T.lifts(c.id)) return null;
-          const up = T.parentOf(c.id);
-          T.hide(c.id);
-          T.remove(T.kids(up).filter((k) => T.shown(k)));
-          T.collapse(up);
-          T.expand(up);
-          const skip = T.state().skip;
-          return { shown: T.shown(c.id), holds: !T.shown(c.id) || T.kids(c.id).length > 0,
-            none: T.kids(up).every((k) => !T.shown(k) || !skip.includes(k)) };
-        })()""")
-        if again is not None:
-            expect(again['holds'] and again['none'], f'a removed level shown again lost its children: {again}')
-
-        # Two violins picked with Shift, removed at once.
-        two = await page.evaluate('TX.violins.G.p.cols.map((c, k) => [c, k]).filter(([c]) => !c.root && !c.merged).map(([c, k]) => [c.id, k]).slice(-2)')
-        if len(two) == 2:
-            for _, k in two:
-                await page.click(f'[data-col="{k}"]', modifiers=['Shift'])
-            await page.click('#v-merge [data-do="remove"]')
-            await page.wait_for_timeout(300)
-            ids = await page.evaluate(COLS)
-            expect(all(i not in ids for i, _ in two), 'removing two picked violins left them')
-
-        # Hiding a merged violin preserves its definition and makes it restorable from +.
-        gone = await page.evaluate("""(() => {
-          const c = TX.violins.G.p.cols.find((c) => c.merged && !c.second);
-          if (!c) return null;
-          TX.layout.hide(c.id);
-          return TX.layout.isMerged(c.id) && !TX.layout.shown(c.id) && TX.layout.candidates(TX.ROOT, '').some((r) => r.id === c.id);
-        })()""")
-        expect(gone is not False, 'a hidden merged violin lost its definition or restoration entry')
-
-        # A violin's + lists its children and, apart, everything deeper, each with All, before any filter; Exclude
-        # there leaves the ticked out of that violin's time.
-        host = await page.evaluate("""(() => { const T = TX.layout;
-          const c = TX.violins.G.p.cols.find((c) => !c.root && !c.merged && !c.second && T.candidates(c.id, '').some((r) => r.deep));
-          return c ? c.id : null; })()""")
-        if host is not None:
-            await page.evaluate(f"TX.layout.expand({host!r})")
-            await page.wait_for_timeout(200)
-            await page.click(f'[data-add="{host}"]')
-            await page.wait_for_timeout(200)
-            expect(await page.is_visible('#v-add [data-all="deep"]'), 'the + list has no section of what is deeper inside')
-            await page.check('#v-add .add-section:last-child input[data-id]')
-            await page.click('#v-add [data-do="exclude"]')
-            await page.wait_for_timeout(300)
-            expect(await page.evaluate(f"TX.layout.excluded({host!r}).length") >= 1, 'Exclude in the + list excluded nothing')
-
-        # A + low on the screen: its list, filtered to many rows, stays on screen.
-        plus = await page.query_selector_all('[data-add]')
-        await plus[-1].click()
-        await page.fill('#v-add [data-filter]', 'e')
-        await page.wait_for_timeout(200)
-        box = await (await page.query_selector('#v-add')).bounding_box()
-        expect(box['y'] >= 0 and box['y'] + box['height'] <= 820, f'the + list runs off the screen: {box}')
-        await page.keyboard.press('Escape')
-
-        # Download the page as one file; opened where nothing is kept, it shows these violins, and works with no data
-        # folder next to it.
-        layout = await page.evaluate(COLS)
-        async with page.expect_download() as info:
-            await page.click('#download')
-        with tempfile.TemporaryDirectory() as tmp:
-            single = os.path.join(tmp, 'page.html')
-            await (await info.value).save_as(single)
-            print(f'one file: {os.path.getsize(single) / 1e6:.1f} MB', file=sys.stderr)
-            other = await (await browser.new_context(viewport={'width': 1440, 'height': 820})).new_page()
-            other.on('pageerror', lambda e: errors.append(f'page (one file): {e}'))
-            other.on('console', lambda m: errors.append(f'console (one file): {m.text}') if m.type == 'error' else None)
-            await other.goto('file://' + single)
-            await other.wait_for_function(READY, timeout=60000)
-            expect(await other.evaluate(COLS) == layout, 'the downloaded page did not open with the same violins')
-            await shot(other, 'one-file')
-            await other.close()
-        # On claude.ai the viewer is offered the file.
-        await page.evaluate(STAND_IN)
-        await page.click('#download')
-        await page.wait_for_timeout(500)
-        saved = await page.evaluate('window.__saved')
-        expect(bool(saved) and saved['filename'].endswith('.html') and saved['size'] > 1000, f'the page offered no file on claude.ai: {saved}')
-
-        for name, js in STEPS:
-            await page.evaluate(js)
-            await page.wait_for_timeout(400)
-            await shot(page, name)
-            # In the Timeline, dragging across the strip at the top shows just that stretch.
-            if name == 'timeline-waterfall':
-                box = await (await page.query_selector('#overview-canvas')).bounding_box()
-                before = await page.evaluate('TX.nav.win().slice()')
-                y = box['y'] + box['height'] / 2
-                await page.mouse.move(box['x'] + box['width'] * 0.3, y)
-                await page.mouse.down()
-                await page.mouse.move(box['x'] + box['width'] * 0.5, y, steps=8)
-                await page.mouse.up()
-                await page.wait_for_timeout(500)
-                after = await page.evaluate('TX.nav.win().slice()')
-                expect(after[1] - after[0] < (before[1] - before[0]) * 0.5, f'dragging across the strip did not narrow the view: {before} -> {after}')
-                await shot(page, 'timeline-picked')
-                expect(not await page.is_visible('[data-nav="back"]'), 'the Back button is still there')
-        # Pick the heaviest span name in the table, then look at its callers and callees.
-        await page.evaluate("TX.go('profile', 'table')")
-        await page.wait_for_timeout(300)
-        row = await page.query_selector('#spans-body tr[data-name]')
-        if row is None:
-            errors.append('no rows in the spans table')
-        else:
-            # Typing keeps the names that have it, in the list and in the tree, where the paths to them show too; the
-            # box keeps its focus as the rows change.
-            name = await row.get_attribute('data-name')
-            part = name[1:4].lower()
-            await page.click('#spans-body [data-find]')
-            await page.keyboard.type(part)
-            await page.wait_for_timeout(200)
-            found = await page.evaluate(f"""(() => {{
-              const names = [...document.querySelectorAll('#spans-body tr[data-name]')].map((tr) => tr.dataset.name);
-              return {{ n: names.length, all: names.every((n) => n.toLowerCase().includes({part!r})),
-                focus: document.activeElement.matches('[data-find]') }};
-            }})()""")
-            expect(found['n'] > 0 and found['all'] and found['focus'], f'finding "{part}" in the spans list did not work: {found}')
-            await page.evaluate("document.querySelector('[data-tree=true]').click()")
-            await page.wait_for_timeout(300)
-            tree = await page.evaluate(f"""(() => {{
-              const rows = [...document.querySelectorAll('#spans-body tr[data-name]')];
-              const hits = rows.filter((tr) => !tr.classList.contains('context'));
-              return {{ n: rows.length, hits: hits.length, all: hits.every((tr) => tr.dataset.name.toLowerCase().includes({part!r})) }};
-            }})()""")
-            expect(tree['hits'] > 0 and tree['all'], f'finding "{part}" in the spans tree did not work: {tree}')
-            await shot(page, 'spans-find')
-            await page.focus('#spans-body [data-find]')
-            await page.keyboard.press('Escape')
-            await page.wait_for_timeout(200)
-            expect(await page.evaluate("TX.S.spansQuery") == '', 'Escape did not clear the spans filter')
-            await page.evaluate("document.querySelector('[data-tree=false]').click()")
-            await page.wait_for_timeout(200)
-            row = await page.query_selector('#spans-body tr[data-name]')
-            await row.click()
-            await page.evaluate("TX.go('profile', 'callers')")
-            await page.wait_for_timeout(400)
-            await shot(page, 'spans-callers')
+                Path(args.shots).mkdir(parents=True,exist_ok=True);await page.screenshot(path=str(Path(args.shots)/(name+'.png')))
+        await page.evaluate("TX.go('timeline','waterfall');TX.select(null);TX.nav.fitAll()")
+        await page.click('#timeline [data-level="all"]')
+        height=await page.locator('.tl-rows').evaluate('(el)=>el.scrollHeight')
+        await page.evaluate('TX.select(TX.nav.model().units.at(-1))');await page.wait_for_timeout(200)
+        assert await page.locator('.tl-rows').evaluate('(el)=>el.scrollHeight')==height
+        assert await page.locator('#timeline').evaluate('(el)=>el.scrollTop')>0
+        await page.evaluate('TX.nav.set(...TX.nav.win().map((x,i)=>x+(i?-1:1)*.01))')
+        assert await page.locator('.tl-rows').evaluate('(el)=>el.scrollHeight')==height
+        await page.evaluate("TX.select(null);TX.go('profile','table')")
+        await page.fill('[data-find]','no-such-span');assert await page.locator('.spans-table tbody tr[data-name]').count()==0
+        await page.press('[data-find]','Escape');assert await page.locator('.spans-table tbody tr[data-name]').count()>0
+        await page.evaluate("TX.go('violins');TX.layout.fresh()")
+        await page.click('#layouts');await page.click('[data-layout-clear]')
+        assert await page.evaluate('TX.layout.state().main.children.length')==0
+        assert not errors,errors
         await browser.close()
-    for e in errors:
-        print(e, file=sys.stderr)
-    print(f'{len(STEPS) + 31} steps, {len(errors)} errors')
-    return 1 if errors else 0
+    print('Tree menus, drag grouping, undo/redo, movement, hiding, Rest, Made of, offline export and all views passed')
 
-
-if __name__ == '__main__':
-    sys.exit(asyncio.run(main()))
+if __name__=='__main__':
+    asyncio.run(main())

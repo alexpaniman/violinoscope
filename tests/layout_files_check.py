@@ -33,7 +33,7 @@ async def main():
             assert await page.locator('#layouts').get_attribute('title') == 'My layout'
             # Projection definitions and edits autosave into the selected named layout.
             state = await page.evaluate("""() => {
-              const T=TX.layout,id=TX.data.columns.find(c=>!c.second).id;T.copyOver(id);T.rename(id,'My phase');return JSON.stringify(T.state());
+              const T=TX.layout,id=T.add([T.candidates(T.rootKey())[0].id],T.rootKey())[0];T.copyOver(id);T.rename(id,'My phase');return JSON.stringify(T.state());
             }""")
             await page.click('[data-layout-load="0"]')
             assert await page.evaluate('JSON.stringify(TX.layout.state())') != state
@@ -50,8 +50,9 @@ async def main():
             await page.wait_for_function("window.__clip.startsWith('{')")
             text = await page.evaluate('__clip')
             doc = json.loads(text)
-            assert doc['format'] == 'violinoscope-layout' and doc['version'] == 3
-            assert all(isinstance(v,list) for v in doc['paths'])
+            assert doc['format'] == 'violinoscope-layout' and doc['version'] == 4
+            assert doc['tree']['span']==doc['unit'] and 'paths' not in doc
+            assert await page.locator('[data-layout-export]').inner_text()=='✓'
             assert '\\u0001' not in text and 'next' not in doc
             await page.click('[data-layout-import]')
             assert await page.locator('.layout-row').count() == 3
@@ -61,14 +62,12 @@ async def main():
             download = await pending.value
             file = Path(folder)/'layout.json';await download.save_as(file)
             assert json.loads(file.read_text())['format']=='violinoscope-layout'
-            unit=doc['unit'];doc['name']='Missing paths';a,b=len(doc['paths']),len(doc['paths'])+1
-            doc['paths'] += [[unit,'Unrecorded A'],[unit,'Unrecorded B']]
-            doc.setdefault('groups',[]).append({'id':'g900','name':'Unrecorded pair','inputs':[{'violin':f's{a}'},{'violin':f's{b}'}]})
-            doc.setdefault('shown',[]).append('g900')
+            unit=doc['unit'];doc['name']='Missing names'
+            doc['tree'].setdefault('children',[]).append({'group':'Unrecorded pair','children':[{'span':'Unrecorded A'},{'span':'Unrecorded B'}]})
             await page.evaluate('doc=>TX.layouts.importFile(new File([JSON.stringify(doc)],"missing.json"))',doc)
-            assert '2 referenced paths' in await page.locator('.layout-note').inner_text()
+            assert '2 span names' in await page.locator('.layout-note').inner_text()
             exported=await page.evaluate('TX.layoutFiles.encode(TX.layouts.current())')
-            assert next(g for g in exported['groups'] if g['id']=='g900')['name']=='Unrecorded pair'
+            assert any(n.get('group')=='Unrecorded pair' for n in exported['tree']['children'])
             await page.click('[data-layout-load="1"]')
             assert not await page.evaluate("TX.layout.candidates(TX.layout.rootKey(),'Unrecorded').length")
             # Invalid input leaves both the working layout and saved library unchanged.
@@ -80,13 +79,14 @@ async def main():
             # Image export includes HTML factor labels and copies a real PNG.
             await page.click('#layouts')
             await page.evaluate("""() => {
-              TX.layout.fresh();TX.setFactor(TX.data.columns.find(c=>!c.second&&!c.async).id,.5);
+              TX.layout.fresh();const id=TX.layout.add([TX.layout.candidates(TX.layout.rootKey())[0].id])[0];TX.setFactor(id,.5);
               window.__drawn=[];const original=CanvasRenderingContext2D.prototype.fillText;
               CanvasRenderingContext2D.prototype.fillText=function(text,...args){__drawn.push(String(text));return original.call(this,text,...args);};
             }""")
             factor=await page.locator('#v-factors [data-pill]').first.inner_text()
             await page.evaluate('TX.download.picture()')
             assert await page.evaluate('__image.type') == 'image/png'
+            assert await page.locator('#picture').inner_text()=='✓'
             assert await page.evaluate('__image.size') > 1000
             assert factor in await page.evaluate('__drawn')
             colors=await page.evaluate("()=>{const s=getComputedStyle(document.documentElement);return [s.getPropertyValue('--tip-bg').trim(),s.getPropertyValue('--tip-fg').trim()]}")
