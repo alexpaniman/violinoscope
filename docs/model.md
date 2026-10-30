@@ -27,7 +27,7 @@ Each top-level projection is an independent analysis with the same rules and no 
 | × on a span or closed group | Delete that subtree and its exploration. |
 | × on an open group / Split up | Remove the wrapper, promote its base members, discard local refiners. An existing same-name destination source is kept; independent projection roots remain separate. |
 | Drag onto a sibling's name | Group them. |
-| Drag between columns or across a column's body | Insert at the marked position and branch level. Within siblings this only reorders; changing parent recomputes scope. |
+| Drag between columns or their slanted labels | Insert at the marked position and branch level. Start from a name or violin body. Within siblings this only reorders; changing parent recomputes scope. |
 | Drag onto another parent's name or + | Move the subtree into that parent. Drop on the projection + to copy from the main tree. |
 | Shift-select → Group | Lift selected branches to their common containing level and group them. Conflicting duplicate names are rejected. |
 | Branch × | Delete all configured children, including hidden ones. |
@@ -48,6 +48,8 @@ A flow explicitly linked with `span.link.relation=depends_on` to its direct chil
 What-if factors scale attributed main-flow intervals. Independent measurements remain unchanged, including inside mixed groups. Factors from independent analyses multiply where their eligible intervals intersect. Hidden factors still apply. This estimates latency under an assumption; it does not simulate scheduling.
 
 Flame charts, waterfall, callers/callees and the table retain logical flow boundaries. Selecting a query scrolls the waterfall; zoom and selection keep its row list stable. Filtering datasets and folding branches still changes the list deliberately.
+
+Callers and Callees are separate flamegraph tabs for the selected name. All three profile graphs share click-to-select, double-click-to-zoom, pan, keyboard navigation and the minimap. The root bar identifies the focus; selecting a bar highlights it without changing that root. Click a Callers or Callees tab to focus the newly selected name. A selected query limits the graph to that query. Independent flows remain separate, on the same duration axis.
 
 ## Automatic breakdown and saved layouts
 

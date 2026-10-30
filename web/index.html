@@ -47,7 +47,8 @@
         <div class="seg" id="prof-modes" role="group" aria-label="Spans" data-for="profile" hidden>
           <button type="button" data-prof="table" aria-pressed="true" title="Every span name, or every call path, with its self and total time; pick one for its callers and callees">Table</button>
           <button type="button" data-prof="flame" aria-pressed="false" title="Spans with the same path merged, heaviest first">Flame graph</button>
-          <button type="button" data-prof="callers" aria-pressed="false" title="The picked span: what calls it, and what it calls" hidden>Callers &amp; callees</button>
+          <button type="button" data-prof="callers" aria-pressed="false" title="Call paths leading to the picked span" hidden>Callers</button>
+          <button type="button" data-prof="callees" aria-pressed="false" title="Calls made inside the picked span" hidden>Callees</button>
         </div>
         <div class="seg" id="table-modes" role="group" aria-label="Rows" data-for="profile" data-for-prof="table" hidden>
           <button type="button" data-tree="false" aria-pressed="true" title="A row per span name">List</button>
@@ -114,7 +115,6 @@
 <script src="layout-files.js"></script>
 <script src="layout-menu.js"></script>
 <script src="nav.js"></script>
-<script src="flame-view.js"></script>
 <script src="parts.js"></script>
 <script src="flame.js"></script>
 <script src="spans.js"></script>

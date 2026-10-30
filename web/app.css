@@ -328,16 +328,10 @@ table.stats .proj td { color: var(--ink); font-weight: 600; }
 .spans-table tbody tr.on td:first-child { background: linear-gradient(var(--line), var(--line)) left / 2px 100% no-repeat; }
 .spans-table td.name .row-actions { display: inline-flex; gap: 12px; margin-left: 14px; }
 .spans-table td.name .row-actions .link { margin-left: 0; }
-/* Callers and callees: names on the left, the sandwich on the right. */
-/* The picked span's callers and callees, beside the table, scrolling on their own. */
-/* Callers and callees: the picked span's graphs, the width of the view, as the flame graph is. */
-.sw-view { padding-bottom: 24px; }
 /* The tick that makes a name a violin; the tree's buttons beside "Span". */
 .spans-table th.tick, .spans-table td.tick { width: 52px; padding-left: 16px; text-align: center; }
 .spans-table td.tick input { margin: 0; accent-color: var(--ink); cursor: pointer; vertical-align: middle; }
 .spans-table th .tl-folds { margin-left: 10px; vertical-align: middle; }
-.sw-title { margin: 20px 0 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
-.sw-canvas { display: block; width: 100%; }
 /* The tree: its lines and arrows in front of the name, the arrow a button over them. */
 .spans-table.tree td.name { position: relative; }
 .spans-table.tree td.name .cell { display: flex; align-items: center; height: 30px; }
@@ -527,17 +521,6 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .member-name { display: flex; align-items: center; min-width: 0; }
 .member-name .text-btn { overflow: hidden; text-overflow: ellipsis; text-align: left; }
 
-.sw-tools { display: flex; align-items: center; gap: 12px; margin-top: 12px; color: var(--muted); }
-.sw-tools span { margin-right: auto; }
-.sw-scroll { max-height: 270px; overflow: auto; }
-.sw-overview { width: 100%; height: 40px; display: block; cursor: crosshair; margin: 6px 0; touch-action: none; }
-.sw-canvas { touch-action: none; }
-.sw-canvas:focus-visible, .sw-overview:focus-visible { outline: 2px solid var(--sel); outline-offset: -2px; }
-.sw-origin, .sw-flow-note { color: var(--muted); font-size: 12px; }
-.sw-flow-note { margin-top: 24px; }
-.sw-flow { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
-.sw-flow-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; font-size: 12px; }
-.sw-flow-head span { color: var(--muted); }
 .layout-menu { position: absolute; z-index: 12; top: 54px; right: 42px; width: min(290px, calc(100vw - 32px)); box-sizing: border-box; padding: 10px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); }
 .layout-head { display: flex; flex: none; align-items: center; gap: 6px; }
 .layout-head b { font-size: 12px; font-weight: 500; margin-right: auto; }

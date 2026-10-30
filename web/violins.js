@@ -668,7 +668,9 @@
   function down(e, px, py) {
     dragged = false;
     const name = e.target.closest && e.target.closest('[data-col]');
-    if (name && G && !e.shiftKey && !G.p.cols[Number(name.dataset.col)].root && !X.layout.isRest(G.p.cols[Number(name.dataset.col)].id)) { lift = { c: Number(name.dataset.col), px, py, moved: false, to: null }; return false; }
+    const button = e.target.closest?.('.hit:not([data-col]), [data-pill], #v-factor-menu');
+    const c = name ? Number(name.dataset.col) : !button && Z.z === 1 ? colAt(...toLayer(px, py)) : null;
+    if (c !== null && G && !e.shiftKey && !G.p.cols[c].root && !X.layout.isRest(G.p.cols[c].id)) { lift = { c, px, py, moved: false, to: null }; return false; }
     if (Z.z === 1 || (e.target.closest && e.target.closest('.hit, [data-pill], #v-factor-menu'))) return false;
     drag = { px, py, x: Z.x, y: Z.y, moved: false };
     return true;
@@ -702,6 +704,16 @@
       const children = cols.flatMap((child, j) => child.parent === col.id && !X.layout.isRest(child.id) ? [j] : []);
       add(col.root ? X.layout.rootKey() : col.id, children, G.nodeY(G.depth[c]), G.plusX(c));
     });
+    // Hidden intermediate parents still own their children. Keep their sibling
+    // insertion targets, alongside targets on the visible containing branch.
+    const visible = new Set(cols.map(col => col.root ? X.layout.rootKey() : col.id)), hidden = new Map();
+    cols.forEach((col, c) => {
+      const parent = X.layout.modelParent(col.id);
+      if (!parent || parent === X.ROOT2 || visible.has(parent) || X.layout.isRest(col.id)) return;
+      if (!hidden.has(parent)) hidden.set(parent, []);
+      hidden.get(parent).push(c);
+    });
+    for (const [parent, children] of hidden) add(parent, children, G.nodeY(Math.max(0, G.depth[children[0]] - 1)), G.xOf(G.ends[children.at(-1)]) + G.colW / 2);
     const projections = cols.flatMap((col, c) => col.parent === X.ROOT2 && !X.layout.isRest(col.id) ? [c] : []);
     if (projections.length) add(X.ROOT2, projections, G.nodeY(0), G.xOf(G.ends[projections.at(-1)]) + G.colW / 2);
     return slots;
@@ -712,6 +724,7 @@
     const from = G.p.cols[lift.c];
     if (!lift.moved) {
       lift.moved = true;
+      $('stage').setPointerCapture(e.pointerId);
       lift.allowed = new Set(X.layout.destinations(from.id).map(d => d.id));
       lift.allowed.add(X.layout.modelParent(from.id));
       lift.slots = insertionSlots();
@@ -722,8 +735,13 @@
       clearTimeout(cardSoon);
     }
     const [lx, ly] = toLayer(px, py), cols = G.p.cols;
-    const el = e.target.closest?.('[data-col]'), add = e.target.closest?.('[data-add]');
-    const c = el ? Number(el.dataset.col) : colAt(lx, ly), onto = c !== null ? cols[c] : null;
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    const el = hit?.closest('[data-col]'), add = hit?.closest('[data-add]');
+    // Below the branch endpoints, hit-test along the slanted labels. Their gaps
+    // continue the column boundaries even though the mouse is left of the plot.
+    const inNames = ly > G.TR.y0 + G.labelY && ly < G.TR.y1;
+    const columnX = inNames ? lx + (ly - G.TR.y0 - G.labelY) / Math.tan(ANGLE) : lx;
+    const c = el ? Number(el.dataset.col) : colAt(columnX, inNames ? G.TR.y0 + G.labelY : ly), onto = c !== null ? cols[c] : null;
     lift.insert = null; lift.merge = null; lift.target = null; lift.copy = false; lift.to = null;
     let say = null;
     const insert = (slot) => {
@@ -736,7 +754,18 @@
       say = `${lift.copy ? 'Copy' : 'Move'} ${where} · ${X.layout.label(slot.parent)}`;
       return true;
     };
-    if (el && onto && onto.id !== from.id && !X.layout.isRest(onto.id)) {
+    // Insertion gaps run through the plot and label area. Close to a branch,
+    // its height chooses the level; elsewhere prefer the current sibling level.
+    let gap = null, distance = Infinity;
+    if (ly >= G.V.y0 - 8 && ly <= G.TR.y1) for (const slot of lift.slots) {
+      if (!lift.allowed.has(slot.parent)) continue;
+      const dx = Math.abs(columnX - slot.x), dy = Math.abs(ly - slot.y), nearBranch = dy <= 7;
+      if (dx > G.colW * (nearBranch ? .45 : .22)) continue;
+      const rank = dx / G.colW + (nearBranch ? dy / 7 - 3 : 0) + (slot.parent === X.layout.modelParent(from.id) ? 0 : 1);
+      if (rank < distance) { gap = slot; distance = rank; }
+    }
+    if (gap && !add) insert(gap);
+    else if (el && onto && onto.id !== from.id && !X.layout.isRest(onto.id)) {
       if (X.layout.modelParent(onto.id) === X.layout.modelParent(from.id) && X.layout.canMerge(from.id, onto.id)) {
         lift.merge = onto.id; lift.to = c; say = `Group with ${onto.label}`;
       } else {
@@ -751,17 +780,7 @@
         lift.to = cols.findIndex(col => col.id === parent || (col.root && parent === X.layout.rootKey()));
       }
     } else {
-      // Near a horizontal branch, y chooses the level and x the insertion gap.
-      let closest = null, distance = Infinity;
-      for (const slot of lift.slots) {
-        if (!lift.allowed.has(slot.parent)) continue;
-        const dx = Math.abs(lx - slot.x), dy = Math.abs(ly - slot.y);
-        if (dx > G.colW * .55 || dy > 7) continue;
-        const d = dx / G.colW + dy / 7;
-        if (d < distance) { closest = slot; distance = d; }
-      }
-      if (closest) insert(closest);
-      else if (onto && !onto.root && onto.id !== from.id && !X.layout.isRest(onto.id)) {
+      if (onto && !onto.root && onto.id !== from.id && !X.layout.isRest(onto.id)) {
         const parent = X.layout.modelParent(onto.id), siblings = X.layout.configuredChildren(parent);
         const after = Math.abs(lx - G.xOf(c)) < G.colW * .15 ? c > lift.c : lx > G.xOf(c);
         const next = siblings[siblings.indexOf(onto.id) + 1];

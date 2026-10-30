@@ -71,10 +71,12 @@
 
   // A tab, and a mode of it. Violins; the Timeline, where things ran: its flame chart or its waterfall; the Profile,
   // where the time goes, merged: its table, its flame graph, and, while a span is picked, its callers and callees.
-  // The flame chart and the flame graph are the flame view's two modes, the table and callers and callees the spans
-  // view's.
+  // All profile graphs share the flame view; only the table uses the spans view.
   X.go = (tab, mode) => {
-    if (mode === 'callers' && S.name === null) mode = 'table';
+    if (tab === 'profile' && ['callers', 'callees'].includes(mode)) {
+      S.profileRoot = S.name || S.profileRoot;
+      if (S.profileRoot === null) mode = 'table';
+    }
     if (mode && tab === 'timeline') S.tl = mode;
     if (mode && tab === 'profile') S.prof = mode;
     S.tab = tab;
@@ -82,7 +84,7 @@
     if (tab === 'violins') S.view = 'violins';
     else if (tab === 'timeline' && S.tl === 'waterfall') S.view = 'timeline';
     else if (tab === 'timeline') { S.view = 'flame'; S.flame = 'time'; }
-    else if (S.prof === 'flame') { S.view = 'flame'; S.flame = 'heavy'; }
+    else if (['flame', 'callers', 'callees'].includes(S.prof)) { S.view = 'flame'; S.flame = 'heavy'; }
     else { S.view = 'spans'; S.spansMode = S.prof; }
     for (const id of ['violins', 'timeline', 'flame', 'spans']) $(id).hidden = id !== S.view;
     if (S.view !== 'violins') X.violins.closeMenu();
@@ -100,7 +102,7 @@
     press('#scales button', (d) => (d.linear === 'true') === S.linear);
     press('#tl-modes button', (d) => d.tl === S.tl);
     press('#prof-modes button', (d) => d.prof === S.prof);
-    document.querySelector('#prof-modes [data-prof="callers"]').hidden = S.name === null;
+    for (const mode of ['callers', 'callees']) document.querySelector(`#prof-modes [data-prof="${mode}"]`).hidden = S.name === null && S.profileRoot === null;
     press('#table-modes button', (d) => (d.tree === 'true') === S.tableTree);
     const curved = document.querySelector('#scales [data-linear="false"]');
     curved.textContent = S.mode === 'share' ? 'Square root' : 'Log';
@@ -747,13 +749,13 @@
         return;
       }
       if (e.key === 'Escape') {
-        if (S.view === 'spans' && S.spansMode === 'callers' && X.spans.back()) { /* back within the flame graph */ }
-        else if (!$('keys').hidden) toggleKeys(false);
+        if (!$('keys').hidden) toggleKeys(false);
         else if (!$('rangecard').hidden) toggleRange(false);
         else if (X.edit.closeAdd()) { /* closed the + list */ }
         else if (X.violins.closeMenu()) { /* closed the factors */ }
         else if (S.card !== null) X.panel.closeCard();
         else if (X.edit.clearPicked()) { /* let the picked violins go */ }
+        else if (S.view === 'flame' && X.flame.back()) { /* back within the profile */ }
         else if (X.nav.back()) { /* back to where the time views were before a jump in */ }
         else if (S.sel !== null) X.select(null);
         else if (S.name !== null) X.spans.pick(null);

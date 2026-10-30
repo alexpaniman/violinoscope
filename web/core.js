@@ -86,13 +86,18 @@
     tab: 'violins', tl: 'chart', prof: 'table', view: 'violins', mode: 'share', linear: false, flame: 'time',
     side: {}, range: null, factors: new Map(),
     sel: null, card: null, hover: null, hoverCol: null, search: '', matches: null,
-    sort: { key: 'self', dir: -1 }, tlSort: { key: 'ms', dir: -1 }, name: null, namePath: null, spansMode: 'table', tableTree: false, spansQuery: '', treeOpen: new Map(), treeLevel: 2,
+    sort: { key: 'self', dir: -1 }, tlSort: { key: 'ms', dir: -1 }, name: null, namePath: null, profileRoot: null, spansMode: 'table', tableTree: false, spansQuery: '', treeOpen: new Map(), treeLevel: 2,
   };
   const slot = new Map();
   {
     let k = 0;
+    const right = new Set(meta.right || []), left = new Set(meta.left || []);
+    if (!left.size) {
+      const largest = data.groups.filter(g => !right.has(g.id)).sort((a,b) => b.units.length-a.units.length)[0];
+      if (largest) left.add(largest.id);
+    }
     for (const g of data.groups) {
-      const side = (meta.left || []).includes(g.id) ? 'left' : (meta.right || []).includes(g.id) ? 'right' : g.units.length <= 5 ? 'marker' : 'off';
+      const side = left.has(g.id) ? 'left' : right.has(g.id) ? 'right' : g.units.length <= 5 ? 'marker' : 'off';
       S.side[g.id] = side;
       if (side === 'marker' || side === 'off') slot.set(g.id, k++ % 4);
     }

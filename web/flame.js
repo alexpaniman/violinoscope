@@ -9,12 +9,21 @@
   'use strict';
   const X = window.TX, S = X.S, data = X.data;
   const { $, clamp } = X;
+  X.flameWindow = {
+    zoom(d0, d1, fraction, factor, extent) {
+      const span = d1 - d0, at = d0 + fraction * span, size = X.clamp(span * factor, 1e-6, extent * 1.2);
+      return [at - fraction * size, at + (1 - fraction) * size];
+    },
+    pan(d0, d1, fraction) { const d = fraction * (d1 - d0); return [d0 + d, d1 + d]; },
+  };
   const ROWH = 15, AXIS = 26, LEFT = 16, RIGHT = 20, ROWS = 8, ASYNC_HEAD = 12, TRACK_HEAD = 15;
 
   let root, canvas, ctx, W = 0, H = 0;
   let M = null;              // the model: the line, time folding, merged trees
   let win = null;            // the stretch on screen, in display units: the shared one by time, heavyWin in left heavy
-  let heavyWin = { d0: 0, d1: 1 };
+  let heavyWin = { d0: 0, d1: 1 }, heavyBack = [];
+  const focused = () => S.tab === 'profile' && ['callers', 'callees'].includes(S.prof);
+  const profileKey = () => focused() ? `${S.prof}|${S.profileRoot}` : 'flame';
   let scrollY = 0, dirty = 0, hot = null, spanHi = null, mergeTimer = 0;
 
   function init() {
@@ -55,13 +64,16 @@
       line.reach.push(Math.max(line.reach.at(-1) ?? -Infinity, d + X.spanExtent(i)[1]));
       line.end = e;
     }
-    M = { key: nav.key, nav, units, lines, pos, heavy: null };
+    M = { key: `${nav.key}|${profileKey()}`, nav, units, lines, pos, heavy: null };
     return M;
   }
 
   function model() {
     const nav = X.nav.model();
-    if (!M || M.key !== nav.key) { const changed = !M || M.nav.viewKey !== nav.viewKey; build(); if (changed) scrollY = 0; }
+    if (!M || M.key !== `${nav.key}|${profileKey()}`) {
+      cancelAnimationFrame(anim);
+      build(); scrollY = 0; heavyBack = [];
+    }
     return M;
   }
 
@@ -105,6 +117,32 @@
   // spans that overlap add up. Everything in view is merged once (M.merged); a selection only merges its own spans.
   // dur, inner and n read a node's time, its children's, and its count, for what is shown.
   function mergeHeavy() {
+    if (focused()) {
+      const moved = !M.heavy || M.heavy.sel !== S.sel;
+      const one = S.sel !== null && M.pos.has(S.sel),
+        source = X.spans.focusTree(S.profileRoot, one ? [S.sel] : M.units),
+        tree = source[S.prof], nodes = [{name:'',depth:-1,kids:new Map(),dur:0,inner:0,n:0,part:-1}], roots = [];
+      const append = (tree, parent, depth) => {
+        const k = nodes.length, kids = new Map();
+        nodes.push({...tree, depth, kids, inner:[...tree.kids.values()].reduce((sum,n)=>sum+n.dur,0)});
+        nodes[parent].kids.set(tree.name,k);
+        for (const child of tree.kids.values()) append(child,k,depth+1);
+        return k;
+      };
+      append(tree,0,0);
+      if (S.prof === 'callees') for (const flow of source.flows) {
+        const root = nodes.length;roots.push(root);
+        nodes.push({name:'',depth:-1,kids:new Map(),dur:flow.tree.dur,inner:0,n:0,part:-1});
+        append(flow.tree,root,0);
+      }
+      const total = tree.dur || 1, dur = k=>nodes[k].dur,
+        chart = root=>chartTree(nodes,root,dur,1/total), sync=chart(0), tracks=roots.map(chart);
+      M.heavy = {nodes,sync,tracks,total,units:source.loaded,all:source.all,unit:one?S.sel:null,sel:S.sel,
+        focus:S.profileRoot,direction:S.prof,origins:source.origins,
+        extent:Math.max(1,...tracks.map(t=>t.width)),dur,inner:k=>nodes[k].inner,n:k=>nodes[k].n};
+      if (moved) heavyWin = {d0:0,d1:M.heavy.extent,key:M.key};
+      return;
+    }
     if (!M.merged) M.merged = mergeAll();
     const { nodes, into, chart, roots } = M.merged, moved = !M.heavy || M.heavy.sel !== S.sel;
     M.heavy = Object.assign({}, M.merged, { unit: null, sel: S.sel, dur: (k) => nodes[k].dur, inner: (k) => nodes[k].inner, n: (k) => nodes[k].n });
@@ -157,36 +195,38 @@
     }
     for (const root of [0, ...roots]) for (const k of nodes[root].kids.values()) nodes[root].dur += nodes[k].dur;
     const total = nodes[0].dur || 1;
-    // A chart: each node as wide as its weight, children heaviest first, squeezed into their parent where they ran
-    // beside each other and together outweigh it.
-    const chart = (root, weight, scale) => {
-      const rects = [];
-      let maxDepth = -1;
-      const lay = (k, x0, sc) => {
-        const node = nodes[k];
-        if (node.depth >= 0) { rects.push({ x0, x1: x0 + weight(k) * sc, depth: node.depth, node, k, w: weight(k) }); maxDepth = Math.max(maxDepth, node.depth); }
-        const list = [...node.kids.values()].filter((j) => weight(j) > 0).sort((a, b) => weight(b) - weight(a));
-        const sum = list.reduce((acc, j) => acc + weight(j), 0);
-        const inner = node.depth >= 0 && sum > weight(k) ? weight(k) / sum : 1;
-        let x = x0;
-        for (const j of list) { lay(j, x, sc * inner); x += weight(j) * sc * inner; }
-      };
-      lay(root, 0, scale);
-      return { rects, maxDepth, width: rects.reduce((m, rc) => Math.max(m, rc.x1), 0) };
-    };
+    const chart = (root, weight, scale) => chartTree(nodes, root, weight, scale);
     const all = (k) => nodes[k].dur;
     const sync = chart(0, all, 1 / total), tracks = roots.map((r) => chart(r, all, 1 / total));
     if (loaded < units.length) X.prefetchChunks();
     return { nodes, into, chart, roots, total, sync, tracks, units: loaded, all: units.length, extent: Math.max(1, ...tracks.map((t) => t.width)) };
   }
 
+  // A chart: each node as wide as its weight, children heaviest first, squeezed into their parent where they ran
+  // beside each other and together outweigh it.
+  function chartTree(nodes, root, weight, scale) {
+    const rects = [];
+    let maxDepth = -1;
+    const lay = (k, x0, sc) => {
+      const node = nodes[k];
+      if (node.depth >= 0) { rects.push({ x0, x1: x0 + weight(k) * sc, depth: node.depth, node, k, w: weight(k) }); maxDepth = Math.max(maxDepth, node.depth); }
+      const list = [...node.kids.values()].filter((j) => weight(j) > 0).sort((a, b) => weight(b) - weight(a));
+      const sum = list.reduce((acc, j) => acc + weight(j), 0);
+      const inner = node.depth >= 0 && sum > weight(k) ? weight(k) / sum : 1;
+      let x = x0;
+      for (const j of list) { lay(j, x, sc * inner); x += weight(j) * sc * inner; }
+    };
+    lay(root, 0, scale);
+    return { rects, maxDepth, width: rects.reduce((m, rc) => Math.max(m, rc.x1), 0) };
+  }
+
   const heavyColor = (node, T) => (node.depth === 0 && !node.async ? (T.scheme === 'dark' ? '#4a505a' : '#a9b0ba') : node.part >= 0 ? T.cols[node.part] : T.unowned);
 
   // The overview strip in left heavy: the merged chart in miniature.
   function drawMini(c, w, h, T) {
-    if (!M) model();
+    model();
     if (!M.heavy || M.heavy.sel !== S.sel) mergeHeavy();
-    const hv = M.heavy, rows = Math.min(ROWS + 4, hv.sync.maxDepth + 1), rh = (h - 6) / rows, ext = hv.extent;
+    const hv = M.heavy, rows = Math.max(1, hv.sync.maxDepth + 1), rh = (h - 6) / rows, ext = hv.extent;
     for (const rc of hv.sync.rects) {
       if (rc.depth >= rows) continue;
       c.fillStyle = heavyColor(rc.node, T);
@@ -203,16 +243,17 @@
     else X.nav.fitAll();
   }
   function heavyExtent() {
-    if (!M) model();
+    model();
     if (!M.heavy || M.heavy.sel !== S.sel) mergeHeavy();
     return M.heavy.extent;
   }
 
   // By time the shared stretch moves, and both views follow; left heavy has its own.
   let anim = 0;
-  function setWindow(d0, d1, animate) {
+  function setWindow(d0, d1, animate, remember = animate) {
     if (S.flame === 'time') { X.nav.set(d0, d1, { animate, push: animate }); return; }
     cancelAnimationFrame(anim);
+    if (remember && (d0 !== heavyWin.d0 || d1 !== heavyWin.d1)) { heavyBack.push([heavyWin.d0, heavyWin.d1]); if (heavyBack.length > 100) heavyBack.shift(); }
     if (!animate) { heavyWin = { d0, d1, key: heavyWin.key }; request(); X.nav.draw(); return; }
     const a = { ...heavyWin }, start = performance.now();
     const step = (now) => {
@@ -311,8 +352,8 @@
     const T = X.T;
     ctx.setTransform(...X.toView(X.fitCanvas(canvas, W, H, X.layerView(root, W, H))));
     ctx.clearRect(0, 0, W, H);
-    sync();
     if (S.flame === 'heavy' && (!M.heavy || M.heavy.sel !== S.sel)) mergeHeavy();
+    sync();
     const x0 = LEFT, x1 = W - RIGHT, span = win.d1 - win.d0, scale = (x1 - x0) / span;
     const X_ = (d) => x0 + (d - win.d0) * scale;
     const top = X.contentTop() + AXIS;
@@ -580,13 +621,13 @@
   }
 
   function paintHeavy(top, X_, T) {
-    heavyBlock(M.heavy.sync, M.heavy.tracks, top + 8, X_, T);
+    heavyBlock(M.heavy.sync, M.heavy.tracks, top + 8 - scrollY, X_, T);
   }
 
   // The compiler's chart and, below a rule, each asynchronous track's, in the flame chart's order; returns where
   // they end.
   function heavyBlock(sync, tracks, y0, X_, T) {
-    const rows = Math.min(ROWS + 4, sync.maxDepth + 1);
+    const rows = Math.max(1, sync.maxDepth + 1);
     heavyRows(sync.rects, rows, y0, X_, T);
     let y = y0 + rows * ROWH;
     const shown = tracks.filter((t) => t.rects.length);
@@ -595,7 +636,7 @@
       ctx.fillRect(LEFT, Math.round(y + 6) - 0.5, W - LEFT - RIGHT, 1);
       y += 12;
       for (const t of shown) {
-        const r = Math.min(4, t.maxDepth + 1);
+        const r = t.maxDepth + 1;
         heavyRows(t.rects, r, y, X_, T);
         y += r * ROWH + 4;
       }
@@ -613,16 +654,18 @@
       if (ex < xL || sx > xR) continue;
       const bw = ex - sx;
       if (bw < 1) { const px = Math.floor(sx); if (px === lastAt[rc.depth]) continue; lastAt[rc.depth] = px; }
-      const y = y0 + rc.depth * ROWH, node = rc.node, color = heavyColor(node, T);
+      const y = y0 + rc.depth * ROWH;
+      if (y + ROWH < X.contentTop() + AXIS || y > H) continue;
+      const node = rc.node, color = heavyColor(node, T);
       // Asynchronous spans hollow, as in the flame chart.
       const hollow = node.async && bw >= 4, fill = hollow ? X.mix(color, T.bg, 0.8) : color;
-      ctx.globalAlpha = S.name !== null && node.name !== S.name ? 0.3 : 1;
+      ctx.globalAlpha = S.name !== null && S.name !== h.focus && node.name !== S.name ? 0.3 : 1;
       ctx.fillStyle = fill;
       ctx.fillRect(sx, y, Math.max(1, bw - (bw > 3 ? 1 : 0)), ROWH - 1);
       if (hollow) { ctx.strokeStyle = color; ctx.lineWidth = 1.2; ctx.strokeRect(sx + 0.6, y + 0.6, Math.max(1, bw - 2.2), ROWH - 2.2); }
       // The top bar is all the compilations merged, or the selected one: named as by time. A track's top bar too narrow
       // for its name has it after the bar.
-      const label = node.depth === 0 && !node.async
+      const label = node.depth === 0 && !node.async && !h.focus
         ? (h.unit !== null ? `${data.units[h.unit].l} · ${X.fmtMs(h.total)}` : `${X.nUnits(h.units)} · ${X.fmtMs(h.total)}`)
         : node.name;
       const tx = Math.max(sx, xL) + 4, room = Math.min(ex, xR) - tx - 3;
@@ -654,10 +697,14 @@
     if (b.heavy) {
       const node = b.heavy.node, k = b.heavy.k, h = M.heavy, root = node.depth === 0 && !node.async, part = node.part >= 0 ? data.columns[node.part].label : '';
       const who = h.unit !== null ? data.units[h.unit].l : null, dur = h.dur(k), n = h.n(k);
-      const lines = [root ? who || 'All in view' : node.name, `${X.fmtMs(dur)} · ${X.fmtPct(dur / h.total)}${who ? ` of ${who}` : ''}`];
+      const lines = [root && !h.focus ? who || 'All in view' : node.name, `${X.fmtMs(dur)} · ${X.fmtPct(dur / h.total)}${who ? ` of ${who}` : ''}`];
       lines.push(node.async ? 'Separate logical flow; overlapping occurrences add up' : `self ${X.fmtMs(Math.max(0, dur - h.inner(k)))}`);
       // How often it runs: spans on this path, and per compilation.
       lines.push(h.units > 1 ? `${X.fmtInt(n)} spans, ${X.round3(n / h.units)} per ${X.UNIT} · ${X.fmtMs(dur / h.units)} each` : `${X.fmtInt(n)} ${n === 1 ? 'span' : 'spans'}`);
+      if (h.focus) {
+        lines.push(`${h.direction === 'callers' ? 'Callers of' : 'Callees of'} ${h.focus}`);
+        if (h.origins.length && root) lines.push(`Flow started by ${h.origins.join(', ')}`);
+      }
       lines.push(part);
       return lines;
     }
@@ -720,14 +767,18 @@
   function wheel(e, px) {
     if (e.ctrlKey || e.metaKey) { zoomAt(px, Math.exp(e.deltaY * 0.004)); return true; }
     if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) { pan((e.shiftKey ? e.deltaY : e.deltaX) * 1); return true; }
-    if (S.flame === 'time' && layout().bottom > H) { scrollTo(scrollY + e.deltaY); return true; }
+    if ((S.flame === 'time' ? layout().bottom : heavyBottom()) > H) { scrollTo(scrollY + e.deltaY); return true; }
     zoomAt(px, Math.exp(e.deltaY * 0.004));
     return true;
   }
+  function heavyBottom() {
+    const h=M.heavy;
+    return X.contentTop()+AXIS+8+(h.sync.maxDepth+1)*ROWH+12+
+      h.tracks.filter(t=>t.rects.length).reduce((sum,t)=>sum+(t.maxDepth+1)*ROWH+4,0);
+  }
   function scrollTo(y) {
-    if (S.flame !== 'time') return;
-    const L = layout();
-    const max = Math.max(0, L.bottom - H);
+    const bottom = S.flame === 'time' ? layout().bottom : heavyBottom();
+    const max = Math.max(0, bottom - H);
     const v = clamp(y, 0, max);
     if (v !== scrollY) { scrollY = v; request(); }
   }
@@ -748,6 +799,7 @@
   function render() {
     W = root.clientWidth; H = root.clientHeight;
     if (!W || !H) return;
+    canvas.setAttribute('aria-label', focused() ? `${S.prof === 'callers' ? 'Callers' : 'Callees'} of ${S.profileRoot}` : S.flame === 'heavy' ? 'Flame graph' : 'Flame chart');
     model();
     if (S.flame === 'heavy' && M.heavy && M.heavy.sel !== S.sel) M.heavy = null;
     fitHeavy();
@@ -757,14 +809,22 @@
   function fitHeavy() {
     if (S.flame !== 'heavy' || !M || heavyWin.key === M.key) return;
     heavyWin = { d0: 0, d1: heavyExtent(), key: M.key };
+    heavyBack = []; scrollY = 0;
     X.nav.draw();
   }
 
   X.flame = {
-    init, render, move, down, up, dbl, wheel, key, leave() { X.hideTip(); },
+    init, render, move, down, up, dbl, wheel, key,
+    back() {
+      if (S.flame !== 'heavy' || !heavyBack.length) return false;
+      setWindow(...heavyBack.pop(),true,false);return true;
+    },
+    profileModel() { model();if(!M.heavy || M.heavy.sel!==S.sel)mergeHeavy();return M.heavy; },
+    leave() { X.hideTip(); },
     // The window follows a selection through X.nav; left heavy merges again with it under the rest.
     selectionChanged() {
       spanHi = null;
+      if (S.flame === 'heavy') { scrollY = 0; heavyBack = []; }
       if (M) M.heavy = null;
       if (S.view === 'flame') request();
     },

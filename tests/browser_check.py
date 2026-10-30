@@ -71,6 +71,7 @@ async def main():
     ap=argparse.ArgumentParser(description='Tree edits, drag, history and view regression checks')
     ap.add_argument('out');ap.add_argument('--shots');args=ap.parse_args()
     errors=[]
+    if args.shots: Path(args.shots).mkdir(parents=True,exist_ok=True)
     async with async_playwright() as p:
         browser=await p.chromium.launch(args=ARGS)
         page=await opened(browser,(Path(args.out).resolve()/'index.html').as_uri(),errors)
@@ -90,6 +91,32 @@ async def main():
         assert await page.evaluate('TX.layout.configuredChildren(TX.layout.rootKey())')==children[::-1]
         assert await page.evaluate('(ids)=>ids.map(id=>Array.from(TX.layout.msOf(id)))',children)==times
         await page.keyboard.press('Control+z');assert await page.evaluate('JSON.stringify(TX.layout.state())')==before
+        # A gap between slanted labels is a real insertion target; the drag can
+        # begin on a violin body, and its line must be visible before dropping.
+        target=await page.evaluate("""id=>{
+          const G=TX.violins.G,c=G.p.cols.findIndex(c=>c.id===id),at=TX.violins.nameAt(id),box=document.querySelector('#violins').getBoundingClientRect(),dy=18;
+          return [box.left+at.x+(G.colW/2-3-dy/Math.tan(Math.PI/6))*at.z,box.top+at.y+dy*at.z];
+        }""",children[1])
+        await page.mouse.move(*(await tree_point(page,children[0])));await page.mouse.down()
+        await page.mouse.move(*target,steps=12);await page.wait_for_timeout(40)
+        assert 'Move after' in await page.locator('.lift-ghost').inner_text()
+        line=await page.evaluate("""id=>{
+          const G=TX.violins.G,c=G.p.cols.findIndex(c=>c.id===id),canvas=document.querySelector('#v-hover'),scale=canvas.width/G.W;
+          const x=Math.round((G.xOf(c)+G.colW/2)*scale),y=Math.round((G.V.y0+40)*scale);
+          return Math.max(...Array.from(canvas.getContext('2d').getImageData(x-2,y,5,1).data).filter((_,i)=>i%4===3));
+        }""",children[1])
+        assert line>180,line
+        if args.shots: await page.screenshot(path=str(Path(args.shots)/'reorder-gap.png'))
+        await page.mouse.up()
+        assert await page.evaluate('TX.layout.configuredChildren(TX.layout.rootKey())')==children[::-1]
+        await page.keyboard.press('Control+z');assert await page.evaluate('JSON.stringify(TX.layout.state())')==before
+        # The same gesture under a hidden parent must remain a visual reorder.
+        hidden=await page.evaluate('(ids)=>{const T=TX.layout,g=T.merge(ids,"Hidden wrapper");T.hide(g);return g;}',children)
+        await drag_to(page,children[0],target)
+        assert await page.evaluate('(id)=>TX.layout.configuredChildren(id)',hidden)==children[::-1]
+        assert await page.evaluate('(id)=>TX.layout.modelParent(id)',children[0])==hidden
+        await page.evaluate('TX.layout.undo();TX.layout.undo();TX.layout.undo()')
+        assert await page.evaluate('JSON.stringify(TX.layout.state())')==before
         # Names remain grouping targets; undo restores precisely the old tree.
         a=await centre(page,'[data-col="1"]');b=await centre(page,'[data-col="2"]')
         await page.mouse.move(*a);await page.mouse.down();await page.mouse.move(*b,steps=12);await page.mouse.up()

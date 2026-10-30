@@ -177,37 +177,25 @@ async def main():
                 await row.hover()
                 expected = 'Starts a separate logical flow' if name == 'Resolve' else 'Within a separate logical flow'
                 assert expected in await page.locator('#tip').inner_text()
-            # Capture the actual graph inputs, as well as exercising their UI and independent navigation.
-            await page.evaluate('''() => {
-              window.flowGraphs=[];const f=TX.flameView;
-              TX.flameView=(host,tree,bars,opts)=>{flowGraphs.push({inverted:!!opts.inverted,name:tree.name,dur:tree.dur,
-                bars:bars.list.map(b=>({name:b.n.name,dur:b.n.dur,width:b.x1-b.x0,async:b.n.async}))});return f(host,tree,bars,opts);};
-              TX.spans.pick('Await table metadata');TX.go('profile','callers');
-            }''')
-            graphs = await page.evaluate('flowGraphs')
-            main = [g for g in graphs if not g['inverted'] and g['name'] == 'Await table metadata'][0]
-            assert main['dur'] == 840 and len(main['bars']) == 1, main
-            flows = {g['name']: g for g in graphs if g['name'] != 'Await table metadata'}
-            assert flows['Resolve']['dur'] == 540 and flows['Load']['dur'] == 1200, flows
-            assert all(g['bars'][0]['width'] == 1 for g in flows.values()), flows
-            decode = next(b for b in flows['Resolve']['bars'] if b['name'] == 'Decode')
-            assert abs(decode['width'] - 10/45) < 1e-8 and decode['async'], decode
-            assert 'Annotate IO' in await page.locator('.sw-view > .sw-origin').inner_text()
-            resolve = page.locator('[data-flow="Resolve"] .sw-canvas')
-            load = page.locator('[data-flow="Load"] .sw-canvas')
-            await resolve.focus()
-            await page.keyboard.press('w')
-            assert await resolve.get_attribute('data-window') != '[0,1]'
-            assert await load.get_attribute('data-window') == '[0,1]'
-            await page.keyboard.press('Escape')
-            assert await resolve.get_attribute('data-window') == '[0,1]'
-            await page.locator('.sw-origin [data-flow-origin="Annotate IO"]').click()
-            assert await page.evaluate('TX.S.name') == 'Annotate IO'
-            # A picked ordinary child has same-flow callers, with its creating flow linked separately.
-            await page.evaluate("flowGraphs=[];TX.spans.pick('Decode')")
-            callers = next(g for g in await page.evaluate('flowGraphs') if g['inverted'])
-            assert [b['name'] for b in callers['bars']] == ['Decode', 'Resolve'], callers
-            assert 'Await table metadata' in await page.locator('.sw-view > .sw-origin').inner_text()
+            # Focused graphs use the normal profile renderer and keep flow boundaries.
+            await page.evaluate("TX.select(null);TX.spans.pick('Await table metadata');TX.go('profile','callees')")
+            actual = await page.evaluate("""() => {
+              const h=TX.flame.profileModel(),bars=t=>t.rects.map(r=>({name:r.node.name,dur:h.dur(r.k),width:r.x1-r.x0,async:r.node.async}));
+              return {total:h.total,main:bars(h.sync),flows:h.tracks.map(bars),origins:h.origins};
+            }""")
+            assert actual['total']==840 and len(actual['main'])==1,actual
+            flows={bars[0]['name']:bars for bars in actual['flows']}
+            assert flows['Resolve'][0]['dur']==540 and flows['Load'][0]['dur']==1200,flows
+            decode=next(b for b in flows['Resolve'] if b['name']=='Decode')
+            assert abs(decode['width']/flows['Resolve'][0]['width']-10/45)<1e-8 and decode['async'],decode
+            assert actual['origins']==['Annotate IO'],actual
+            assert await page.locator('#flame').is_visible() and await page.locator('#overview').is_visible()
+            await page.evaluate("TX.spans.pick('Decode');TX.go('profile','callers')")
+            actual=await page.evaluate("""()=>{const h=TX.flame.profileModel();return {names:h.sync.rects.map(r=>r.node.name),origins:h.origins,total:h.total};}""")
+            assert actual['names']==['Decode','Resolve'] and actual['total']==120,actual
+            assert actual['origins']==['Await table metadata'],actual
+            await page.evaluate('TX.select(0)')
+            assert await page.evaluate('TX.flame.profileModel().total')==10
             with tempfile.TemporaryDirectory(prefix='violinoscope-tails-') as tails:
                 tail_page = await opened(browser, tail_fixture(Path(tails)), errors)
                 bounds = await tail_page.evaluate('''() => {
