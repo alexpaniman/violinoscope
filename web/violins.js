@@ -68,13 +68,13 @@
     // The unit's own span is the root the columns branch from; in Share it is 100% everywhere, so it shows only its
     // median time.
     const depth = p.cols.map((col) => (col.root ? 0 : X.depthIdx[col.base] + 1));
-    const isParent = p.cols.map(col=>X.layout.addable(col.id));
+    const isParent = p.cols.map(col=>X.layout.expandable(col.id));
     const bare = (c) => p.cols[c].root && S.mode === 'share';
     const visKids = p.cols.map((col) => p.cols.map((_, j) => j).filter((j) => p.cols[j].parent === col.id));
     // An open column with anything under it off screen has a + at the end of what it shows.
     // Open with none of them shown too: its + is how to add just the ones wanted.
     const open = p.cols.map((col, c) => visKids[c].length > 0 || X.layout.open(col.id));
-    const more = p.cols.map((col, c) => open[c] && X.layout.addable(col.id));
+    const more = p.cols.map((col, c) => open[c] && isParent[c] && X.layout.addable(col.id));
     // A merged violin's name is followed by how many spans it merges, small and muted.
     const counts = p.cols.map((col) => (col.merged ? String(X.layout.size(col.id)) : ''));
     const countW = counts.map((t) => (t ? X.textWidth(t, COUNT, 400) + 4 : 0));
@@ -744,6 +744,10 @@
     const c = el ? Number(el.dataset.col) : colAt(columnX, inNames ? G.TR.y0 + G.labelY : ly), onto = c !== null ? cols[c] : null;
     lift.insert = null; lift.merge = null; lift.target = null; lift.copy = false; lift.to = null;
     let say = null;
+    const duplicateReason = parent => {
+      const existing = X.layout.configuredChildren(parent).find(id => id !== from.id && X.layout.sourceKey(id) === X.layout.sourceKey(from.id));
+      return existing ? `Already ${X.layout.shown(existing) ? 'included' : 'hidden'} in ${X.layout.label(parent)}` : null;
+    };
     const insert = (slot) => {
       if (!lift.allowed.has(slot.parent) || slot.before === from.id) return false;
       lift.insert = slot;
@@ -764,13 +768,16 @@
       const rank = dx / G.colW + (nearBranch ? dy / 7 - 3 : 0) + (slot.parent === X.layout.modelParent(from.id) ? 0 : 1);
       if (rank < distance) { gap = slot; distance = rank; }
     }
-    if (gap && !add) insert(gap);
+    if (gap && !add && !hit?.closest('text')) insert(gap);
     else if (el && onto && onto.id !== from.id && !X.layout.isRest(onto.id)) {
-      if (X.layout.modelParent(onto.id) === X.layout.modelParent(from.id) && X.layout.canMerge(from.id, onto.id)) {
+      const duplicate = duplicateReason(onto.root ? X.layout.rootKey() : onto.id);
+      if (duplicate) say = duplicate;
+      else if (X.layout.modelParent(onto.id) === X.layout.modelParent(from.id) && X.layout.canMerge(from.id, onto.id)) {
         lift.merge = onto.id; lift.to = c; say = `Group with ${onto.label}`;
       } else {
         const parent = onto.root ? X.layout.rootKey() : onto.id;
         if (lift.allowed.has(parent)) { lift.target = parent; lift.to = c; say = `Move into ${onto.label}`; }
+        else say = duplicateReason(parent);
       }
     } else if (add) {
       const parent = add.dataset.add === X.ROOT ? X.layout.rootKey() : add.dataset.add;
@@ -779,6 +786,7 @@
         say = `${lift.copy ? 'Copy to' : 'Move into'} ${X.layout.label(parent)}`;
         lift.to = cols.findIndex(col => col.id === parent || (col.root && parent === X.layout.rootKey()));
       }
+      else say = duplicateReason(parent);
     } else {
       if (onto && !onto.root && onto.id !== from.id && !X.layout.isRest(onto.id)) {
         const parent = X.layout.modelParent(onto.id), siblings = X.layout.configuredChildren(parent);

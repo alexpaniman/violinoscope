@@ -31,6 +31,40 @@ test('fresh layout contains only the expanded unit', () => {
   near(T.msOf('Compile')[0], 100);
   T.check();
 });
+test('only recorded descendants or configured children offer expansion', () => {
+  const { T } = fixture(),
+    prepare = T.add([pick('Prepare')], 'Compile')[0],
+    leaf = T.add([pick('Annotate IO')], prepare)[0],
+    other = T.add([pick('Other')], 'Compile')[0];
+  assert.ok(T.expandable(prepare));
+  assert.equal(T.expandable(leaf), false);
+  assert.equal(T.expandable(other), false);
+  assert.ok(T.destinations(other).some(n => n.id === leaf));
+  T.transfer(other, leaf);
+  near(T.msOf(other)[0], 0);
+  assert.ok(T.expandable(leaf));
+  T.remove([other]);
+  assert.equal(T.expandable(leaf), false);
+  T.add(['~rest:' + leaf], leaf);
+  assert.ok(T.expandable(leaf));
+  assert.equal(T.expandable('~rest:' + leaf), false);
+  T.hide('~rest:' + leaf);
+  assert.equal(T.expandable(leaf), false);
+  const group = T.merge([leaf], 'Part');
+  T.clearChildren(group);
+  assert.ok(T.expandable(group));
+  T.check();
+});
+test('expansion follows the selected occurrence scope, not every same-name path', () => {
+  const { T, add } = simple(['Compile', 'A', 'B', 'Same', 'Child'], [
+    0,-1,0,100000,0, 1,0,0,50000,0, 3,1,0,50000,0, 4,2,0,10000,0,
+    2,0,50000,50000,0, 3,4,50000,50000,0,
+  ]);
+  const a=add('A'),b=add('B'),withChild=add('Same',a),leaf=add('Same',b);
+  assert.ok(T.expandable(withChild));
+  assert.equal(T.expandable(leaf),false);
+  T.check();
+});
 test('higher extraction, hidden participation and delete restore scoped shares', () => {
   const { T, add, ms } = malloc(),
     work = add('Work'),

@@ -734,7 +734,7 @@
       if (!$('rangecard').hidden && !e.target.closest('#rangecard') && !e.target.closest('#range-chip')) toggleRange(false);
       if (S.card !== null && !e.target.closest('#card-pop, #v-add') && !e.target.closest('[data-col]')) X.panel.closeCard();
       if (!e.target.closest('#v-factor-menu, [data-pill]')) X.violins.closeMenu();
-      if (!e.target.closest('#v-add, [data-add], [data-made-add]')) X.edit.closeAdd();
+      if (!e.target.closest('#v-add, [data-add], [data-made-add], [data-hidden-items]')) X.edit.closeAdd();
     });
     $('whatif-clear').addEventListener('click', () => { X.layout.clearFactors();renderWhatif(); });
     document.addEventListener('paste', (e) => {

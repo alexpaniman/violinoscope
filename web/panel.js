@@ -27,6 +27,7 @@
       const level=e.target.closest('[data-unskip]');if(level){X.layout.unskip(level.dataset.unskip);return;}
       if(e.target.closest('[data-made]')){madeOpen=!madeOpen;renderCard();return;}
       const more=e.target.closest('[data-made-add]');if(more){X.edit.openAdd(S.card,more.getBoundingClientRect());return;}
+      const hidden=e.target.closest('[data-hidden-items]');if(hidden){X.edit.openAdd(S.card,hidden.getBoundingClientRect(),'hidden');return;}
       const hide=e.target.closest('[data-member-hide]');if(hide){X.layout.hide(hide.dataset.memberHide);return;}
       const remove=e.target.closest('[data-member-remove]');if(remove){X.layout.remove([remove.dataset.memberRemove]);return;}
       const member=e.target.closest('[data-reveal-part]');if(member){const id=member.dataset.revealPart;if(!X.layout.shown(id))X.layout.add([id],S.card);openCard(id,card.getBoundingClientRect());return;}
@@ -123,6 +124,7 @@
     // Its one span name, also when merged from spans of one name: what calls it and what it calls, in Spans.
     const names = root ? [] : X.layout.spanNames(col.id);
     const tools = root ? [] : [
+      !X.layout.isRest(col.id) && !X.layout.expandable(col.id) ? '<button type="button" class="quiet-btn" data-hidden-items title="Reveal Rest" aria-label="Reveal Rest">+</button>' : '',
       col.merged ? '<button type="button" class="text-btn small" data-act="split">Split up</button>' : '',
       `<button type="button" class="quiet-btn" data-act="hide" title="Hide, keeping its share" aria-label="Hide violin">${X.visibilityIcon(true)}</button>`,
       names.length === 1 ? `<button type="button" class="text-btn small" data-act="spans" title="${esc(names[0])} in the Spans tab: what calls it and what it calls">In Spans</button>` : ''];

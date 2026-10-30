@@ -19,6 +19,7 @@ python3 tests/layout_files_check.py
 python3 tests/parts_check.py out-synthetic
 python3 tests/flows_check.py
 python3 tests/flame_check.py
+python3 tests/leaf_check.py
 ```
 
 `tools/with-browser.sh` can load local browser paths from the ignored `tools/browser.env`. For an existing report directory, `python3 tools/write_page.py OUT_DIR` refreshes the self-contained HTML without converting traces again.

@@ -22,7 +22,7 @@ Each top-level projection is an independent analysis with the same rules and no 
 | --- | --- |
 | + → Spans | Add exact names from the scope, largest proposed share first. New nodes have no children. A group's picker uses its containing scope so broader members can be added. |
 | + → Hidden | Reveal existing hidden nodes or Rest. |
-| Triangle | Open or close the display; measurements stay fixed. |
+| Triangle | Open or close the display; measurements stay fixed. Recorded leaves have no triangle until children or Rest are configured. Rest is also available through + in a leaf's card. |
 | Hide | Keep the node in the calculation and lift its children visually. Reveal it from + or the eye on its connection; one hidden parent returns immediately, several offer a searchable list. Its previous collapse state returns. |
 | × on a span or closed group | Delete that subtree and its exploration. |
 | × on an open group / Split up | Remove the wrapper, promote its base members, discard local refiners. An existing same-name destination source is kept; independent projection roots remain separate. |

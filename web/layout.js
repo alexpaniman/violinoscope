@@ -6,6 +6,7 @@
   const Definitions = window.ViolinDefinitions,
     V = window.ViolinTree;
   const routes = [],
+    routeParents = new Set(),
     routeKeys = new Map(),
     patterns = [],
     patternKeys = new Map(),
@@ -38,6 +39,7 @@
     if (!routeKeys.has(key)) {
       routeKeys.set(key, routes.length);
       routes.push({ id: routes.length, path, parent, name: path < 0 ? V.GAP : paths[path].name, independent });
+      if (parent >= 0) routeParents.add(parent);
     }
     return routeKeys.get(key);
   }
@@ -671,6 +673,12 @@
   const independent = (id) => matchedRoutes(id).length > 0 && matchedRoutes(id).every((r) => routes[r].independent);
   const flowOf = (id) => matchedRoutes(id).some((r) => routes[r].independent || paths[routes[r].path]?.flow);
   const dependency = (id) => matchedRoutes(id).some((r) => paths[routes[r].path]?.dependency);
+  function expandable(id) {
+    const n = node(id);
+    if (!n || isRest(id)) return false;
+    return n.group !== undefined || n.children.length > 0 || !!n.rest ||
+      matchedRoutes(normal(id)).some(r => routeParents.has(r));
+  }
   function hiddenCandidates(id, query = '') {
     id = normal(id);
     const q = query.toLowerCase(),
@@ -1244,6 +1252,7 @@
     members: (id) => (node(id)?.group !== undefined ? tree.children(id).map((n) => n.id) : [id]),
     restsOf: (id) => (node(id)?.span ? [V.rest(normal(id))] : []),
     addable: (id) => !isRest(id) && (!!node(id) || id === ROOT2),
+    expandable,
     expand: change((id) => {
       if (node(id)) node(id).open = true;
     }),
