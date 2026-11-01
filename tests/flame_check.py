@@ -112,6 +112,16 @@ async def main():
             box=await page.locator('#flame').bounding_box()
             await page.mouse.move(box['x']+60,box['y']+box['height']-19)
             assert 'Deep 47' in await page.locator('#tip').inner_text()
+            # The chronological chart must also expose deep stacks, including sampled profiles.
+            await page.evaluate("TX.select(0);TX.go('timeline','chart')")
+            await page.wait_for_timeout(300)
+            await page.mouse.move(400,400);await page.mouse.wheel(0,10000);await page.wait_for_timeout(100)
+            point=await page.evaluate('''()=>{
+              const m=TX.nav.model(),[a,b]=TX.nav.win(),box=document.querySelector('#flame').getBoundingClientRect();
+              return [box.left+16+(m.start[0]+25-a)/(b-a)*(box.width-36),box.top+box.height-19];
+            }''')
+            await page.mouse.move(*point)
+            assert 'Deep 47' in await page.locator('#tip').inner_text()
             assert not errors,errors
             await browser.close()
     print('Shared flamegraph: three tabs, selection, zoom, pan, minimap, query filtering and deep rows passed')

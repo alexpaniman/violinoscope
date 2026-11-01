@@ -306,6 +306,17 @@ test('previews match the added selector and deduplicate names', () => {
     T.load(before);
   }
 });
+test('single-name previews preserve unions, recursion and independent tails', () => {
+  const {T, X, ms} = simple(['Compile','A','B'], [
+    0,-1,0,100000,0, 1,0,0,60000,0, 1,1,10000,20000,0,
+    2,0,40000,40000,0, 1,0,80000,60000,1,
+  ]);
+  for (const parent of ['Compile',X.ROOT2]) for (const row of T.candidates(parent)) {
+    const before=T.state(),id=T.add([row.id],parent)[0];
+    near(row.share,ms(id)/100);
+    T.load(before);
+  }
+});
 test('display undo and redo preserve exact snapshots', () => {
   const { T, add } = malloc(),
     a = add('Work'),
@@ -386,6 +397,12 @@ test('fuzz: every edit conserves time, survives roundtrip and undoes exactly', (
         visit(T.state().main);
         T.state().projections.forEach(visit);
         for (const id of current) near(T.msOf(id)[0], cold.msOf(id)[0]);
+        const parent=current[rand(current.length)], original=cold.state();
+        for(const candidate of cold.candidates(parent)) {
+          const id=cold.add([candidate.id],parent)[0], total=cold.msOf(parent)[0];
+          near(candidate.share,total?cold.msOf(id)[0]/total:0);
+          cold.load(original);
+        }
       }
       const after = JSON.stringify(T.state());
       if (before !== after) {

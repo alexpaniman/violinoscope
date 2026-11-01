@@ -32,6 +32,9 @@ async def main():
             await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
             out[name]=performance.now()-start;
           };
+          await time('configuredPicker',()=>T.candidates(T.rootKey()));
+          const group=original.main.children.find(n=>n.group!==undefined)?.id;
+          if(group)await time('groupPicker',()=>T.candidates(group));
           await time('clear',()=>T.fresh());let rows,projection,child;
           await time('openPicker',()=>{rows=T.candidates(TX.ROOT2,'Compute');if(!rows.length)rows=T.candidates(TX.ROOT2).slice(0,6);});
           await time('addProjection',()=>{projection=T.addGroup(rows.map(r=>r.id),TX.ROOT2,'Properties');});
@@ -59,17 +62,25 @@ async def main():
             await time('delete75Names',()=>{T.collapse(many);T.remove([many]);});T.check();T.load(original);
           }
           await time('flameChart',()=>TX.go('timeline','chart'));
+          if(TX.S.view!=='flame'||TX.S.flame!=='time')throw Error('Flame chart did not open');
           for(let k=0;k<6;k++) await time('flamePan'+k,()=>{const [a,b]=TX.nav.win();TX.nav.set(a+(b-a)*.02,b+(b-a)*.02);});
           await time('flameProfile',()=>TX.go('profile','flame'));
           const raw=TX.rawSpans(TX.allInView()[0]),name=raw.names[raw.flat[5] ?? raw.flat[0]];
           TX.spans.pick(name);
           await time('callers',()=>TX.go('profile','callers'));
           await time('callees',()=>TX.go('profile','callees'));
+          await time('table',()=>TX.go('profile','table'));
+          await time('tableSearch',()=>{TX.S.spansQuery=name;TX.spans.render();});
+          await time('tableTree',()=>{TX.S.spansQuery='';TX.S.tableTree=true;TX.spans.render();});
+          await time('treeExpandAll',()=>{document.querySelector('#spans [data-level=all]').click();});
+          await time('tableScroll',()=>{document.querySelector('#spans').scrollTop=1e8;});
+          if(document.querySelectorAll('#spans tr[data-name]').length>100)throw Error('Table rows are not virtualized');
+          await time('waterfall',()=>TX.go('timeline','waterfall'));
+          if(TX.S.view!=='timeline'||!document.querySelector('.tl-row'))throw Error('Waterfall did not open');
           if(!TX.meta.sampled_cpu){
-            await time('waterfall',()=>TX.go('timeline','waterfall'));
             await time('criticalPath',()=>document.querySelector('.tl-critical-toggle').click());
-            for(let k=0;k<5;k++) await time('waterfallScroll'+k,()=>{document.querySelector('#timeline').scrollTop+=420;});
           }
+          for(let k=0;k<5;k++) await time('waterfallScroll'+k,()=>{document.querySelector('#timeline').scrollTop+=420;});
           TX.go('violins');
           return out;
         }''', args.stress)

@@ -71,30 +71,54 @@
         this.contains = containmentCache.get(paths);
         return;
       }
-      this.contains = new Map();
+      const edges = new Map();
       for (const p of paths) {
         let q = p.parent;
         while (q >= 0 && (!p.independent || paths[q].independent)) {
           const name = paths[q].name;
-          if (name !== p.name) (this.contains.get(name) || this.contains.set(name, new Set()).get(name)).add(p.name);
+          if (name !== p.name) (edges.get(name) || edges.set(name, new Set()).get(name)).add(p.name);
           q = paths[q].parent;
         }
       }
-      // Reachability closes the name graph, including recursive components spread across calls.
-      for (const name of this.contains.keys()) {
-        const seen = new Set(),
-          pending = [name];
-        while (pending.length) {
-          const from = pending.pop();
-          for (const to of this.contains.get(from) || [])
-            if (!seen.has(to)) {
-              seen.add(to);
-              pending.push(to);
-            }
+      // Condense recursive names first; a large cycle shares one reachability query.
+      const names=[...new Set(paths.map(p=>p.name))], ids=new Map(names.map((n,i)=>[n,i]));
+      const forward=names.map(n=>[...(edges.get(n)||[])].map(n=>ids.get(n))), reverse=names.map(()=>[]);
+      forward.forEach((list,i)=>list.forEach(j=>reverse[j].push(i)));
+      const visited=new Uint8Array(names.length), order=[];
+      for(let i=0;i<names.length;i++)if(!visited[i]) {
+        const stack=[i];
+        while(stack.length) {
+          const v=stack.pop();
+          if(v<0){order.push(~v);continue;}
+          if(visited[v])continue;
+          visited[v]=1;stack.push(~v);
+          for(const w of forward[v])if(!visited[w])stack.push(w);
         }
-        seen.delete(name);
-        this.contains.set(name, seen);
       }
+      const component=new Int32Array(names.length).fill(-1);
+      let count=0;
+      for(const v of order.reverse())if(component[v]<0) {
+        const stack=[v];component[v]=count;
+        while(stack.length)for(const w of reverse[stack.pop()])if(component[w]<0){component[w]=count;stack.push(w);}
+        count++;
+      }
+      const graph=Array.from({length:count},()=>new Set()), closure=new Map(), views=new Map();
+      forward.forEach((list,i)=>list.forEach(j=>{if(component[i]!==component[j])graph[component[i]].add(component[j]);}));
+      this.contains={get(name) {
+        if(!ids.has(name))return undefined;
+        if(!views.has(name))views.set(name,{has(other) {
+          if(name===other||!ids.has(other))return false;
+          const from=component[ids.get(name)],to=component[ids.get(other)];
+          if(from===to)return true;
+          if(!closure.has(from)) {
+            const seen=new Set([from]),stack=[from];
+            while(stack.length)for(const v of graph[stack.pop()])if(!seen.has(v)){seen.add(v);stack.push(v);}
+            closure.set(from,seen);
+          }
+          return closure.get(from).has(to);
+        }});
+        return views.get(name);
+      }};
       containmentCache.set(paths, this.contains);
     }
     refresh() {
@@ -323,7 +347,7 @@
       return n.id;
     }
     // Compile a selector lookup and an owner for each actual call route. Recursion re-enters the upper selector.
-    plan(routes, analysis = 'main') {
+    plan(routes, analysis = 'main', previous = null, changedRoutes = routes) {
       const root = analysis === 'main' ? this.unit : analysis;
       const all = [...this.nodes.values()].filter((n) => this.analysis.get(n.id) === analysis),
         byName = new Map(),
@@ -336,12 +360,14 @@
       }
       for (const ids of byName.values())
         ids.sort((a, b) => this.rank(a) - this.rank(b) || compare(this.signature(a), this.signature(b)));
-      const owners = new Array(routes.length),
+      const owners = previous ? Object.create(previous.owners) : new Array(routes.length),
         matches = new Map(all.map((n) => [n.id, []])),
         blocked = new Map(),
-        selected = new Uint8Array(routes.length),
-        guards = Array.from(routes, () => []);
-      for (const route of routes) {
+        selected = previous ? Object.create(previous.selected) : new Uint8Array(routes.length),
+        guards = previous ? Object.create(previous.guards) : Array.from(routes, () => []);
+      for (const route of changedRoutes) {
+        selected[route.id] = 0;
+        guards[route.id] = [];
         const inherited = route.parent < 0 ? (analysis === 'main' ? root : null) : owners[route.parent];
         const candidates = [];
         for (const id of byName.get(route.name) || []) {

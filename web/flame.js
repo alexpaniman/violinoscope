@@ -85,16 +85,39 @@
     if (chartCache.has(i)) return chartCache.get(i);
     const raw = X.rawSpans(i);
     if (!raw) return null;
-    const {flat:f,flow,names} = raw, rows = [], parts = [], asyncRows = [];
+    const {flat:f,flow,names} = raw, parts = new Int32Array(f.length/5), asyncRows = [], levels = [];
     let maxDepth = 0;
     for (let r=0; r<f.length/5; r++) {
       if (!flow.root[r]) maxDepth = Math.max(maxDepth,flow.depth[r]);
-      if (!flow.root[r] && flow.depth[r] >= ROWS) continue;
-      rows.push(r); parts.push(X.layout.partOfRow(i,r));
+      parts[r] = X.layout.partOfRow(i,r);
+      if (!flow.root[r]) (levels[flow.depth[r]] ||= []).push(r);
       if (flow.root[r]) asyncRows.push(r);
     }
-    const value = {...raw, rows:Int32Array.from(rows), parts:Int32Array.from(parts), asyncRows:Int32Array.from(asyncRows), maxDepth, links:raw.tree.links || []};
+    const index = levels.map(rows => {
+      rows.sort((a,b)=>f[a*5+2]-f[b*5+2] || a-b);
+      const reach = new Float64Array(rows.length);
+      rows.forEach((r,k)=>{reach[k]=Math.max(k ? reach[k-1] : -Infinity,f[r*5+2]+f[r*5+3]);});
+      return {rows:Int32Array.from(rows),reach};
+    });
+    const value = {...raw, levels:index, parts, asyncRows:Int32Array.from(asyncRows), maxDepth, links:raw.tree.links || []};
     chartCache.set(i,value); return value;
+  }
+  function* visibleRows(sp, l, a, scale) {
+    const f = sp.flat, lo = (LEFT-a)/scale*1000, hi = (W-RIGHT-a)/scale*1000;
+    const first = Math.max(0,Math.floor((X.contentTop()+AXIS-l.y0)/ROWH));
+    const last = Math.min(sp.levels.length,Math.ceil((H-l.y0)/ROWH));
+    for (let depth=first; depth<last; depth++) {
+      const line = sp.levels[depth];
+      if (!line) continue;
+      let left=0, right=line.rows.length;
+      while (left<right) { const mid=(left+right)>>>1; if (line.reach[mid]<lo) left=mid+1; else right=mid; }
+      for (let k=left; k<line.rows.length; k++) {
+        const r=line.rows[k];
+        if (f[r*5+2]>hi) break;
+        yield r;
+      }
+    }
+    yield* sp.asyncRows;
   }
   function dominantOf(i) {
     let d = dominant.get(i);
@@ -341,7 +364,16 @@
   function layout() {
     const top = X.contentTop() + AXIS;
     let y = top + 6 - scrollY;
-    const lines = M.lines.map((line) => { const l = { line, y0: y }; y += ROWS * ROWH + 4; return l; });
+    const px = (W-LEFT-RIGHT)/(win.d1-win.d0);
+    const lines = M.lines.map((line) => {
+      let depth = ROWS;
+      const [lo,end] = visible(line);
+      for (let j=lo;j<end;j++) if ((line.d1[j]-line.d0[j])*px>=3 || line.units[j]===S.sel) {
+        const sp=chartSpans(line.units[j]);
+        if (sp) depth=Math.max(depth,sp.maxDepth+1);
+      }
+      const l = {line, y0:y, depth}; y += depth*ROWH+4; return l;
+    });
     const depths = asyncLanes(), n = depths.map((lanes) => Array.from({length:lanes.length}, (_, k) => lanes[k] || 1).reduce((a, b) => a + b, 0));
     const total = n.reduce((a, b) => a + b, 0);
     let lanes = null;
@@ -516,10 +548,11 @@
 
   function paintLine(l, lanes, X_, scale, T, xL, xR) {
     const line = l.line;
+    const top = X.contentTop()+AXIS;
     const [lo, end] = visible(line);
     // The last pixel drawn on each row, so spans thinner than a pixel draw once per pixel: a compilation a pixel
     // wide, then its depths, then its lanes.
-    const lastPx = new Float64Array(1 + ROWS + (lanes ? lanes.total : 0)).fill(-1);
+    const lastPx = new Float64Array(1 + l.depth + (lanes ? lanes.total : 0)).fill(-1);
     const root = T.scheme === 'dark' ? '#4a505a' : '#a9b0ba';
     const dim = S.name !== null;
     const laneH = lanes ? lanes.h : 0, gapY = laneH >= 6 ? 1 : 0;
@@ -554,25 +587,26 @@
       if (sel) {
         ctx.fillStyle = T.sel;
         ctx.globalAlpha = 0.07;
-        ctx.fillRect(a - 2, l.y0 - 2, w + 4, (sp ? Math.min(ROWS, sp.maxDepth + 1) : ROWS) * ROWH + 3);
+        ctx.fillRect(a - 2, l.y0 - 2, w + 4, (sp ? sp.maxDepth + 1 : ROWS) * ROWH + 3);
         ctx.globalAlpha = 1;
       }
       if (sp) {
         // Its links, once it is wide enough for them to read.
         if (sel && w > 60) flows = { pos: new Map(), links: sp.links };
         const s = {}, {flat:f,flow,names} = sp;
-        for (let k = 0; k < sp.rows.length; k++) {
-          const r=sp.rows[k],fr=flow.root[r];
+        for (const r of visibleRows(sp,l,a,scale)) {
+          const fr=flow.root[r];
           s.start=f[r*5+2]/1000; s.dur=f[r*5+3]/1000; s.name=names[f[r*5]];
-          s.part=sp.parts[k]; s.flowDepth=flow.depth[r]; s.depth=flow.depth[r]+Number(fr>0);
+          s.part=sp.parts[r]; s.flowDepth=flow.depth[r]; s.depth=flow.depth[r]+Number(fr>0);
           s.lane=fr>0?f[fr*5+4]>>>10:-1; s.track=fr>0?X.trackIndex.get(names[f[fr*5]]):-1;
           const async = s.lane >= 0, tr = async && lanes ? lanes.tracks[s.track] : null;
-          if (async ? !tr || tr.offsets[s.lane] === undefined : s.depth >= ROWS) continue;
+          if (async && (!tr || tr.offsets[s.lane] === undefined)) continue;
           const sx = a + s.start * scale, ex = sx + s.dur * scale;
           if (ex < xL || sx > xR) continue;
           const flowRow = async ? tr.offsets[s.lane] + s.flowDepth : 0;
-          const bw = ex - sx, row = async ? 1 + ROWS + tr.base + flowRow : 1 + s.depth;
+          const bw = ex - sx, row = async ? 1 + l.depth + tr.base + flowRow : 1 + s.depth;
           const y = async ? tr.y0 + flowRow * laneH : l.y0 + s.depth * ROWH, h = async ? laneH - gapY : ROWH - 1;
+          if (y+h<top || y>H) continue;
           if (sel && flows) flows.pos.set(r, { x0: sx, x1: ex, y: y + h / 2 });
           if (bw < 1) { const px = Math.floor(sx); if (px === lastPx[row]) continue; lastPx[row] = px; }
           // Separate logical flows are hollow; ordinary descendants keep their nesting within that flow.

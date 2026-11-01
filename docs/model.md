@@ -1,6 +1,6 @@
 # Time and layouts
 
-Each occurrence of the chosen `--unit` span is one measurement, even when units overlap. Its label comes from that span, its enclosing request, then its descendants. The root measures elapsed time. Perf imports instead measure sampled CPU time per thread, with no wall-clock timeline.
+Each occurrence of the chosen `--unit` span is one measurement, even when units overlap. Its label comes from that span, its enclosing request, then its descendants. The root measures elapsed time. Perf imports instead measure sampled CPU time per thread. The Samples chart and waterfall concatenate units on a CPU-time axis in recorded order; they do not show wall-clock gaps, waits or concurrency.
 
 ## The tree
 

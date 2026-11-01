@@ -35,7 +35,7 @@ class Formats(unittest.TestCase):
             bb main (/clang)
 
 clang++ 100/101 2.000000: 2000000 cpu-clock:u:
-            cc other (/clang)
+            cc other (void (*)(int)) (/clang)
             bb main (/clang)
 
 clang++ 100/102 2.500000: 500000 task-clock:u:
@@ -48,6 +48,7 @@ clang++ 100/102 2.500000: 500000 task-clock:u:
         self.assertEqual(leaf['name'],'leaf')
         self.assertEqual(leaf['end'],other['start'])
         self.assertEqual(leaf['parent'],main['id'])
+        self.assertEqual(other['name'],'other (void (*)(int))')
         self.assertNotEqual(worker_root['trace'],root['trace'])
         self.assertEqual(worker_root['attrs']['profile.kind'],'sampled_cpu')
 

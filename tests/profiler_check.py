@@ -50,15 +50,22 @@ compiler 10/10 2.000000: 2000000 cpu-clock:u:
             page = await opened('perf')
             assert await page.evaluate('TX.meta.sampled_cpu')
             assert await page.evaluate('TX.data.units[0].ms')==3
-            assert await page.locator('[data-tab="timeline"]').is_disabled()
-            await page.evaluate("TX.go('timeline')")
-            assert await page.evaluate('TX.S.tab')=='profile'
+            assert await page.locator('[data-tab="timeline"]').inner_text()=='Samples'
+            await page.click('[data-tab="timeline"]')
+            assert await page.evaluate('TX.S.tab')=='timeline'
+            assert await page.evaluate('TX.S.flame')=='time'
+            assert await page.evaluate('TX.nav.model().dMax-TX.nav.model().dMin')==3
+            assert await page.evaluate('TX.nav.model().gaps.length')==0
+            await page.evaluate("TX.go('timeline','waterfall')")
+            await page.wait_for_function('document.querySelectorAll(".tl-row").length>0')
+            assert await page.locator('.tl-critical-toggle').is_hidden()
+            await page.evaluate("TX.go('profile','flame')")
             assert await page.evaluate('TX.flame.profileModel().total')==3
             await page.evaluate("TX.go('profile','table')")
             assert 'Segments' in await page.locator('#spans').inner_text()
             assert not errors,errors
             await browser.close()
-    print('Offline Chrome/perf: distinct units, CPU periods, profiles and timeline restrictions passed')
+    print('Offline Chrome/perf: units, CPU periods, sample order, profiles and waterfall passed')
 
 
 if __name__=='__main__': asyncio.run(main())

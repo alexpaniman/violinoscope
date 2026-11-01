@@ -32,6 +32,11 @@
       + '</span><button class="tl-critical-toggle" aria-pressed="false" title="Highlight the recorded critical path; ordinary calls are assumed sequential">Critical path</button></div><div class="tl-ticks" title="Time since the first span in view began; each run counts from its own"></div></div></div>'
       + '<div class="tl-rows"><div class="tl-grid"></div><div class="tl-layer"></div></div>';
     head = root.firstChild;
+    if (X.meta.sampled_cpu) {
+      head.querySelector('.tl-critical-toggle').hidden = true;
+      head.querySelector('.tl-th').textContent = 'Stack segment';
+      head.querySelector('.tl-ticks').title = 'Sampled CPU time in recording order; independent units are concatenated';
+    }
     head.querySelector('.tl-critical-toggle').addEventListener('click', e => {
       critical = !critical; e.currentTarget.setAttribute('aria-pressed', String(critical)); schedule();
     });

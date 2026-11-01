@@ -716,6 +716,21 @@
     return { share: n ? sum / n : 0, seen: seen / X.NU };
   }
   const previewWeights = new Map();
+  const previewSums = new Map();
+  let previewIndex;
+  function pickerIndex() {
+    if (previewIndex) return previewIndex;
+    const children=routes.map(()=>[]), byName=new Map(), byRoute=routes.map(()=>[]);
+    for (const r of routes) {
+      if(r.parent>=0)children[r.parent].push(r.id);
+      if(!byName.has(r.name))byName.set(r.name,[]);
+      byName.get(r.name).push(r.id);
+    }
+    patterns.forEach((entries,p)=>{
+      for(const r of new Set(entries.map(occurrenceRoute)))byRoute[r].push(p);
+    });
+    return previewIndex={children,byName,byRoute};
+  }
   function candidates(parent, query = '') {
     parent = normal(parent);
     const q = query.trim().toLowerCase();
@@ -756,29 +771,63 @@
       }
       const weights = previewWeights.get(main),
         rows = [];
+      // Independent single-name projections and an empty unit tree need no trial layout per name.
+      // Sum each name once per interval pattern, preserving union semantics through recursion/overlap.
+      const simple = parent === ROOT2 || (parent === rootKey() && !node(parent).children.length);
+      if (simple && !previewSums.has(main)) {
+        const sums = new Map();
+        for (let p=0;p<patterns.length;p++) if (weights[p]) {
+          const names = new Set(patterns[p].map(entry=>routes[occurrenceRoute(entry)].name));
+          for (const name of names) sums.set(name,(sums.get(name)||0)+weights[p]);
+        }
+        previewSums.set(main,sums);
+      }
+      const unitTotal = units.reduce((s,u)=>s+u.L,0);
+      const ownerOf=(plan,entries)=>{
+        for(const entry of entries)if(selects(plan,entry))return plan.owners[occurrenceRoute(entry)];
+        return analysis==='main'?rootKey():null;
+      };
+      const baseOwners = !simple ? patterns.map(entries=>ownerOf(current,entries)) : null;
+      const inParent = owner=>!!owner&&tree.inside(owner,parent);
+      const baseTotal = !simple ? baseOwners.reduce((sum,owner,p)=>sum+(inParent(owner)?weights[p]:0),0) : 0;
       for (const name of reachableNames) {
         if (existing.has(name) || name === node(parent)?.span) continue;
+        if (simple) {
+          const sum=previewSums.get(main).get(name)||0;
+          const source=node(scope)?.span;
+          if (sum || (source && tree.contains.get(source)?.has(name)))
+            rows.push({id:V.pick(name),label:name===V.GAP?'Not covered by spans':name,share:sum/unitTotal});
+          continue;
+        }
         const trial = new V.Tree(rootKey(), paths, tree.state),
           id = trial.create(name, parent),
           context = parent === ROOT2 ? id : analysis;
         let plan;
+        const changedNames=new Set([name]);
+        // Only membership changes to existing group bases affect selectors outside the new name's subtree.
+        for(let g=parent;node(g)?.group!==undefined;g=modelParent(g)) {
+          const before=tree.bases(g),after=trial.bases(g);
+          for(const n of before)if(!after.has(n))changedNames.add(n);
+          for(const n of after)if(!before.has(n))changedNames.add(n);
+        }
+        const index=pickerIndex(), affected=new Set(), pending=[...changedNames].flatMap(n=>index.byName.get(n)||[]);
+        while(pending.length){const r=pending.pop();if(affected.has(r))continue;affected.add(r);for(const child of index.children[r])pending.push(child);}
+        const changed=[...affected].sort((a,b)=>a-b).map(r=>routes[r]);
+        const touched=new Set();
+        for(const r of affected)for(const p of index.byRoute[r])touched.add(p);
         try {
-          plan = trial.plan(routes, context);
+          plan = trial.plan(routes, context, current, changed);
         } catch (_) {
           continue;
         }
         let sum = 0,
-          total = parent === ROOT2 ? units.reduce((s, u) => s + u.L, 0) : 0;
-        for (let pattern = 0; pattern < patterns.length; pattern++)
+          total = baseTotal;
+        for (const pattern of touched)
           if (weights[pattern]) {
-            let owner = context === 'main' ? rootKey() : null;
-            for (const entry of patterns[pattern])
-              if (selects(plan, entry)) {
-                owner = plan.owners[occurrenceRoute(entry)];
-                break;
-              }
+            const owner=ownerOf(plan,patterns[pattern]);
             if (owner === id) sum += weights[pattern];
-            if (parent !== ROOT2 && owner && trial.inside(owner, parent)) total += weights[pattern];
+            if(inParent(baseOwners[pattern]))total-=weights[pattern];
+            if(owner&&trial.inside(owner,parent))total+=weights[pattern];
           }
         const source = node(scope)?.span;
         if (!sum && !(source && tree.contains.get(source)?.has(name))) continue;

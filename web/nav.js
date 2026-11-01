@@ -32,7 +32,7 @@
     let dMin = Infinity, dMax = -Infinity, run = null;
     units.forEach((i, k) => {
       if (!run || run.run !== X.runOf(i)) run = fold.runs.find((r) => r.run === X.runOf(i));
-      const d = start[i] = run.toD(data.units[i].at);
+      const d = start[i] = fold.start ? fold.start[i] : run.toD(data.units[i].at);
       pos.set(i, k);
       const [lo, hi] = X.spanExtent(i);
       dMin = Math.min(dMin, d + lo);

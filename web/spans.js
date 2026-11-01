@@ -5,7 +5,7 @@
 (function () {
   'use strict';
   const X = window.TX, S = X.S, data = X.data;
-  const { $, esc } = X;
+  const { $, esc, clamp } = X;
   const INDENT = 16;
 
   let root, body, lastKey = null, rebuild = 0, partial = false;
@@ -45,6 +45,10 @@
     });
     // Typing keeps the rows whose name has it; Escape clears it first.
     root.addEventListener('input', (e) => { if (e.target.matches('[data-find]')) { S.spansQuery = e.target.value; render(); } });
+    let scrollFrame = 0;
+    root.addEventListener('scroll',()=>{
+      if (!scrollFrame) scrollFrame=requestAnimationFrame(()=>{scrollFrame=0;drawRows?.();});
+    });
     root.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || !e.target.matches('[data-find]') || !e.target.value) return;
       S.spansQuery = '';
@@ -239,6 +243,7 @@
       + (r.kids && !finding ? `<button type="button" class="twist" data-twist="${esc(r.path)}" style="left:${d * INDENT}px" aria-label="${open ? 'Shut' : 'Open'}" aria-expanded="${open}"></button>` : '');
   }
 
+  let drawRows = null;
   function render() {
     if (S.view !== 'spans') return;
     root.style.top = `${X.contentTop()}px`;
@@ -293,7 +298,7 @@
     for (const i of units) all += data.units[i].ms;
     const groups = new Set(units.map((i) => data.units[i].g));
     const marks = !tree && groups.size > 1;
-    const maxSelf = Math.max(1e-9, ...rows.map((r) => r.self)), maxTotal = Math.max(1e-9, ...rows.map((r) => r.total));
+    const maxSelf = rows.reduce((v,r)=>Math.max(v,r.self),1e-9), maxTotal = rows.reduce((v,r)=>Math.max(v,r.total),1e-9);
     const th = (k, label, cls, title) => `<th data-sort="${k}" class="${cls || ''}${S.sort.key === k ? ' on' : ''}"${title ? ` title="${esc(title)}"` : ''} aria-sort="${S.sort.key === k ? (S.sort.dir > 0 ? 'ascending' : 'descending') : 'none'}">`
       + `${label}<span class="arrow">${S.sort.key === k ? (S.sort.dir > 0 ? '↑' : '↓') : ''}</span></th>`;
     const time = (v, max) => `<td class="num time" title="${X.fmtPct(v / all)} of ${esc(X.UNIT)} time"><span class="v">${v > 0 ? X.fmtUs(v) : '–'}</span><span class="meter"><i style="width:${(v / max * 100).toFixed(1)}%"></i></span></td>`;
@@ -304,7 +309,7 @@
       return X.glyph(side === 'left' || side === 'right' ? side : 'marker', T[side], X.groupName(g));
     }).join('')}</span>` : '');
     const u1 = one ? data.units[S.sel] : null;
-    const maxOneSelf = Math.max(1e-9, ...rows.map((r) => (r.one ? r.one.self : 0))), maxOneTotal = Math.max(1e-9, ...rows.map((r) => (r.one ? r.one.total : 0)));
+    const maxOneSelf = rows.reduce((v,r)=>Math.max(v,r.one?.self||0),1e-9), maxOneTotal = rows.reduce((v,r)=>Math.max(v,r.one?.total||0),1e-9);
     const oneTime = (v, max) => (v === null ? '<td class="num time mine"><span class="v">–</span><span class="meter"></span></td>'
       : `<td class="num time mine" title="${X.fmtPct(v / u1.ms)} of ${esc(u1.l)}"><span class="v">${v > 0 ? X.fmtUs(v) : '–'}</span><span class="meter"><i style="width:${(v / max * 100).toFixed(1)}%"></i></span></td>`);
     const swatch = (r) => (r.async
@@ -326,22 +331,34 @@
       + th('n', X.meta.sampled_cpu ? 'Segments' : 'Count', 'num', X.meta.sampled_cpu ? 'Reconstructed stack segments, not invocation counts' : tree ? 'Spans on this path' : 'Spans of this name')
       + (tree ? '' : `${th('callers', 'Callers', 'num', 'How many span names call it')}${th('callees', 'Callees', 'num', 'How many span names it calls')}`)
       + (one ? `${th('oneSelf', `${esc(u1.l)} self`, 'num mine')}${th('oneTotal', `${esc(u1.l)} total`, 'num mine')}` : '');
-    const table = `<table class="spans-table${compact ? ' compact' : ''}${tree ? ' tree' : ''}"><thead><tr>${head}</tr></thead><tbody>`
-      // The row picked strongly; in the tree, the name's other paths lightly.
-      + rows.map((r) => `<tr data-name="${esc(r.name)}"${tree ? ` data-path="${esc(r.path)}"` : ''}${S.name !== r.name ? (r.context ? ' class="context"' : '')
+    const cols = `<col>${compact?'':'<col style="width:180px">'}<col span="2" style="width:136px"><col span="${tree?1:3}" style="width:70px">${one?'<col span="2" style="width:136px">':''}`;
+    const table = `<table class="spans-table${compact ? ' compact' : ''}${tree ? ' tree' : ''}"><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody></tbody></table>`;
+    const rowHtml = (r) => `<tr data-name="${esc(r.name)}"${tree ? ` data-path="${esc(r.path)}"` : ''}${S.name !== r.name ? (r.context ? ' class="context"' : '')
         : !tree || !S.namePath || S.namePath === r.path ? ' class="here"' : ' class="on"'}>`
         + `<td class="name">${tree ? `<div class="cell">${guide(r, T, !!q)}` : ''}${swatch(r)}<span class="nm"${r.part >= 0 ? ` title="${esc(data.columns[r.part].label)}"` : ''}>${esc(r.name)}</span>${glyphs(r)}${tree ? '</div>' : ''}</td>`
         + `<td class="part"${(r.partList || []).length > 1 ? ` title="${esc(r.partList.map((p) => data.columns[p].label).join(', '))}"` : ''}>${esc((r.partList || (r.part >= 0 ? [r.part] : [])).map((p) => data.columns[p].label).join(', '))}</td>`
         + `${time(r.self, maxSelf)}${time(r.total, maxTotal)}<td class="num count">${X.fmtInt(r.n)}</td>`
         + (tree ? '' : `<td class="num count">${X.fmtInt(r.callers)}</td><td class="num count">${X.fmtInt(r.callees)}</td>`)
-        + `${one ? oneTime(r.one && r.one.self, maxOneSelf) + oneTime(r.one && r.one.total, maxOneTotal) : ''}</tr>`).join('')
-      + '</tbody></table>';
+        + `${one ? oneTime(r.one && r.one.self, maxOneSelf) + oneTime(r.one && r.one.total, maxOneTotal) : ''}</tr>`;
     // Typing in the filter goes on in the new one.
     const typing = document.activeElement && document.activeElement.matches('[data-find]') ? document.activeElement.selectionStart : null;
     body.innerHTML = `<div class="spans-wrap"><div class="spans-scope table-scope">${scope}</div>${table}`
       + (q && !rows.length ? `<p class="spans-none">No span is called anything with “${esc(S.spansQuery.trim())}” in it.</p>` : '') + '</div>';
     if (typing !== null) { const f = body.querySelector('[data-find]'); f.focus(); f.setSelectionRange(typing, typing); }
     root.scrollTop = scrollTop;
+    const tbody=body.querySelector('tbody'), rowHeight=31, columns=(tree?5:7)+(one?2:0)-(compact?1:0);
+    let previous=-1;
+    drawRows=(position=root.scrollTop)=>{
+      const offset=tbody.getBoundingClientRect().top-root.getBoundingClientRect().top+root.scrollTop;
+      const first=clamp(Math.floor((position-offset)/rowHeight)-8,0,Math.max(0,rows.length-1));
+      if(first===previous)return;
+      previous=first;
+      const end=Math.min(rows.length,first+Math.ceil(root.clientHeight/rowHeight)+20);
+      const spacer=n=>n?`<tr aria-hidden="true" class="spans-spacer"><td colspan="${columns}" style="height:${n*rowHeight}px"></td></tr>`:'';
+      tbody.innerHTML=spacer(first)+rows.slice(first,end).map(rowHtml).join('')+spacer(rows.length-end);
+    };
+    drawRows(scrollTop);
+    root.scrollTop=scrollTop;
   }
 
   // ---------------------------------------------------------------------------------------------------------

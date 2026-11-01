@@ -301,7 +301,18 @@
   // Text.
 
   const measure = document.createElement('canvas').getContext('2d');
-  X.textWidth = (s, size, weight) => { measure.font = `${weight} ${size}px ${X.SANS}`; return measure.measureText(s).width; };
+  const textWidths = new Map();
+  document.fonts?.addEventListener('loadingdone',()=>textWidths.clear());
+  X.textWidth = (s, size, weight) => {
+    const font = `${weight} ${size}px ${X.SANS}`, key = font+'\n'+s;
+    let width = textWidths.get(key);
+    if (width === undefined) {
+      measure.font=font; width=measure.measureText(s).width;
+      if (textWidths.size>=16000) textWidths.delete(textWidths.keys().next().value);
+      textWidths.set(key,width);
+    }
+    return width;
+  };
   X.fitText = (s, size, weight, room) => {
     if (X.textWidth(s, size, weight) <= room) return s;
     let lo = 0, hi = s.length;
@@ -539,6 +550,22 @@
     return { run, r0, d0, r1: r0, d1: d0, gaps, toD, toR, fold };
   }
   X.timeFold = (units) => {
+    // Sample periods form a CPU-time sequence, not a wall clock. Pack independent units without idle gaps.
+    if (meta.sampled_cpu) {
+      const runs = [], start = new Float64Array(data.units.length);
+      let end = 0, cur;
+      for (const i of units) {
+        const run = X.runOf(i);
+        if (!cur || cur.run !== run) {
+          cur = {run, r0:end, d0:end, r1:end, d1:end, gaps:[], toD:t=>t, toR:d=>d};
+          runs.push(cur);
+        }
+        start[i] = end;
+        end += data.units[i].ms;
+        cur.r1 = cur.d1 = end;
+      }
+      return {runs, start, gaps:[], breaks:runs.slice(1).map(r=>r.d0)};
+    }
     const runs = [], gaps = [];
     let cur = null, end = 0, d = 0;
     const close = () => { if (cur) { cur.r1 = end; cur.d1 = cur.toD(end); d = cur.d1 + RUN_GAP; } };
@@ -587,6 +614,7 @@
   // Wall-clock ticks for display times d0..d1 across px pixels: on round times of each run's clock, skipping folded
   // stretches, never crowded, and clear of the runs' labels.
   X.clockTicks = (fold, d0, d1, px, labels) => {
+    if (meta.sampled_cpu) return X.elapsedTicks(fold, d0, d1, px, labels);
     const epoch = meta.epoch_ms || 0, out = [], xOf = (d) => (d - d0) / (d1 - d0) * px;
     const step = X.tickStep(Math.max(1e-6, d1 - d0), Math.max(2, px / 130));
     let last = -Infinity;
@@ -615,7 +643,7 @@
     for (const run of nav.runs) {
       if (run.d1 < d0 || run.d0 > d1) continue;
       let origin = null;
-      for (const i of nav.units) if (X.runOf(i) === run.run && nav.start[i] + data.units[i].ms >= d0) { origin = data.units[i].at; break; }
+      for (const i of nav.units) if (X.runOf(i) === run.run && nav.start[i] + data.units[i].ms >= d0) { origin = meta.sampled_cpu ? nav.start[i] : data.units[i].at; break; }
       if (origin === null) continue;
       const r0 = run.toR(Math.max(d0, run.d0)), r1 = run.toR(Math.min(d1, run.d1));
       for (let v = origin + Math.max(0, Math.ceil((r0 - origin) / step)) * step; v <= r1; v += step) {

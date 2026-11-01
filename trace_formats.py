@@ -62,7 +62,7 @@ def perf_spans(lines, source=''):
     width. Only nanosecond cpu-clock/task-clock events are accepted.
     """
     header = re.compile(r'^\s*(.*?)\s+(\d+)(?:/|\s+)(\d+)\s+([\d.]+):\s+(\d+)\s+([^\s]+):\s*(.*)$')
-    frame = re.compile(r'^\s*([0-9a-fA-F]+)\s+(.+?)\s+\((.*)\)\s*$')
+    frame = re.compile(r'^\s*([0-9a-fA-F]+)\s+(.+)\s+\((.*)\)\s*$')
     threads = defaultdict(list)
     current = None
     for number,line in enumerate(lines,1):
@@ -87,7 +87,10 @@ def perf_spans(lines, source=''):
         trace = hashlib.sha256(f'{source}:{pid}:{tid}'.encode()).hexdigest()[:32]
         samples.sort(key=lambda s:s[0])
         spans, active, time = [], [], samples[0][0]
-        attrs = {'trace.format':'perf', 'profile.kind':'sampled_cpu', 'job.name':f'{samples[0][3]} ({pid}/{tid})'}
+        label = Path(source).name.removesuffix('.gz').removesuffix('.perf.txt') if source else samples[0][3]
+        if len(threads) > 1 or not source:
+            label += f' ({pid}/{tid})'
+        attrs = {'trace.format':'perf', 'profile.kind':'sampled_cpu', 'job.name':label}
         root = {'trace':trace,'id':'0000000000000001','parent':'','name':'Sampled CPU',
                 'start':time,'end':time,'attrs':attrs,'error':False,'message':'','links':[]}
         for _,period,frames,_ in samples:
