@@ -24,7 +24,7 @@
   let heavyWin = { d0: 0, d1: 1 }, heavyBack = [];
   const focused = () => S.tab === 'profile' && ['callers', 'callees'].includes(S.prof);
   const profileKey = () => focused() ? `${S.prof}|${S.profileRoot}` : 'flame';
-  let scrollY = 0, dirty = 0, hot = null, spanHi = null, mergeTimer = 0;
+  let scrollY = 0, dirty = 0, hot = null, spanHi = null, mergeTimer = 0, pendingFocus = null;
 
   function init() {
     root = $('flame');
@@ -38,7 +38,11 @@
       merge();
       if (S.view === 'flame') request();
     });
-    X.on('window', () => { if (S.view === 'flame' && S.flame === 'time') request(); });
+    X.on('window', opts => {
+      if (opts.focus) pendingFocus = opts.focus;
+      else if (opts.unit !== undefined) pendingFocus = {unit:opts.unit, row:0};
+      if (S.view === 'flame' && S.flame === 'time') request();
+    });
   }
 
   // The stretch on screen, read again wherever it is used: it moves from outside too.
@@ -58,7 +62,7 @@
     for (const i of units) {
       const d = nav.start[i], e = d + data.units[i].ms;
       let line = lines.find((l) => l.end <= d);
-      if (!line) { line = { units: [], d0: [], d1: [], reach: [], end: -Infinity }; lines.push(line); }
+      if (!line) { line = { units: [], d0: [], d1: [], reach: [], end: -Infinity }; lines.push(line); line.number = lines.length; }
       pos.set(i, { line, j: line.units.length });
       line.units.push(i); line.d0.push(d); line.d1.push(e);
       line.reach.push(Math.max(line.reach.at(-1) ?? -Infinity, d + X.spanExtent(i)[1]));
@@ -346,6 +350,11 @@
     return [lo, end];
   }
 
+  const detailed = (i, scale) => {
+    const [lo, hi] = X.spanExtent(i);
+    return Math.max(data.units[i].ms, hi - lo) * scale >= 3;
+  };
+
   // Lanes of each asynchronous track in the window: as many as its busiest moment there needs. A compilation wide
   // enough to draw its spans counts only the lanes of its spans in the window; a narrower one, all of its lanes.
   function asyncLanes() {
@@ -355,7 +364,7 @@
       const [lo, end] = visible(line);
       for (let j = lo; j < end; j++) {
         const i = line.units[j];
-        if ((line.d1[j] - line.d0[j]) * px >= 3 && X.hasSpans(i)) {
+        if (detailed(i, px) && X.hasSpans(i)) {
           const {flat:f,flow,names,asyncRows} = chartSpans(i);
           for (const r of asyncRows) {
             const fr=flow.root[r],track=X.trackIndex.get(names[f[fr*5]]),lane=f[fr*5+4]>>>10;
@@ -375,14 +384,16 @@
     const top = X.contentTop() + AXIS;
     let y = top + 6 - scrollY;
     const px = (W-LEFT-RIGHT)/(win.d1-win.d0);
-    const lines = M.lines.map((line) => {
+    const lines = M.lines.flatMap((line) => {
       let depth = ROWS;
       const [lo,end] = visible(line);
-      for (let j=lo;j<end;j++) if ((line.d1[j]-line.d0[j])*px>=3 || line.units[j]===S.sel) {
+      if (lo === end) return [];
+      const heading = M.lines.length > 1 ? TRACK_HEAD : 0;
+      for (let j=lo;j<end;j++) if (detailed(line.units[j], px)) {
         const sp=chartSpans(line.units[j]);
         if (sp) depth=Math.max(depth,sp.maxDepth+1);
       }
-      const l = {line, y0:y, depth}; y += depth*ROWH+4; return l;
+      const l = {line, y0:y+heading, depth, heading}; y += heading+depth*ROWH+4; return [l];
     });
     const depths = asyncLanes(), n = depths.map((lanes) => Array.from({length:lanes.length}, (_, k) => lanes[k] || 1).reduce((a, b) => a + b, 0));
     const total = n.reduce((a, b) => a + b, 0);
@@ -427,7 +438,27 @@
     ctx.font = `500 11px ${X.SANS}`;
     ctx.textBaseline = 'middle';
     if (S.flame === 'heavy') paintHeavy(top, X_, T);
-    else paintTime(layout(), X_, scale, T);
+    else {
+      let L = layout();
+      if (pendingFocus) {
+        const {unit, row} = pendingFocus, line = M.pos.get(unit)?.line;
+        const l = L.lines.find(l => l.line === line), sp = l && chartSpans(unit);
+        if (sp && row < sp.flat.length / 5) {
+          const fr = sp.flow.root[row];
+          let y = l.y0 + sp.flow.depth[row] * ROWH;
+          if (fr > 0) {
+            const track = X.trackIndex.get(sp.names[sp.flat[fr * 5]]), lane = sp.flat[fr * 5 + 4] >>> 10;
+            const tr = L.lanes?.tracks[track];
+            if (tr) y = tr.y0 + (tr.offsets[lane] + sp.flow.depth[row]) * L.lanes.h;
+          }
+          scrollY = clamp(scrollY + y - (L.top + 6 + l.heading), 0, Math.max(0, L.bottom - H));
+        }
+        pendingFocus = null;
+        L = layout();
+      }
+      if (scrollY > Math.max(0, L.bottom - H)) { scrollY = Math.max(0, L.bottom - H); L = layout(); }
+      paintTime(L, X_, scale, T);
+    }
     ctx.restore();
     paintAxis(top, X_, T);
   }
@@ -514,7 +545,15 @@
     }
     ctx.font = `500 11px ${X.SANS}`;
     flows = null;
-    for (const l of L.lines) paintLine(l, L.lanes, X_, scale, T, xL, xR);
+    for (const l of L.lines) {
+      if (l.heading && l.y0 >= L.top && l.y0 - l.heading < H) {
+        ctx.fillStyle = T.muted;
+        ctx.font = `400 10.5px ${X.SANS}`;
+        ctx.fillText(`Concurrent lane ${l.line.number}`, xL, l.y0 - 4);
+        ctx.font = `500 11px ${X.SANS}`;
+      }
+      paintLine(l, L.lanes, X_, scale, T, xL, xR);
+    }
     paintFlows(T);
   }
 
@@ -572,7 +611,7 @@
     for (let j = lo; j < end; j++) {
       const i = line.units[j], a = X_(line.d0[j]), b = X_(line.d1[j]), w = b - a;
       const sel = i === S.sel;
-      if (w < 3 && X.spanExtent(i)[1] * scale < 3 && !sel) {
+      if (!detailed(i, scale)) {
         // A pixel-wide compilation: its biggest part at each of the first levels, and a mark on each of its lanes.
         const px = Math.floor(a);
         if (px === lastPx[0]) continue;
@@ -588,6 +627,7 @@
             if (tr && tr.offsets[lane] !== undefined) rect(part >= 0 ? T.cols[part] : T.unowned, px, tr.y0 + (tr.offsets[lane] + depth) * laneH, 1, laneH - gapY);
           }
         }
+        if (sel) { ctx.strokeStyle = T.sel; ctx.lineWidth = 2; ctx.strokeRect(px - 1, l.y0 - 1, Math.max(2, w) + 2, ROWH + 1); }
         if (!X.hasSpans(i)) X.loadChunk(data.units[i].k).catch(() => {});
         continue;
       }
@@ -787,8 +827,9 @@
   }
 
   let drag = null;
+  const clicks = [];
   function down(e, px, py) {
-    drag = { x: px, y: py, moved: false, sy: scrollY };
+    drag = { x: px, y: py, moved: false, sy: scrollY, bar:barAt(px, py) };
   }
   function move(e, px, py) {
     if (drag && (e.buttons & 1)) {
@@ -809,8 +850,10 @@
   function up(e, px, py) {
     const d = drag;
     drag = null;
-    if (d && d.moved) return;
-    const b = barAt(px, py);
+    if (!d || d.moved) return;
+    const b = d.bar;
+    clicks.push({bar:b, x:px, y:py, time:e.timeStamp});
+    if (clicks.length > 2) clicks.shift();
     // In the flame graph a bar picks its name, as the table does; in the flame chart it selects its compilation.
     // Empty space lets both go.
     if (b && b.heavy) {
@@ -825,19 +868,32 @@
     }
   }
   function dbl(e, px, py) {
-    const b = barAt(px, py);
+    // The first click can change selection controls or finish loading a stack.
+    // Zoom the bar originally pressed, even if its screen position has changed.
+    const first = clicks.length === 2 && clicks[0];
+    const b = first && e.timeStamp - first.time < 1500 && Math.hypot(px-first.x, py-first.y) < 5
+      ? first.bar : barAt(px, py);
     if (!b) return;
     if (b.heavy) { setWindow(b.heavy.x0 - (b.heavy.x1 - b.heavy.x0) * 0.03, b.heavy.x1 + (b.heavy.x1 - b.heavy.x0) * 0.03, true); return; }
-    const p = M.pos.get(b.i), a = p.line.d0[p.j], u = data.units[b.i];
-    if (b.r < 0) { setWindow(a - u.ms * 0.04, a + u.ms * 1.04, true); return; }
-    const s = X.spansOf(b.i).rows[b.r];
-    setWindow(a + s.start - s.dur * 0.05, a + s.start + s.dur * 1.05, true);
+    X.select(b.i, {keepWindow:true});
+    zoomToSpan(b.i, Math.max(0, b.r));
+  }
+  function zoomToSpan(unit, row) {
+    model();
+    if (S.flame !== 'time' || !M.pos.has(unit)) return;
+    const raw = X.rawSpans(unit);
+    if (!raw || row < 0 || row >= raw.flat.length / 5) return;
+    const a = M.nav.start[unit] + raw.flat[row * 5 + 2] / 1000, duration = raw.flat[row * 5 + 3] / 1000;
+    spanHi = {unit, row};
+    X.nav.set(a - duration * .05, a + duration * 1.05, {animate:true, push:true, focus:{unit, row}});
   }
   function wheel(e, px) {
-    if (e.ctrlKey || e.metaKey) { zoomAt(px, Math.exp(e.deltaY * 0.004)); return true; }
-    if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) { pan((e.shiftKey ? e.deltaY : e.deltaX) * 1); return true; }
-    if ((S.flame === 'time' ? layout().bottom : heavyBottom()) > H) { scrollTo(scrollY + e.deltaY); return true; }
-    zoomAt(px, Math.exp(e.deltaY * 0.004));
+    const scale = e.deltaMode === 1 ? ROWH : e.deltaMode === 2 ? Math.max(1, H - X.contentTop() - AXIS) : 1;
+    const dx = e.deltaX * scale, dy = e.deltaY * scale;
+    if (e.ctrlKey || e.metaKey) { zoomAt(px, Math.exp(dy * 0.004)); return true; }
+    if (Math.abs(dx) > Math.abs(dy) || e.shiftKey) { pan(e.shiftKey ? dy : dx); return true; }
+    scrollTo(scrollY + dy);
+    X.hideTip();
     return true;
   }
   function heavyBottom() {
@@ -891,8 +947,9 @@
     profileModel() { model();if(!M.heavy || M.heavy.sel!==S.sel)mergeHeavy();return M.heavy; },
     leave() { X.hideTip(); },
     // The window follows a selection through X.nav; left heavy merges again with it under the rest.
-    selectionChanged() {
+    selectionChanged(keepWindow) {
       spanHi = null;
+      if (!keepWindow && S.sel !== null) pendingFocus = {unit:S.sel, row:0};
       if (S.flame === 'heavy') { scrollY = 0; heavyBack = []; }
       if (M) M.heavy = null;
       if (S.view === 'flame') request();
@@ -903,12 +960,7 @@
     heavyWindow() { return [heavyWin.d0, heavyWin.d1]; },
     setHeavyWindow(d0, d1, animate) { setWindow(d0, d1, animate); },
     highlightSpan(unit, row) { spanHi = unit === null ? null : { unit, row }; request(); },
-    zoomToSpan(unit, row) {
-      if (!M || S.flame !== 'time' || !M.pos.has(unit)) return;
-      const p = M.pos.get(unit), a = p.line.d0[p.j], s = X.spansOf(unit).rows[row];
-      spanHi = { unit, row };
-      setWindow(a + s.start - s.dur * 0.05, a + s.start + s.dur * 1.05, true);
-    },
+    zoomToSpan,
     invalidate() { M = null; },
     // Spans count toward other columns now: their colours, merged again.
     layoutChanged() { dominant.clear(); chartCache.clear(); M = null; if (S.view === 'flame') request(); },

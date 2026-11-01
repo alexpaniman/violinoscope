@@ -22,6 +22,7 @@ python3 tests/flows_check.py
 python3 tests/causal_check.py
 python3 tests/profiler_check.py
 python3 tests/flame_check.py
+python3 tests/navigation_check.py
 python3 tests/leaf_check.py
 ```
 
@@ -49,4 +50,4 @@ Path diversity, stack depth, unit count and visible columns matter as much as sp
 
 Containment uses direct edges and lazy recursive-name reachability; picker previews revisit affected routes and interval patterns. Call paths use compact parent/name keys. Breakdown rows and interpolation coefficients are sparse; curve sums preserve the same monotone interpolation and partition. Tables, pickers and waterfalls render viewport rows. Offline HTML embeds compressed data; the browser decompresses one chunk at a time. These changes do not alter allocation rules.
 
-The browser checks cover actual tab state (including perf Samples), deep chart scrolling, all profile views, table search/expansion/scrolling, critical paths, drag editing and offline export. Model fuzzing checks snapshot undo, cold recomputation and picker previews against actual edits. Critical-path fixtures and 10,000 randomized fork/join graphs check coverage, joins, resumption delay, unjoined work, missing links and cycles; 100,001 sequential spans take about 26 ms.
+Navigation checks cover scaled scrollbars with ordinary wheel distances, fold anchors, concurrent lanes and double-click targets. The browser checks cover actual tab state (including perf Samples), deep chart scrolling, all profile views, table search/expansion/scrolling, critical paths, drag editing and offline export. Model fuzzing checks snapshot undo, cold recomputation and picker previews against actual edits. Critical-path fixtures and 10,000 randomized fork/join graphs check coverage, joins, resumption delay, unjoined work, missing links and cycles; 100,001 sequential spans take about 26 ms.

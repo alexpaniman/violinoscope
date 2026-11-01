@@ -43,7 +43,22 @@
     rowsEl = root.lastChild;
     gridEl = rowsEl.firstChild;
     layerEl = rowsEl.lastChild;
+    root.tabIndex = 0;
     root.addEventListener('scroll', () => schedule());
+    root.addEventListener('wheel', e => {
+      if (!rows || e.ctrlKey || e.metaKey || e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      const g = scrollGeometry(), scale = e.deltaMode === 1 ? ROW : e.deltaMode === 2 ? g.view : 1;
+      scrollToOffset(g.v + e.deltaY * scale);
+      schedule();
+    }, {passive:false});
+    root.addEventListener('keydown', e => {
+      if (!rows || e.ctrlKey || e.metaKey || e.altKey || e.target.matches('input,textarea,[contenteditable]')) return;
+      const g = scrollGeometry(), targets = {ArrowUp:g.v-ROW, ArrowDown:g.v+ROW,
+        PageUp:g.v-g.view, PageDown:g.v+g.view, Home:0, End:g.total};
+      if (!(e.key in targets)) return;
+      e.preventDefault(); scrollToOffset(targets[e.key]); schedule();
+    });
     // Span trees arrive in files of a few hundred compilations; each brings their spans in, keeping the view still.
     X.on('chunk', () => {
       if (S.view === 'timeline' && M) {
@@ -61,7 +76,8 @@
       filter();
       bringUp();
       if (opts.focus) {
-        for (let k = 0; k < rows.length; k++) if (M.U[rows[k]] === opts.focus.unit && M.R[rows[k]] === opts.focus.row) { scrollToRow(Math.max(0, k - 2)); break; }
+        const k = rowIndex(opts.focus.unit, opts.focus.row);
+        if (k >= 0) scrollToRow(Math.max(0, k - 2));
       }
       schedule();
     });
@@ -145,17 +161,20 @@
     for (const i of units) { const t = treeOf(i); n += t ? t.n : 1; }
     const U = new Int32Array(n), R = new Int32Array(n), D0 = new Float64Array(n), D1 = new Float64Array(n);
     let k = 0, maxDepth = 0;
+    const unitRows = new Map();
     for (const i of units) {
       const u = data.units[i], base = nav.start[i], t = treeOf(i);
-      if (!t) { U[k] = i; R[k] = 0; D0[k] = base; D1[k] = base + u.ms; k++; continue; }
+      const first = k;
+      if (!t) { U[k] = i; R[k] = 0; D0[k] = base; D1[k] = base + u.ms; k++; unitRows.set(i, [first,k]); continue; }
       maxDepth = Math.max(maxDepth, t.maxDepth);
       for (let r = 0; r < t.n; r++) {
         const s = t.flat[5 * r + 2] / 1000;
         U[k] = i; R[k] = r; D0[k] = base + s; D1[k] = base + s + t.flat[5 * r + 3] / 1000; k++;
         if (folded.has(key(i, r))) r += t.size[r] - 1;
       }
+      unitRows.set(i, [first,k]);
     }
-    return { key: nav.key, nav, units, U: U.subarray(0, k), R: R.subarray(0, k), D0: D0.subarray(0, k), D1: D1.subarray(0, k), n: k, maxDepth };
+    return { unitRows, key: nav.key, nav, units, U: U.subarray(0, k), R: R.subarray(0, k), D0: D0.subarray(0, k), D1: D1.subarray(0, k), n: k, maxDepth };
   }
 
   // Once every file is in, the trees are read and the rows laid out while the page is idle, a slice at a time, so
@@ -182,8 +201,11 @@
     M = build();
     filter();
     if (anchor) {
-      for (let k = 0; k < rows.length; k++) {
-        if (M.U[rows[k]] === anchor.unit && M.R[rows[k]] === anchor.row) { scrollToRow(k); break; }
+      const t = treeOf(anchor.unit);
+      // A collapsed ancestor can replace the old top row. Keep its screen offset.
+      for (let r = anchor.row; r >= 0; r = t ? t.flat[r * 5 + 1] : -1) {
+        const k = rowIndex(anchor.unit, r);
+        if (k >= 0) { scrollToOffset(k * ROW - anchor.offset); break; }
       }
     }
     draw();
@@ -213,30 +235,45 @@
     if (pending === null || !rows) return;
     const i = pending;
     pending = null;
-    for (let k = 0; k < rows.length; k++) if (M.U[rows[k]] === i) { scrollToRow(k); break; }
+    const range = M.unitRows.get(i);
+    if (range) scrollToRow(range[0]);
+  }
+  function rowIndex(unit, row) {
+    const range = M.unitRows.get(unit);
+    if (!range) return -1;
+    let [lo, hi] = range;
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (M.R[mid] < row) lo = mid + 1; else hi = mid; }
+    return lo < range[1] && M.R[lo] === row ? lo : -1;
   }
 
   // ---------------------------------------------------------------------------------------------------------
-  // Scrolling. A list taller than browsers allow is scrolled at a scale: the scroll bar covers it all, rows stay a
-  // row apart.
-
+  // The native scrollbar spans the whole recording. Wheel and keyboard movement
+  // use logical pixels, independent of the browser's scroll-height limit.
+  let logicalTop = 0, physicalTop = 0;
   function scrollGeometry() {
     const total = rows.length * ROW, height = Math.min(total, MAXH), view = Math.max(1, root.clientHeight - head.offsetHeight);
     const s = clamp(root.scrollTop - rowsEl.offsetTop + head.offsetHeight, 0, Math.max(0, height - view));
-    const v = height > view ? s * (Math.max(0, total - view) / Math.max(1, height - view)) : 0;
-    return { total, height, view, s, v };
+    if (root.scrollTop !== physicalTop) {
+      logicalTop = height > view ? s * (Math.max(0, total - view) / Math.max(1, height - view)) : 0;
+      physicalTop = root.scrollTop;
+    }
+    logicalTop = clamp(logicalTop, 0, Math.max(0, total - view));
+    return { total, height, view, s, v:logicalTop };
   }
   function topRow() {
     if (!M || !rows || !rows.length) return null;
-    const k = clamp(Math.floor(scrollGeometry().v / ROW), 0, rows.length - 1);
-    return { unit: M.U[rows[k]], row: M.R[rows[k]] };
+    const g = scrollGeometry(), k = clamp(Math.floor(g.v / ROW), 0, rows.length - 1);
+    return { unit: M.U[rows[k]], row: M.R[rows[k]], offset:k * ROW - g.v };
   }
-  function scrollToRow(k) {
+  function scrollToOffset(v) {
     rowsEl.style.height = `${Math.min(rows.length * ROW, MAXH) + 8}px`;
-    const g = scrollGeometry();
-    const s = g.total > g.view ? k * ROW * (Math.max(1, g.height - g.view) / Math.max(1, g.total - g.view)) : 0;
+    const total = rows.length * ROW, height = Math.min(total, MAXH), view = Math.max(1, root.clientHeight - head.offsetHeight);
+    logicalTop = clamp(v, 0, Math.max(0, total - view));
+    const s = total > view ? logicalTop * Math.max(0, height - view) / (total - view) : 0;
     root.scrollTop = s + rowsEl.offsetTop - head.offsetHeight;
+    physicalTop = root.scrollTop;
   }
+  function scrollToRow(k) { scrollToOffset(k * ROW); }
 
   // ---------------------------------------------------------------------------------------------------------
   // Drawing.
@@ -379,7 +416,7 @@
     } else label = `<i style="background:${color}"></i><span class="nm">${esc(name)}</span>`;
     // With a compilation selected the others recede, so it stands out wherever it is.
     const cls = `tl-row${r === 0 ? ' root' : ''}${i === S.sel ? ' sel' : S.sel !== null ? ' dim' : ''}${hi && hi.unit === i && hi.row === r ? ' on' : ''}${S.name === name ? ' named' : ''}`;
-    return `<div class="${cls}" data-j="${j}" style="top:${y.toFixed(1)}px">`
+    return `<div class="${cls}" data-j="${j}" data-unit="${i}" data-row="${r}" style="top:${y.toFixed(1)}px">`
       + `<div class="tl-name" style="padding-left:${4 + depth * INDENT}px">${tw}${label}`
       + `${isFolded && t ? `<em>${t.size[r] - 1}</em>` : ''}${flags & 2 ? '<span class="tl-err">error</span>' : ''}</div>`
       + `<div class="tl-track"><span class="tl-bar${async ? ' async' : ''}" style="left:${pct(x0)};width:${pct(Math.max(0, x1 - x0))};--c:${color};--f:${X.mix(color, T.bg, 0.82)}"></span>`

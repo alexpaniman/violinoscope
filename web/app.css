@@ -69,7 +69,7 @@ button { cursor: pointer; }
 .ov-nav button:hover:not(:disabled) { background: var(--raised); }
 .ov-nav button:disabled { color: var(--faint); box-shadow: none; }
 /* A double-click zooms the waterfall; it selects no text. */
-#timeline { user-select: none; }
+#timeline { user-select: none; overflow-anchor: none; scroll-behavior: auto; }
 
 /* Stage and its views */
 .stage { position: relative; min-width: 0; overflow: hidden; }

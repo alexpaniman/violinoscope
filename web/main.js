@@ -132,7 +132,7 @@
     if (unit !== null && !X.hasSpans(unit)) X.loadChunk(data.units[unit].k).then(show, () => {}); else show();
     X.panel.render();
     X.violins.drawHover();
-    X.flame.selectionChanged();
+    X.flame.selectionChanged(opts && opts.keepWindow);
     X.spans.invalidate();
     if (S.view === 'spans') X.spans.render();
     X.timeline.selectionChanged(opts && opts.keepWindow);
