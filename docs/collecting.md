@@ -86,7 +86,7 @@ python3 violinoscope.py 'optimized=build/*.json' --unit ExecuteCompiler \
   --layout examples/clang/phases.layout.json -o compiler.html
 ```
 
-Clang's granularity is in microseconds. Use `0` to retain very short events, at the cost of larger files. See [Clang's time-trace options](https://clang.llvm.org/docs/ClangCommandLineReference.html) and the [reproducible fmt example](../examples/clang/README.md).
+Clang's granularity is in microseconds. Use `0` to retain very short events, at the cost of larger files. See [Clang's time-trace options](https://clang.llvm.org/docs/ClangCommandLineReference.html) and the [reproducible LLVM example](../examples/clang/README.md).
 
 ## Linux perf
 
@@ -100,4 +100,4 @@ python3 violinoscope.py cpu.perf.txt -o cpu.html
 
 The `.perf.txt` or `.perf` suffix selects this importer; gzip works too. It accepts `cpu-clock` and `task-clock`, whose periods are nanoseconds. Each recorded thread becomes a **Sampled CPU** unit. Adjacent samples with a common stack coalesce; their sample periods determine width. Counts refer to reconstructed segments, not function invocations. Unknown/truncated stacks stay visible. Hardware cycles are rejected because they cannot be converted to time this way.
 
-Phases, merged flamegraphs and callers/callees work on sampled CPU time. The wall-clock timeline and critical path are unavailable: samples do not identify waits or causal relationships. This was exercised with an actual Clang compilation, not just a format fixture. See the [perf script manual](https://man7.org/linux/man-pages/man1/perf-script.1.html).
+Phases, flamegraphs and callers/callees measure sampled CPU time. The **Samples** tab opens a flame chart or waterfall in recorded stack order, weighted by sample periods. Independent units are concatenated, with no wall-clock gaps or implied concurrency. Critical-path highlighting is unavailable because samples do not identify waits or dependencies. File names label single-thread recordings; multi-thread recordings also include PID/TID. The [LLVM example](../examples/clang/README.md) collects one compilation per file. See the [perf script manual](https://man7.org/linux/man-pages/man1/perf-script.1.html).

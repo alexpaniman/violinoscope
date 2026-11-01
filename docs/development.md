@@ -33,13 +33,16 @@ Measure a real report with:
 python3 tests/performance_check.py report.html --stress --output performance.json
 ```
 
-Measured in Chromium at 1600×1050 (timings include two animation frames):
+Measured in Chromium at 1600×1050; actions include two animation frames:
 
-| Recording | Load | Move / reorder | Add 75 names | Flame pan | Critical-path toggle |
+| Recording | Load | Move / reorder | Add 75 names | Open chart | Expand full table tree |
 | --- | --- | --- | --- | --- | --- |
-| 822,426 spans, 6,586 units, 189 paths | 4.4 s | 133 / 33 ms | 1.01 s | 21–35 ms | 52 ms |
-| Clang: 637,678 spans, 56 units, 1,266 paths | 3.1 s | 50 / 33 ms | 190 ms | 28–37 ms | 34 ms |
+| YDB: 822,426 spans, 6,586 units | 4.5 s | 150 / 33 ms | 1.06 s | 104 ms | 33 ms |
+| LLVM time traces: 255,163 spans, 64 files | 2.5 s | 33 / 33 ms | 170 ms | 107 ms | 33 ms |
+| LLVM perf: 207,281 segments, 63 files, 48,768 paths | 2.2 s | 116 / 33 ms | 134 ms | 107 ms | 183 ms |
 
-Drag handlers stayed below 4 ms. Retained JS heap was about 142 MB and 24 MB respectively. A separate 109,379-span compilation loaded in 0.75 s. These are measured workloads, not limits: the number of units, paths and visible columns matters as much as span count. Bulk edits across thousands of runs still take longer than a frame.
+Drag handlers stayed below 4 ms. Retained JS heap was about 143, 15 and 165 MB respectively. A first picker calculation in an already populated perf layout takes 0.9–1.0 s for roughly 4,900 names; subsequent searches use its cached results. Panning ranged from 20–80 ms including animation frames. These are tested workloads, not capacity guarantees: path diversity, stack depth, unit count and visible columns matter as much as span count.
 
-The flame chart caches compact visible-depth rows; aggregate profiles avoid per-occurrence objects. Detailed span objects use a row-bounded LRU. Embedded chunks are JSON-parsed incrementally, and sequential traces share their main/projection interval index. The critical-path engine caches sparse causal graphs per trace; 100,001 ordinary spans required two vertices and about 25 ms. Its fixtures and 10,000 randomized fork/join graphs check coverage, joins, resumption delay, unjoined work, missing links and cycles.
+The perf fixture exposed a 12 s startup from eager name-graph closure and a 13 s expanded-table render. Recursive name components now share lazy reachability; picker previews revisit only affected routes and interval patterns. The table and waterfall render viewport rows, and chronological charts index complete stacks by depth/time instead of truncating at eight levels. Text measurements are bounded and cached. None of these changes alters allocation rules.
+
+The browser checks cover actual tab state (including perf Samples), deep chart scrolling, all profile views, table search/expansion/scrolling, critical paths, drag editing and offline export. Model fuzzing checks snapshot undo, cold recomputation and picker previews against actual edits. Critical-path fixtures and 10,000 randomized fork/join graphs check coverage, joins, resumption delay, unjoined work, missing links and cycles; 100,001 sequential spans take about 26 ms.

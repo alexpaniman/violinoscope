@@ -2,9 +2,9 @@
 
 Compare where time goes across thousands of traced requests. Build your own breakdown, compare groups, and open any request in a flame chart or waterfall.
 
-![Compiler phase distributions for fmt, comparing Clang -O0 and -O2](docs/clang-phases.png)
+![Clang compiling LLVM library files and unit tests, with templates and repeated passes extracted](docs/clang-phases.png)
 
-[Reproduce this Clang example](examples/clang/README.md): 56 compilations, about 638,000 spans, one offline page.
+[Reproduce this Clang example](examples/clang/README.md): 64 source files, about 255,000 spans, one offline page.
 
 ```sh
 python3 violinoscope.py before.jsonl after.jsonl --unit "Handle request" -o report.html

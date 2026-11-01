@@ -1,16 +1,57 @@
 {
   "format": "violinoscope-layout",
   "version": 4,
-  "name": "Sampled compiler CPU",
+  "name": "Compiler components",
   "unit": "Sampled CPU",
   "tree": {
     "span": "Sampled CPU",
     "open": true,
-    "rest": true,
     "children": [
-      {"span": "clang::ParseAST", "name": "Parse & analyze"},
-      {"span": "(anonymous namespace)::EmitAssemblyHelper::RunOptimizationPipeline", "name": "LLVM optimization"},
-      {"span": "(anonymous namespace)::EmitAssemblyHelper::RunCodegenPipeline", "name": "Code generation"}
+      {
+        "span": "clang::ParseAST",
+        "name": "Front end"
+      },
+      {
+        "group": "Templates",
+        "open": true,
+        "children": [
+          {
+            "span": "clang::Sema::InstantiateClass",
+            "name": "Classes"
+          },
+          {
+            "span": "clang::Sema::InstantiateFunctionDefinition",
+            "name": "Functions"
+          }
+        ]
+      },
+      {
+        "span": "(anonymous namespace)::EmitAssemblyHelper::RunOptimizationPipeline",
+        "name": "Optimization"
+      },
+      {
+        "span": "(anonymous namespace)::EmitAssemblyHelper::RunCodegenPipeline",
+        "name": "Code generation"
+      },
+      {
+        "group": "Repeated passes",
+        "open": true,
+        "children": [
+          {
+            "span": "llvm::InstCombinePass::run",
+            "name": "Inst. combining"
+          },
+          {
+            "span": "llvm::GVNPass::run",
+            "name": "Value numbering"
+          },
+          {
+            "span": "llvm::SimplifyCFGPass::run",
+            "name": "CFG cleanup"
+          }
+        ]
+      }
     ]
-  }
+  },
+  "projections": []
 }
