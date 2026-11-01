@@ -333,58 +333,50 @@
   function bucketShares(rc) {
     const breakdown = X.layout.breakdown(), P = breakdown.nodes.length, NB = rc.NB;
     const at = (l) => clamp(Math.floor((l - rc.lo) / (rc.hi - rc.lo) * NB), 0, NB - 1);
-    const sum = Array.from({ length: NB }, () => new Float64Array(P)), n = new Float64Array(NB), logs = new Float64Array(NB);
+    const sum = Array.from({ length: NB }, () => new Map()), n = new Float64Array(NB), logs = new Float64Array(NB);
     const lows = new Float64Array(NB).fill(Infinity), highs = new Float64Array(NB);
     // With a what-if, each column's own time takes its factors, and each unit sits at the time it would take.
     const proj = X.proj();
-    const row = new Float64Array(P);
     for (const i of rc.all.left.concat(rc.all.right)) {
-      const u = data.units[i];
+      const u = data.units[i], row = breakdown.rows[i];
       let total = 0;
-      for (let p = 0; p < P; p++) {
-        row[p] = breakdown.rows[i][p];
-        total += row[p];
-      }
+      for (const value of row.values()) total += value;
       const l = Math.log10(Math.max(proj ? X.totalMs(i, false) : u.ms, 1e-3)), b = at(l);
       n[b]++;
       logs[b] += l;
       lows[b] = Math.min(lows[b], 10 ** l); highs[b] = Math.max(highs[b], 10 ** l);
-      for (let p = 0; p < P; p++) sum[b][p] += total > 0 ? row[p] / total : 0;
+      if (total > 0) for (const [p,value] of row) sum[b].set(p,(sum[b].get(p)||0)+value/total);
     }
     const groups = [];
     let cur = null;
     for (let b = 0; b < NB; b++) {
       if (!n[b]) continue;
-      if (!cur) cur = { b0: b, b1: b, n: 0, logs: 0, lo: Infinity, hi: 0, sum: new Float64Array(P) };
+      if (!cur) cur = { b0: b, b1: b, n: 0, logs: 0, lo: Infinity, hi: 0, sum: new Map() };
       cur.b1 = b; cur.n += n[b]; cur.logs += logs[b];
       cur.lo = Math.min(cur.lo, lows[b]); cur.hi = Math.max(cur.hi, highs[b]);
-      for (let p = 0; p < P; p++) cur.sum[p] += sum[b][p];
+      for (const [p,value] of sum[b]) cur.sum.set(p,(cur.sum.get(p)||0)+value);
       if (cur.n >= FEW) { groups.push(cur); cur = null; }
     }
     if (cur && groups.length) {
       const g = groups[groups.length - 1];
       g.b1 = cur.b1; g.n += cur.n; g.logs += cur.logs;
       g.lo = Math.min(g.lo, cur.lo); g.hi = Math.max(g.hi, cur.hi);
-      for (let p = 0; p < P; p++) g.sum[p] += cur.sum[p];
+      for (const [p,value] of cur.sum) g.sum.set(p,(g.sum.get(p)||0)+value);
     } else if (cur) groups.push(cur);
     const groupOf = new Int32Array(NB).fill(-1);
     groups.forEach((g, k) => { for (let b = g.b0; b <= g.b1; b++) groupOf[b] = k; });
     // Each group at the middle of its compilations' times.
     const xs = groups.map((g) => g.logs / g.n);
-    const curves = Array.from({ length: P }, (_, p) => monotone(xs, groups.map((g) => g.sum[p] / g.n)));
-    const G = 240, grid = new Float64Array(G), mean = [], neff = new Float64Array(G), wide = new Uint8Array(G), support = [];
+    const G = 240, grid = new Float64Array(G), neff = new Float64Array(G), wide = new Uint8Array(G), support = [];
     for (let j = 0; j < G; j++) {
-      const x = rc.lo + (rc.hi - rc.lo) * j / (G - 1), row = new Float64Array(P), g = groups[groupOf[at(x)]];
-      let total = 0;
-      for (let p = 0; p < P; p++) { row[p] = Math.max(0, curves[p](x)); total += row[p]; }
-      if (total > 0) for (let p = 0; p < P; p++) row[p] /= total;
+      const x = rc.lo + (rc.hi - rc.lo) * j / (G - 1), g = groups[groupOf[at(x)]];
       grid[j] = x;
-      mean.push(row);
       neff[j] = g ? g.n : 0;
       wide[j] = !g || g.b1 > g.b0 ? 1 : 0;
       const edge = x < xs[0] ? groups[0] : x > xs[xs.length - 1] ? groups[groups.length - 1] : null;
       support.push(g ? {lo:g.lo, hi:g.hi, n:g.n} : edge ? {lo:edge.lo, hi:edge.hi, n:edge.n, edge:true} : null);
     }
+    const mean = X.partSeries(xs, groups.map(g => new Map([...g.sum].map(([p, value]) => [p, value / g.n]))), grid, P);
     return { grid, mean, neff, wide, support, breakdown };
   }
   // Meaningful work anywhere along the axis gets a stable name. The remaining recorded steps and time outside
@@ -413,31 +405,9 @@
       if (!part.other) for (let k = part.node; k >= 0; k = nodes[k].parent) path.unshift(nodes[k].label);
       return {...part, label:nameOf(part), details:detailOf(part), path, fill, stroke:color};
     });
-    const mean = dom.mean.map((row) => Float64Array.from(parts, (part) => part.ks.reduce((a, k) => a + row[k], 0)));
+    const series = parts.map(part => dom.mean.values(part.ks));
+    const mean = Array.from(dom.grid, (_, j) => Float64Array.from(series, values => values[j]));
     return {...dom, mean, sourceMean:dom.mean, parts};
-  }
-
-  // A monotone cubic through the points (Fritsch and Carlson): smooth, and never past its neighbours; flat beyond the
-  // ends.
-  function monotone(xs, ys) {
-    const n = xs.length;
-    if (n < 2) return () => (n ? ys[0] : 0);
-    const h = [], d = [], m = new Float64Array(n);
-    for (let i = 0; i + 1 < n; i++) { h.push(xs[i + 1] - xs[i]); d.push((ys[i + 1] - ys[i]) / h[i]); }
-    m[0] = d[0]; m[n - 1] = d[n - 2];
-    for (let i = 1; i + 1 < n; i++) {
-      if (d[i - 1] * d[i] <= 0) continue;
-      const a = 2 * h[i] + h[i - 1], b = h[i] + 2 * h[i - 1];
-      m[i] = (a + b) / (a / d[i - 1] + b / d[i]);
-    }
-    return (x) => {
-      if (x <= xs[0]) return ys[0];
-      if (x >= xs[n - 1]) return ys[n - 1];
-      let lo = 0, hi = n - 1;
-      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (xs[mid] <= x) lo = mid; else hi = mid; }
-      const t = (x - xs[lo]) / h[lo], t2 = t * t, t3 = t2 * t;
-      return (2 * t3 - 3 * t2 + 1) * ys[lo] + (t3 - 2 * t2 + t) * h[lo] * m[lo] + (-2 * t3 + 3 * t2) * ys[hi] + (t3 - t2) * h[lo] * m[hi];
-    };
   }
 
   // The share of each part of compile time, stacked, against compile time, across the whole range: smooth bands with a
@@ -506,9 +476,9 @@
 
   function partExplanation(dom, k, j, limit = Infinity) {
     const part = dom.parts[k], support = dom.support[j];
-    const near = support ? `${support.n} compilations, ${X.fmtMs(support.lo)}–${X.fmtMs(support.hi)}${support.edge ? ' · nearest average' : ''}`
-      : 'No compilations here · interpolated between neighbouring averages';
-    const details = part.details.map((d) => ({label:d.label, value:d.ks.reduce((a, q) => a + dom.sourceMean[j][q], 0)}))
+    const near = support ? `${X.nUnits(support.n)}, ${X.fmtMs(support.lo)}–${X.fmtMs(support.hi)}${support.edge ? ' · nearest average' : ''}`
+      : 'No units here · interpolated between neighbouring averages';
+    const details = part.details.map((d) => ({label:d.label, value:dom.sourceMean.values(d.ks)[j]}))
       .filter((d) => d.value > 1e-8).sort((a, b) => b.value - a.value);
     const explanation = part.kind === 'own' ? 'Time not covered by child steps or dependency groups in this breakdown.'
       : part.kind === 'steps' ? 'Recorded child steps too small to show separately.'

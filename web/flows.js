@@ -18,7 +18,7 @@
       else invalid[from] = 1;
     }
     for (let r = 0; r < n; r++) {
-      const p = f[r * 5 + 1], a = f[r * 5 + 2], b = a + f[r * 5 + 3];
+      const p = f[r * 5 + 1], a = f[r * 5 + 2], b = Math.round((a + f[r * 5 + 3]) * 1000) / 1000;
       extent[0] = Math.min(extent[0], a / 1000); extent[1] = Math.max(extent[1], b / 1000);
       start[r] = Number(p >= 0 && !!(f[r * 5 + 4] & 1));
       root[r] = p < 0 || start[r] ? r : root[p];

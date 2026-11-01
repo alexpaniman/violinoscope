@@ -5,7 +5,11 @@
     meta = X.meta;
   const Definitions = window.ViolinDefinitions,
     V = window.ViolinTree;
+  // Inputs have nanosecond precision. Canonical endpoints prevent tiny phantom
+  // overlaps when a fractional-microsecond start and duration are added.
+  const spanEnd = (rows, r) => Math.round((rows[5*r+2] + rows[5*r+3]) * 1000) / 1000;
   const routes = [],
+    routesByName = new Map(),
     routeParents = new Set(),
     routeKeys = new Map(),
     patterns = [],
@@ -39,6 +43,9 @@
     if (!routeKeys.has(key)) {
       routeKeys.set(key, routes.length);
       routes.push({ id: routes.length, path, parent, name: path < 0 ? V.GAP : paths[path].name, independent });
+      const r=routes[routes.length-1];
+      if(!routesByName.has(r.name))routesByName.set(r.name,[]);
+      routesByName.get(r.name).push(r.id);
       if (parent >= 0) routeParents.add(parent);
     }
     return routeKeys.get(key);
@@ -57,13 +64,22 @@
     rootPath = -1,
     ready = false;
 
-  function intern(key, name, parent) {
+  const pathText = new Map();
+  function pathKey(id) {
+    if (!pathText.has(id)) {
+      const names=[];
+      for(let p=id;p>=0;p=paths[p].parent)names.push(paths[p].name);
+      pathText.set(id,names.reverse().join(SEP));
+    }
+    return pathText.get(id);
+  }
+  function intern(name, parent) {
+    const key = parent + SEP + name;
     let id = pathByKey.get(key);
     if (id === undefined) {
       id = paths.length;
       paths.push({
         id,
-        key,
         name,
         parent,
         depth: parent >= 0 ? paths[parent].depth + 1 : 0,
@@ -109,13 +125,11 @@
       flow = X.traceFlows(tree);
     const L = n ? Math.max(1, f[3]) : 1;
     const rowPath = new Int32Array(n),
-      keyOf = new Array(n),
       kids = new Array(n);
     for (let r = 0; r < n; r++) {
       const name = chunk.names[f[5 * r]],
         parent = f[5 * r + 1];
-      keyOf[r] = parent >= 0 ? keyOf[parent] + SEP + name : name;
-      rowPath[r] = intern(keyOf[r], name, parent >= 0 ? rowPath[parent] : -1);
+      rowPath[r] = intern(name, parent >= 0 ? rowPath[parent] : -1);
       const P = paths[rowPath[r]];
       P.main = P.main || !!flow.main[r];
       P.independent = !P.main;
@@ -123,7 +137,7 @@
       P.dependency = P.dependency || !!flow.dependency[r];
       // A span's self time is its length less what its synchronous children cover.
       if (parent >= 0 && !(f[5 * r + 4] & 1))
-        (kids[parent] || (kids[parent] = [])).push(f[5 * r + 2], f[5 * r + 2] + f[5 * r + 3]);
+        (kids[parent] || (kids[parent] = [])).push(f[5 * r + 2], spanEnd(f, r));
     }
     if (n && rootPath < 0) rootPath = rowPath[0];
     const order = Array.from({ length: n }, (_, r) => r).sort(
@@ -151,7 +165,7 @@
       for (; q < n && rowPath[order[q]] === p; q++) {
         const r = order[q],
           s0 = f[5 * r + 2],
-          s1 = s0 + f[5 * r + 3];
+          s1 = spanEnd(f, r);
         if (flow.root[r] > 0) flowCount++;
         c++;
         d += s1 - s0;
@@ -365,6 +379,8 @@
       all = [],
       mainEvents = [],
       projectionEvents = [];
+    const lastChildEnd = new Float64Array(n).fill(-Infinity);
+    let nested = true;
     for (let r = 0; r < n; r++) {
       const parent = rows[5 * r + 1],
         independent = !flow.main[r];
@@ -374,9 +390,13 @@
           : -1;
       rowRoute[r] = routeFor(U.rowPath[r], pr, independent);
       const a = rows[5 * r + 2],
-        b = a + rows[5 * r + 3],
+        b = spanEnd(rows, r),
         lo = Math.max(0, a),
         hi = Math.min(U.L, b);
+      if (parent >= 0) {
+        if (a < lastChildEnd[parent] || a < rows[5*parent+2] || b > spanEnd(rows,parent)) nested = false;
+        lastChildEnd[parent] = Math.max(lastChildEnd[parent], b);
+      }
       if (r > 0 && hi > lo) all.push(lo, hi);
       if (b > a) projectionEvents.push([a, r, 1], [b, r, 0]);
       if (flow.main[r] && flow.hi[r] > flow.lo[r]) mainEvents.push([flow.lo[r], r, 1], [flow.hi[r], r, 0]);
@@ -391,19 +411,21 @@
       for (let k = 0; k < events.length; ) {
         const t = events[k][0];
         if (t > at && active.size) {
-          const ordered = [...active]
-            .sort(
+          const activeRows = [...active];
+          // Nested calls and sampled stacks are already in ancestor order.
+          if (nested) activeRows.reverse();
+          else activeRows.sort(
               (a, b) =>
                 paths[U.rowPath[b]].depth - paths[U.rowPath[a]].depth ||
                 rows[5 * b + 2] - rows[5 * a + 2] ||
                 rows[5 * a + 3] - rows[5 * b + 3] ||
-                (paths[U.rowPath[a]].key < paths[U.rowPath[b]].key
+                (pathKey(U.rowPath[a]) < pathKey(U.rowPath[b])
                   ? -1
-                  : paths[U.rowPath[a]].key > paths[U.rowPath[b]].key
+                  : pathKey(U.rowPath[a]) > pathKey(U.rowPath[b])
                     ? 1
                     : 0),
-            )
-            .map((r) => {
+            );
+          const ordered = activeRows.map((r) => {
               const absent = [];
               if (!main)
                 for (let p = rows[5 * r + 1]; p >= 0; p = rows[5 * p + 1]) if (!active.has(p)) absent.push(rowRoute[p]);
@@ -424,7 +446,7 @@
     U.rowRoute = rowRoute;
     U.slices = slices(mainEvents, true);
     const sameFlows = mainEvents.length === projectionEvents.length && flow.main.every((main,r) =>
-      main && flow.lo[r] === rows[5*r+2] && flow.hi[r] === rows[5*r+2]+rows[5*r+3]);
+      main && flow.lo[r] === rows[5*r+2] && flow.hi[r] === spanEnd(rows, r));
     U.projectionSlices = sameFlows ? U.slices : slices(projectionEvents, false);
     U.gaps = gaps;
     // Projection slices need gap endpoints too when independent work crosses a hole.
@@ -453,7 +475,7 @@
     metrics = new Map(),
     plans = new Map(),
     candidateCache = new Map();
-  const rootKey = () => paths[rootPath].key,
+  const rootKey = () => paths[rootPath].name,
     normal = (id) => (id === X.ROOT ? rootKey() : id);
   const node = (id) => tree.get(normal(id)),
     isRoot = (id) => normal(id) === rootKey() || id === ROOT2,
@@ -509,10 +531,15 @@
       );
       let cached = analysisCache.get(analysis);
       if (cached?.key !== localKey) {
-        const plan = tree.plan(routes, analysis),
+        const single = analysis !== 'main' && members.length === 1 && members[0].span;
+        const selectedRoutes = single ? (routesByName.get(single)||[]).map(r=>routes[r]) : routes;
+        const plan = tree.plan(routes, analysis, null, selectedRoutes),
           positions = new Map(plan.all.map((n, k) => [n.id, k]));
         const independentPatterns = new Uint8Array(patterns.length);
-        const ownedPatterns = patterns.map((active, p) => {
+        const ownedPatterns = new Int32Array(patterns.length).fill(-1);
+        const patternIds = single ? pickerIndex().touched(new Set([single])) : patterns.keys();
+        for (const p of patternIds) {
+          const active = patterns[p];
           let id = analysis === 'main' ? rootKey() : null;
           for (const entry of active)
             if (selects(plan, entry)) {
@@ -521,8 +548,8 @@
               independentPatterns[p] = Number(routes[r].independent);
               break;
             }
-          return positions.get(id) ?? -1;
-        });
+          ownedPatterns[p] = positions.get(id) ?? -1;
+        }
         const previous = new Map(cached?.plan.all.map((n, k) => [n.id, cached.details[k]]) || []),
           ownChanged = new Set(),
           coverageChanged = new Set(),
@@ -554,14 +581,15 @@
             coverageChanged.add(n.id);
             fixedChanged.add(n.id);
           }
-        const countOwners = routes.map((r) => {
+        const countOwners = new Int32Array(routes.length).fill(-1);
+        for(const r of selectedRoutes) {
             const id = plan.owners[r.id];
-            return id && r.name === tree.get(id)?.span && !(analysis === 'main' && r.independent)
+            countOwners[r.id] = id && r.name === tree.get(id)?.span && !(analysis === 'main' && r.independent)
               ? positions.get(id)
               : -1;
-          }),
-          countChanged = new Set();
-        for (let r = 0; r < routes.length; r++) {
+        }
+        const countChanged = new Set();
+        if(cached)for (let r = 0; r < routes.length; r++) {
           const now = countOwners[r] >= 0 ? plan.all[countOwners[r]].id : null,
             old = cached && cached.countOwners[r] >= 0 ? cached.plan.all[cached.countOwners[r]].id : null;
           if (now !== old) {
@@ -720,19 +748,55 @@
   let previewIndex;
   function pickerIndex() {
     if (previewIndex) return previewIndex;
-    const children=routes.map(()=>[]), byName=new Map(), byRoute=routes.map(()=>[]);
+    const children=routes.map(()=>[]), byName=routesByName;
     for (const r of routes) {
       if(r.parent>=0)children[r.parent].push(r.id);
-      if(!byName.has(r.name))byName.set(r.name,[]);
-      byName.get(r.name).push(r.id);
     }
+    // A selector affects its call-route subtrees. DFS ranges avoid expanding and
+    // sorting the same descendants for every name and every opened picker.
+    const order=[], start=new Int32Array(routes.length), end=new Int32Array(routes.length);
+    const stack=routes.filter(r=>r.parent<0).map(r=>r.id).reverse();
+    while(stack.length) {
+      const r=stack.pop();
+      if(r<0){end[~r]=order.length;continue;}
+      start[r]=order.length;order.push(r);stack.push(~r);
+      for(let k=children[r].length-1;k>=0;k--)stack.push(children[r][k]);
+    }
+    const mergeRanges=list=>{
+      list.sort((a,b)=>a[0]-b[0]);const out=[];
+      for(const [a,b] of list)if(out.length&&a<=out[out.length-1])out[out.length-1]=Math.max(b,out[out.length-1]);else out.push(a,b);
+      return out;
+    };
+    const ranges=new Map([...byName].map(([name,ids])=>[name,mergeRanges(ids.map(r=>[start[r],end[r]]))]));
+    const namePatterns=new Map();
     patterns.forEach((entries,p)=>{
-      for(const r of new Set(entries.map(occurrenceRoute)))byRoute[r].push(p);
+      const seen=new Set(),names=new Set();
+      for(const entry of entries)for(let r=occurrenceRoute(entry);r>=0&&!seen.has(r);r=routes[r].parent) {
+        seen.add(r);names.add(routes[r].name);
+      }
+      for(const name of names) {
+        if(!namePatterns.has(name))namePatterns.set(name,[]);
+        namePatterns.get(name).push(p);
+      }
     });
-    return previewIndex={children,byName,byRoute};
+    for(const [name,list] of namePatterns)namePatterns.set(name,Int32Array.from(list));
+    function* changed(names) {
+      let spans;
+      if(names.size===1)spans=ranges.get(names.values().next().value)||[];
+      else {
+        const list=[];
+        for(const name of names){const a=ranges.get(name)||[];for(let k=0;k<a.length;k+=2)list.push([a[k],a[k+1]]);}
+        spans=mergeRanges(list);
+      }
+      for(let k=0;k<spans.length;k+=2)for(let j=spans[k];j<spans[k+1];j++)yield routes[order[j]];
+    }
+    const touched=names=>names.size===1 ? namePatterns.get(names.values().next().value)||[] :
+      new Set([...names].flatMap(name=>Array.from(namePatterns.get(name)||[])));
+    return previewIndex={changed,touched};
   }
-  function candidates(parent, query = '') {
+  function* candidateSteps(parent, query = '') {
     parent = normal(parent);
+    if (parent !== ROOT2 && !node(parent)) return [];
     const q = query.trim().toLowerCase();
     if (!candidateCache.has(parent)) {
       const main = parent !== ROOT2 && treeOf(parent) === 1,
@@ -740,18 +804,16 @@
         current = plans.get(analysis);
       let scope = parent;
       while (node(scope)?.group !== undefined) scope = modelParent(scope);
-      const reachableNames = new Set();
+      const reachableNames = new Set(), reachable = new Uint8Array(routes.length);
+      const inScope = new Set([...tree.nodes.keys()].filter(id => tree.inside(id, scope)));
       for (const r of routes) {
         if (main && r.independent) continue;
         if (scope === ROOT2) {
           reachableNames.add(r.name);
           continue;
         }
-        for (let p = r.id; p >= 0; p = routes[p].parent)
-          if (current?.owners[p] && tree.inside(current.owners[p], scope)) {
-            reachableNames.add(r.name);
-            break;
-          }
+        reachable[r.id] = inScope.has(current?.owners[r.id]) || (r.parent >= 0 && reachable[r.parent]);
+        if (reachable[r.id]) reachableNames.add(r.name);
       }
       const existing = new Set(
         parent === ROOT2
@@ -788,9 +850,15 @@
         return analysis==='main'?rootKey():null;
       };
       const baseOwners = !simple ? patterns.map(entries=>ownerOf(current,entries)) : null;
-      const inParent = owner=>!!owner&&tree.inside(owner,parent);
+      const parentNodes = new Set([...tree.nodes.keys()].filter(id => tree.inside(id, parent)));
+      const inParent = owner=>parentNodes.has(owner);
       const baseTotal = !simple ? baseOwners.reduce((sum,owner,p)=>sum+(inParent(owner)?weights[p]:0),0) : 0;
+      // Reuse one isolated trial tree; each preview changes only its new leaf's name.
+      const trial = simple ? null : new V.Tree(rootKey(), paths, tree.state);
+      const scratch = simple ? null : {owners:current.owners.slice(),selected:current.selected.slice(),guards:current.guards.slice(),touched:[]};
+      let previewId, checkpoint = Date.now();
       for (const name of reachableNames) {
+        if (Date.now() - checkpoint > 12) { yield; checkpoint = Date.now(); }
         if (existing.has(name) || name === node(parent)?.span) continue;
         if (simple) {
           const sum=previewSums.get(main).get(name)||0;
@@ -799,9 +867,9 @@
             rows.push({id:V.pick(name),label:name===V.GAP?'Not covered by spans':name,share:sum/unitTotal});
           continue;
         }
-        const trial = new V.Tree(rootKey(), paths, tree.state),
-          id = trial.create(name, parent),
-          context = parent === ROOT2 ? id : analysis;
+        if (previewId) { trial.get(previewId).span = name; trial.refresh(); }
+        else previewId = trial.create(name, parent);
+        const id = previewId, context = analysis;
         let plan;
         const changedNames=new Set([name]);
         // Only membership changes to existing group bases affect selectors outside the new name's subtree.
@@ -810,13 +878,9 @@
           for(const n of before)if(!after.has(n))changedNames.add(n);
           for(const n of after)if(!before.has(n))changedNames.add(n);
         }
-        const index=pickerIndex(), affected=new Set(), pending=[...changedNames].flatMap(n=>index.byName.get(n)||[]);
-        while(pending.length){const r=pending.pop();if(affected.has(r))continue;affected.add(r);for(const child of index.children[r])pending.push(child);}
-        const changed=[...affected].sort((a,b)=>a-b).map(r=>routes[r]);
-        const touched=new Set();
-        for(const r of affected)for(const p of index.byRoute[r])touched.add(p);
+        const index=pickerIndex(), touched=index.touched(changedNames);
         try {
-          plan = trial.plan(routes, context, current, changed);
+          plan = trial.plan(routes, context, current, index.changed(changedNames), scratch);
         } catch (_) {
           continue;
         }
@@ -827,7 +891,7 @@
             const owner=ownerOf(plan,patterns[pattern]);
             if (owner === id) sum += weights[pattern];
             if(inParent(baseOwners[pattern]))total-=weights[pattern];
-            if(owner&&trial.inside(owner,parent))total+=weights[pattern];
+            if(owner===id||inParent(owner))total+=weights[pattern];
           }
         const source = node(scope)?.span;
         if (!sum && !(source && tree.contains.get(source)?.has(name))) continue;
@@ -841,6 +905,34 @@
       candidateCache.set(parent, rows);
     }
     return candidateCache.get(parent).filter((r) => r.label.toLowerCase().includes(q));
+  }
+  function candidates(parent, query = '') {
+    const steps = candidateSteps(parent, query);
+    let result; do { result = steps.next(); } while (!result.done);
+    return result.value;
+  }
+  const candidateJobs = new Map();
+  function candidatesAsync(parent, query = '') {
+    parent = normal(parent);
+    const version = numericVersion;
+    if (candidateCache.has(parent)) return Promise.resolve(candidates(parent, query));
+    let job = candidateJobs.get(parent);
+    if (!job || job.version !== version) {
+      job = {version, promise:(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const steps = candidateSteps(parent);
+        while (numericVersion === version) {
+          const result = steps.next();
+          if (result.done) return result.value;
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        return null;
+      })()};
+      candidateJobs.set(parent, job);
+      const clear = () => { if (candidateJobs.get(parent) === job) candidateJobs.delete(parent); };
+      job.promise.then(clear, clear);
+    }
+    return job.promise.then(rows => rows?.filter(r => r.label.toLowerCase().includes(query.trim().toLowerCase())));
   }
   const blockedBy = (id) => plans.get(analysisOf(id))?.blocked.get(id) || null;
   function hiddenImpact(id) {
@@ -986,7 +1078,7 @@
     const none = add('~unassigned', 'Outside the included spans', -1, 0),
       scenario = scenarioKey(factors()) ? project(factors()) : null;
     const rows = units.map((u, i) => {
-      const row = new Float64Array(nodes.length);
+      const row = new Map();
       for (let j = 0; j < u.slices.length; j += 3) {
         const a = u.slices[j],
           b = u.slices[j + 1],
@@ -997,7 +1089,8 @@
           for (const [lo, hi, f] of scenario.segments[i])
             duration += Math.max(0, Math.min(b, hi) - Math.max(a, lo)) * f;
         }
-        row[patternOwn[pattern]] += duration / u.L;
+        const at = patternOwn[pattern];
+        row.set(at, (row.get(at) || 0) + duration / u.L);
       }
       return row;
     });
@@ -1363,12 +1456,17 @@
       }
     }),
     candidates,
+    candidatesAsync,
     msOf,
     sig: measurementKey,
     async: flowOf,
     independent,
     dependency,
-    hasPath: (p) => paths.some((x) => x.key === p && x.n > 0),
+    hasPath: (p) => {
+      let id=-1;
+      for(const name of p.split(SEP)){id=pathByKey.get(id+SEP+name);if(id===undefined)return false;}
+      return id>=0&&paths[id].n>0;
+    },
     hasName: (name) => paths.some((x) => x.name === name),
     path: (p) => paths[p],
     pathsOf: (i) => units[i],

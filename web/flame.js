@@ -268,10 +268,20 @@
     model();
     if (!M.heavy || M.heavy.sel !== S.sel) mergeHeavy();
     const hv = M.heavy, rows = Math.max(1, hv.sync.maxDepth + 1), rh = (h - 6) / rows, ext = hv.extent;
-    for (const rc of hv.sync.rects) {
-      if (rc.depth >= rows) continue;
-      c.fillStyle = heavyColor(rc.node, T);
-      c.fillRect(rc.x0 / ext * w, 3 + rc.depth * rh, Math.max(0.5, (rc.x1 - rc.x0) / ext * w), Math.max(1, rh - 0.5));
+    const width = Math.max(1, Math.ceil(w)), height = Math.max(1, Math.ceil(h - 6));
+    const pixels = new Int32Array(width * height).fill(-1), weights = new Float32Array(pixels.length);
+    // Many call paths occupy the same minimap pixel. Paint its widest contributor once.
+    hv.sync.rects.forEach((rc, k) => {
+      const y = Math.min(height - 1, Math.floor(rc.depth * rh)), a = Math.max(0, Math.floor(rc.x0 / ext * width));
+      const b = Math.min(width, Math.max(a + 1, Math.ceil(rc.x1 / ext * width))), weight = rc.x1 - rc.x0;
+      for (let x = a; x < b; x++) { const p = y * width + x; if (weight > weights[p]) { weights[p] = weight; pixels[p] = k; } }
+    });
+    for (let y = 0; y < height; y++) for (let x = 0; x < width;) {
+      const k = pixels[y * width + x];
+      let end = x + 1;
+      while (end < width && pixels[y * width + end] === k) end++;
+      if (k >= 0) { c.fillStyle = heavyColor(hv.sync.rects[k].node, T); c.fillRect(x, 3 + y, end - x, Math.max(1, rh - .5)); }
+      x = end;
     }
   }
 

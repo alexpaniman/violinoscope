@@ -23,6 +23,14 @@ function malloc() {
     [0, -1, 0, 130000, 0, 1, 0, 0, 100000, 0, 2, 1, 10000, 10000, 0, 3, 0, 100000, 30000, 0, 2, 3, 100000, 20000, 0],
   );
 }
+test('nanosecond endpoints do not create phantom parent tails', () => {
+  const {T}=fixture({names:['Compile','A','B'],rows:[0,-1,0,1,0, 1,0,0,.3,0, 2,1,.1,.2,0]});
+  const a=T.add(['~pick:A'],'Compile')[0],b=T.add(['~pick:B'],a)[0];
+  near(T.msOf(b)[0],.0002);
+  assert.equal(T.stats().variants,0);
+  assert.equal(T.stats().mainSlices,T.stats().projectionSlices);
+});
+
 test('fresh layout contains only the expanded unit', () => {
   const { T, X } = fixture();
   assert.equal(T.state().main.open, true);

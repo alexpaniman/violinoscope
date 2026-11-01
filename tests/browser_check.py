@@ -21,11 +21,6 @@ STEPS = [
 READY = 'window.TX && TX.layout.ready && TX.violins.G'
 TWO = '~two'
 COLS = 'TX.violins.G.p.cols.map((c) => c.id)'
-# claude.ai as a page offering a file sees it: the viewer accepts.
-STAND_IN = """
-window.__saved = null;
-window.claude = { use: async (name) => name === 'downloads' ? { save: async (r) => { window.__saved = { filename: r.filename, size: r.data.size }; return { status: 'saved' }; } } : null };
-"""
 
 
 async def opened(browser, url, errors, init=None):
@@ -78,6 +73,10 @@ async def main():
         await page.emulate_media(color_scheme='dark')
         await page.evaluate('TX.layout.fresh()')
         assert await page.locator('[data-add]').count()==2
+        await page.locator('[data-add]').first.click()
+        await page.fill('#v-add [data-filter]', 'no-such-span')
+        await page.press('#v-add [data-filter]', 'Escape')
+        assert await page.locator('#v-add').is_hidden()
         await page.locator('[data-add]').first.click()
         await page.locator('#v-add [data-id]').nth(0).check()
         await page.locator('#v-add [data-id]').nth(1).check()

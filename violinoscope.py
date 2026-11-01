@@ -460,13 +460,22 @@ def write_page(out, split_data=False, output=None):
     if not split_data:
         summary = json.loads((data / 'summary.js').read_text().split('=', 1)[1].rstrip().rstrip(';'))
         count = max((u['k'] for u in summary['units']), default=-1) + 1
-        chunks = '\n'.join(script((data / f'trees-{k:04d}.js').read_text().split(']=', 1)[1].rstrip().rstrip(';'),
-                                 f' type="application/json" data-chunk="{k}"') for k in range(count))
+        chunks = '\n'.join(script(base64.b64encode(gzip.compress(
+            (data / f'trees-{k:04d}.js').read_text().split(']=', 1)[1].rstrip().rstrip(';').encode(),
+            compresslevel=6, mtime=0)).decode(),
+            f' type="application/octet-stream" data-chunk="{k}" data-gzip') for k in range(count))
         page = page.replace('<script src="core.js"></script>', chunks + '\n<script src="core.js"></script>')
     page = re.sub(r'<script src="([^"]+)"></script>', inline, page)
     target = Path(output) if output else Path(out) / 'index.html'
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(page)
+    with tempfile.NamedTemporaryFile('w', dir=target.parent, delete=False, encoding='utf-8') as f:
+        temporary = Path(f.name)
+        try:
+            f.write(page)
+            f.close()
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def natural(s):

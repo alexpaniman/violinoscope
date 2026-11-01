@@ -31,9 +31,9 @@ async def main():
           const underCbo=k=>{for(;k>=0;k=d.nodes[k].parent)if(k===cboNode)return true;return false;};
           window.cboPart=parts.findIndex(p=>!p.other&&underCbo(p.node));
           return {nodes:d.nodes.length,unique:new Set(ks).size,count:ks.length,
-            maxError:Math.max(...d.rows.map(row=>Math.abs(row.reduce((a,b)=>a+b,0)-1))),
+            maxError:Math.max(...d.rows.map(row=>Math.abs(Array.from(row.values()).reduce((a,b)=>a+b,0)-1))),
             cbo,cboShown:window.cboPart>=0,
-            bandError:Math.max(...mean.map(row=>Math.abs(parts.reduce((a,p)=>a+p.ks.reduce((s,k)=>s+row[k],0),0)-1)))};
+            bandError:Math.max(...Array.from({length:mean.length},(_,j)=>Math.abs(parts.reduce((a,p)=>a+mean.values(p.ks)[j],0)-1)))};
         }''')
         assert measured['nodes'] == measured['unique'] == measured['count']
         assert measured['maxError'] < 1e-8 and measured['bandError'] < 1e-8
@@ -51,7 +51,7 @@ async def main():
         await other.hover()
         assert await page.locator('#tip').is_visible()
         tip = await page.locator('#tip').inner_text()
-        assert f"of {await page.evaluate('TX.UNIT')}" in tip and ('compilations' in tip or 'No compilations' in tip)
+        assert f"of {await page.evaluate('TX.UNIT')}" in tip and ('spans' in tip or 'compilations' in tip or 'No units' in tip)
         await other.click()
         assert await page.locator('#range-details').count() == 0
         assert await page.locator('.range-help').count() == 0
@@ -69,7 +69,7 @@ async def main():
             error = await page.evaluate('''factor => {
               const c=TX.data.columns.find(c=>!c.second&&!c.async);TX.setFactor(c.id,factor);
               const d=TX.layout.breakdown();return Math.max(...d.rows.map((row,i)=>
-                Math.abs(row.reduce((a,b)=>a+b,0)*TX.data.units[i].ms-TX.totalMs(i,false))));
+                Math.abs(Array.from(row.values()).reduce((a,b)=>a+b,0)*TX.data.units[i].ms-TX.totalMs(i,false))));
             }''', factor)
             assert error < .002, error
         # A copied projection intersects the main-tree factor, rather than applying evenly to the parent.
@@ -78,7 +78,7 @@ async def main():
           const child=L.kids(c.id).find(id=>!L.async(id))||c.id, copy=L.copyOver(child);
           TX.setFactor(c.id,.5);TX.setFactor(copy,.5);
           const d=L.breakdown();return Math.max(...d.rows.map((row,i)=>
-            Math.abs(row.reduce((a,b)=>a+b,0)*TX.data.units[i].ms-TX.totalMs(i,false))));
+            Math.abs(Array.from(row.values()).reduce((a,b)=>a+b,0)*TX.data.units[i].ms-TX.totalMs(i,false))));
         }''')
         assert error < .002, error
         await browser.close()

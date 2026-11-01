@@ -113,6 +113,7 @@
       else if (action === 'cancel') clearPicked();
     };
     X.on('layout', () => {
+      if (!menu.hidden) renderList();
       controls.hidden = true;
       for (const id of [...X.picked]) if (!X.layout.shown(id)) X.picked.delete(id);
       syncBar();
@@ -162,26 +163,42 @@
   function closeAdd() {
     if (menu.hidden) return false;
     menu.hidden = true;
+    listRequest++;
     delete menu.dataset.ancestors;
     under = null;
     return true;
   }
-  function renderList() {
-    rows = mode === 'hidden' ? X.layout.hiddenCandidates(under, query) : X.layout.candidates(under, query);
+  let listRequest = 0;
+  async function renderList() {
+    if (menu.hidden || under === null) return;
+    const request = ++listRequest, list = menu.querySelector('.add-list');
+    list.scrollTop = 0;
+    if (mode === 'spans') {
+      rows = [];
+      list.innerHTML = '<p class="add-none">Counting spans…</p>';
+      renderFoot();
+      const result = await X.layout.candidatesAsync(under, query);
+      if (request !== listRequest || menu.hidden || !result) return;
+      rows = result;
+    } else rows = X.layout.hiddenCandidates(under, query);
     if (mode === 'hidden' && menu.dataset.ancestors)
       rows = JSON.parse(menu.dataset.ancestors)
         .filter((id) => X.layout.label(id).toLowerCase().includes(query.toLowerCase()))
         .map((id) => ({ id, label: X.layout.label(id) }));
-    menu.querySelector('.add-list').innerHTML = rows.length
-      ? `<label class="add-row all"><input type="checkbox" data-all ${rows.every((r) => ticked.has(r.id)) ? 'checked' : ''}><span class="nm">All</span><span class="pct">${rows.length}</span></label>` +
-        rows
-          .map(
-            (r) =>
-              `<label class="add-row"><input type="checkbox" data-id="${esc(r.id)}"${ticked.has(r.id) ? ' checked' : ''}><span class="nm">${r.group ? '<span class="group-mark">⊞</span>' : ''}${esc(r.label)}</span><span class="pct">${Number.isFinite(r.share) ? X.fmtPct(r.share) : ''}</span></label>`,
-          )
-          .join('')
-      : `<p class="add-none">${query ? 'No matches' : mode === 'hidden' ? 'Nothing hidden here' : 'No further spans in this scope'}</p>`;
+    list.onscroll = renderRows;
+    renderRows();
     renderFoot();
+  }
+  function renderRows() {
+    const list = menu.querySelector('.add-list'), height = 28;
+    const start = Math.max(0, Math.floor(list.scrollTop / height) - 5);
+    const end = Math.min(rows.length, start + Math.ceil((list.clientHeight || 320) / height) + 12);
+    list.innerHTML = rows.length
+      ? `<label class="add-row all"><input type="checkbox" data-all ${rows.every(r => ticked.has(r.id)) ? 'checked' : ''}><span class="nm">All</span><span class="pct">${rows.length}</span></label>`
+        + `<div style="height:${start * height}px"></div>`
+        + rows.slice(start, end).map(r => `<label class="add-row"><input type="checkbox" data-id="${esc(r.id)}"${ticked.has(r.id) ? ' checked' : ''}><span class="nm">${r.group ? '<span class="group-mark">⊞</span>' : ''}${esc(r.label)}</span><span class="pct">${Number.isFinite(r.share) ? X.fmtPct(r.share) : ''}</span></label>`).join('')
+        + `<div style="height:${(rows.length - end) * height}px"></div>`
+      : `<p class="add-none">${query ? 'No matches' : mode === 'hidden' ? 'Nothing hidden here' : 'No further spans in this scope'}</p>`;
   }
   function renderFoot() {
     const n = ticked.size;

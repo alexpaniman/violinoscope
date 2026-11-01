@@ -9,6 +9,7 @@
   const pick = (name) => '~pick:' + encodeURIComponent(name);
   const picked = (id) => (typeof id === 'string' && id.startsWith('~pick:') ? decodeURIComponent(id.slice(6)) : null);
   const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const noGuards = Object.freeze([]);
 
   function validate(unit, value) {
     if (!value || value.v !== 7 || value.unit !== unit || !value.main || !Array.isArray(value.projections))
@@ -72,12 +73,16 @@
         return;
       }
       const edges = new Map();
+      const edge = (from,to) => { if(from!==to)(edges.get(from)||edges.set(from,new Set()).get(from)).add(to); };
       for (const p of paths) {
         let q = p.parent;
-        while (q >= 0 && (!p.independent || paths[q].independent)) {
-          const name = paths[q].name;
-          if (name !== p.name) (edges.get(name) || edges.set(name, new Set()).get(name)).add(p.name);
-          q = paths[q].parent;
+        if(q>=0&&(!p.independent||paths[q].independent))edge(paths[q].name,p.name);
+        // Reachability supplies the transitive edges. Bridge a mixed-flow path
+        // across its independent ancestors without connecting independent work
+        // back to the main flow.
+        if(!p.independent&&q>=0&&paths[q].independent) {
+          while(q>=0&&paths[q].independent)q=paths[q].parent;
+          if(q>=0)edge(paths[q].name,p.name);
         }
       }
       // Condense recursive names first; a large cycle shares one reachability query.
@@ -347,7 +352,13 @@
       return n.id;
     }
     // Compile a selector lookup and an owner for each actual call route. Recursion re-enters the upper selector.
-    plan(routes, analysis = 'main', previous = null, changedRoutes = routes) {
+    plan(routes, analysis = 'main', previous = null, changedRoutes = routes, scratch = null) {
+      if (scratch) {
+        for (const r of scratch.touched) {
+          scratch.owners[r]=previous.owners[r];scratch.selected[r]=previous.selected[r];scratch.guards[r]=previous.guards[r];
+        }
+        scratch.touched.length=0;
+      }
       const root = analysis === 'main' ? this.unit : analysis;
       const all = [...this.nodes.values()].filter((n) => this.analysis.get(n.id) === analysis),
         byName = new Map(),
@@ -360,15 +371,21 @@
       }
       for (const ids of byName.values())
         ids.sort((a, b) => this.rank(a) - this.rank(b) || compare(this.signature(a), this.signature(b)));
-      const owners = previous ? Object.create(previous.owners) : new Array(routes.length),
+      const owners = scratch?.owners || (previous ? Object.create(previous.owners) : new Array(routes.length)),
         matches = new Map(all.map((n) => [n.id, []])),
         blocked = new Map(),
-        selected = previous ? Object.create(previous.selected) : new Uint8Array(routes.length),
-        guards = previous ? Object.create(previous.guards) : Array.from(routes, () => []);
+        selected = scratch?.selected || (previous ? Object.create(previous.selected) : new Uint8Array(routes.length)),
+        guards = scratch?.guards || (previous ? Object.create(previous.guards) : new Array(routes.length));
       for (const route of changedRoutes) {
+        // Previews only query selected routes. Skip inherited-only rows and
+        // obtain their owner from the nearest route with a configured selector.
+        if (previous && !byName.has(route.name)) continue;
+        if (scratch) scratch.touched.push(route.id);
         selected[route.id] = 0;
-        guards[route.id] = [];
-        const inherited = route.parent < 0 ? (analysis === 'main' ? root : null) : owners[route.parent];
+        guards[route.id] = noGuards;
+        let parent = route.parent;
+        if (previous) while (parent >= 0 && !byName.has(routes[parent].name)) parent = routes[parent].parent;
+        const inherited = parent < 0 ? (analysis === 'main' ? root : null) : owners[parent];
         const candidates = [];
         for (const id of byName.get(route.name) || []) {
           if (analysis === 'main' && route.independent) continue;
@@ -394,6 +411,7 @@
         if (candidates[0]) {
           matches.get(candidates[0]).push(route.id);
           selected[route.id] = 1;
+          guards[route.id] = [];
           for (let p = this.parents.get(candidates[0]); p && p !== ROOT2; p = this.parents.get(p)) {
             const n = this.get(p);
             if (analysis === 'main' && p === this.unit) continue;

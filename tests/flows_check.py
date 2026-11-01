@@ -134,7 +134,7 @@ async def main():
                 projection = await page.evaluate('''shown => {
                   const {phase,join}=flowTest,T=TX.layout;if(shown)T.add([join]);else T.hide(join);
                   TX.setFactor(phase,.5);
-                  return {total:TX.totalMs(0),fine:T.breakdown().rows[0].reduce((s,v)=>s+v,0)*100};
+                  return {total:TX.totalMs(0),fine:Array.from(T.breakdown().rows[0].values()).reduce((s,v)=>s+v,0)*100};
                 }''', shown)
                 assert abs(projection['total'] - 70) < 1e-8 and abs(projection['fine'] - 70) < 1e-8, projection
             await page.evaluate('TX.S.factors.clear();TX.setFactor("__none__",1);TX.go("profile","table")')

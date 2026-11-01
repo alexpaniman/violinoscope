@@ -371,12 +371,20 @@
     if (chunks.has(k)) return Promise.resolve(chunks.get(k));
     if (!chunkLoads.has(k)) {
       const embedded = document.querySelector(`script[data-chunk="${k}"]`);
-      if (embedded) {
-        (window.EXPLORER_CHUNKS ||= {})[k] = JSON.parse(embedded.textContent);
-        embedded.remove();
-      }
-      const inPage = (window.EXPLORER_CHUNKS || {})[k];
-      chunkLoads.set(k, (inPage ? Promise.resolve() : loadScript(`data/trees-${String(k).padStart(4, '0')}.js`)).then(() => {
+      const read = async () => {
+        if (embedded) {
+          let text = embedded.textContent;
+          if (embedded.hasAttribute('data-gzip')) {
+            const bytes = Uint8Array.from(atob(text.trim()), c => c.charCodeAt(0));
+            text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+          }
+          (window.EXPLORER_CHUNKS ||= {})[k] = JSON.parse(text);
+          embedded.remove();
+        } else if (!(window.EXPLORER_CHUNKS || {})[k]) {
+          await loadScript(`data/trees-${String(k).padStart(4, '0')}.js`);
+        }
+      };
+      chunkLoads.set(k, read().then(() => {
         const c = (window.EXPLORER_CHUNKS || {})[k];
         if (!c) throw new Error('empty chunk');
         chunks.set(k, c);

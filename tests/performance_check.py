@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import time
+import sys
 from pathlib import Path
 from playwright.async_api import async_playwright
 from browser_check import ARGS, centre
@@ -14,16 +15,20 @@ async def main():
     ap.add_argument('report')
     ap.add_argument('--output', default='performance.json')
     ap.add_argument('--stress', action='store_true', help='Also add and expand up to 75 distinct names')
+    ap.add_argument('--progress', action='store_true', help='Log completed actions while a large report is tested')
     args = ap.parse_args()
     errors = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(args=ARGS)
         page = await browser.new_page(viewport={'width': 1600, 'height': 1050}, color_scheme='dark')
         page.on('pageerror', lambda e: errors.append(str(e)))
+        if args.progress:
+            page.on('console', lambda m: print(m.text, file=sys.stderr, flush=True) if m.text.startswith('perf:') else None)
         started = time.perf_counter()
         await page.goto(Path(args.report).resolve().as_uri())
         await page.wait_for_function('TX.layout?.version>0', timeout=60000)
         load_ms = (time.perf_counter() - started) * 1000
+        if args.progress: print(f'perf: load {load_ms:.1f} ms', file=sys.stderr, flush=True)
         # Let the initial paint and GPU uploads finish before measuring interactions.
         await page.wait_for_timeout(1200)
         timings = await page.evaluate('''async(stress)=>{
@@ -31,6 +36,7 @@ async def main():
             const start=performance.now();f();out[name+'Model']=performance.now()-start;
             await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
             out[name]=performance.now()-start;
+            console.info('perf: '+name+' '+out[name].toFixed(1)+' ms');
           };
           await time('configuredPicker',()=>T.candidates(T.rootKey()));
           const group=original.main.children.find(n=>n.group!==undefined)?.id;

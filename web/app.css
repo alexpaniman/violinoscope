@@ -199,7 +199,7 @@ button { cursor: pointer; }
 .add-head input { width: 100%; box-sizing: border-box; border: 1px solid var(--edge); background: var(--surface); border-radius: 7px; padding: 5px 9px; font: 12.5px var(--sans); color: var(--ink); }
 .add-head input:focus { outline: 2px solid var(--sel); outline-offset: -1px; }
 .add-list { overflow: auto; min-height: 0; flex: 1; padding: 0 4px; }
-.add-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; font-size: 12.5px; cursor: pointer; }
+.add-row { height: 28px; box-sizing: border-box; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; font-size: 12.5px; cursor: pointer; }
 .add-row:hover { background: var(--raised); }
 .add-row.all { color: var(--muted); border-bottom: 1px solid var(--grid); border-radius: 6px 6px 0 0; }
 .add-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
