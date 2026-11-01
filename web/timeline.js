@@ -18,6 +18,7 @@
   const folded = new Set();  // spans folded into themselves, by key()
   let level = Infinity;      // the depth the fold buttons last showed down to
   let frame = 0, rebuildTimer = 0;
+  let critical = false;
 
   const key = (i, r) => i * 1e6 + r;
 
@@ -28,9 +29,12 @@
     root.innerHTML = '<div class="tl-head"><div class="tl-axis-row"><div class="tl-headcell"><span class="tl-th">Span</span><span class="tl-folds" role="group" aria-label="Fold spans">'
       + fold('none', 'Collapse all', 'M3.5 6.5 7 3l3.5 3.5M3.5 11 7 7.5l3.5 3.5') + fold('less', 'Collapse a level', 'M3.5 9 7 5.5 10.5 9')
       + fold('more', 'Expand a level', 'M3.5 5 7 8.5 10.5 5') + fold('all', 'Expand all', 'M3.5 3 7 6.5 10.5 3M3.5 7.5 7 11l3.5-3.5')
-      + '</span></div><div class="tl-ticks" title="Time since the first span in view began; each run counts from its own"></div></div></div>'
+      + '</span><button class="tl-critical-toggle" aria-pressed="false" title="Highlight the recorded critical path; ordinary calls are assumed sequential">Critical path</button></div><div class="tl-ticks" title="Time since the first span in view began; each run counts from its own"></div></div></div>'
       + '<div class="tl-rows"><div class="tl-grid"></div><div class="tl-layer"></div></div>';
     head = root.firstChild;
+    head.querySelector('.tl-critical-toggle').addEventListener('click', e => {
+      critical = !critical; e.currentTarget.setAttribute('aria-pressed', String(critical)); schedule();
+    });
     rowsEl = root.lastChild;
     gridEl = rowsEl.firstChild;
     layerEl = rowsEl.lastChild;
@@ -125,7 +129,7 @@
     }
     // Rows are in tree order, so a span's descendants follow it.
     for (let r = n - 1; r > 0; r--) { const p = flat[5 * r + 1]; size[p] += size[r]; kids[p]++; }
-    t = { flat, names: chunk.names, links: tree.links || [], flow: X.traceFlows(tree), n, depth, size, kids, end, maxDepth };
+    t = { tree, flat, names: chunk.names, links: tree.links || [], flow: X.traceFlows(tree), n, depth, size, kids, end, maxDepth };
     trees.set(i, t);
     return t;
   }
@@ -292,13 +296,12 @@
     const xOf = (d) => nameW + clamp((d - w[0]) / span, 0, 1) * tw;
     let paths = '';
     for (let k = 0; k < t.links.length; k += 3) {
+      if (!t.links[k + 2]) continue;
       const a = at.get(t.links[k]), b = at.get(t.links[k + 1]);
       if (!a || !b) continue;
       let x1 = xOf(M.D1[b.j]), x2 = xOf(t.links[k + 2] === 2 ? M.D0[a.j] : M.D1[a.j]);
       const y1 = b.y - g.s + ROW / 2, y2 = a.y - g.s + ROW / 2, near = Math.abs(x2 - x1) < 24;
-      // Where the ends nearly line up, it joins the bars' starts and bulges left, clear of the durations written after
-      // them; else an S from one end to the other. The head points along it.
-      if (near) { x1 = xOf(M.D0[b.j]); x2 = xOf(M.D0[a.j]); }
+      // Nearly coincident endpoints bow left without moving their causal timestamps.
       const d = near ? -18 : Math.max(10, (x2 - x1) / 2), c1 = x1 + d, c2 = near ? x2 + d : x2 - d, s = x2 >= c2 ? 1 : -1;
       paths += `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)}C${c1.toFixed(1)} ${y1.toFixed(1)} ${c2.toFixed(1)} ${y2.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}"/>`
         + `<path class="head" d="M${x2.toFixed(1)} ${y2.toFixed(1)}l${-6 * s} -3.5v7z"/>`;
@@ -307,6 +310,36 @@
   }
 
   const pct = (v) => `${v.toFixed(3)}%`;
+  function criticalIntervals(t, r, collapsed) {
+    const cp = X.criticalPath(t.tree, t.flow), f = t.flat, a = f[r*5+2], b = a+f[r*5+3];
+    const source = collapsed ? [...cp.segments].filter(([fr]) => fr === t.flow.root[r] || (fr > r && fr < r+t.size[r])).flatMap(([,spans]) => spans)
+      : cp.segments.get(t.flow.root[r]) || [];
+    const spans = source.filter(v => v[1] > a && v[0] < b).map(v => [Math.max(a,v[0]),Math.min(b,v[1])]);
+    if (collapsed) {
+      const merged = [];
+      for (const v of spans.sort((a,b)=>a[0]-b[0])) {
+        const last = merged[merged.length-1];
+        if (last && v[0] <= last[1]) last[1] = Math.max(last[1],v[1]); else merged.push(v);
+      }
+      return merged;
+    }
+    // Show exclusive segments on open rows, leaving children to carry their own highlights.
+    const children = [];
+    for (let q = r+1; q < r+t.size[r]; q += t.size[q]) if (!t.flow.start[q]) children.push([f[q*5+2],f[q*5+2]+f[q*5+3]]);
+    children.sort((a,b) => a[0]-b[0]);
+    const out = [];
+    let child = 0;
+    for (const [a,b] of spans) {
+      let at = a;
+      while (child < children.length && children[child][1] <= at) child++;
+      for (let q = child; q < children.length && children[q][0] < b; q++) {
+        if (children[q][0] > at) out.push([at,Math.min(b,children[q][0])]);
+        at = Math.max(at,children[q][1]);
+      }
+      if (at < b) out.push([at,b]);
+    }
+    return out;
+  }
   // A bar's length label: after the bar, before it near the right edge, or inside its end when it spans the track.
   function durLabel(x0, x1, text) {
     if (x1 < 0 || x0 > 100) return '';
@@ -322,6 +355,14 @@
     const async = t && t.flow.root[r] > 0;
     const x0 = (M.D0[j] - w[0]) / span * 100, x1 = (M.D1[j] - w[0]) / span * 100;
     const isFolded = folded.has(key(i, r)), kids = t ? t.kids[r] : 0;
+    let highlight = '';
+    if (critical && t) {
+      const base = M.nav.start[i];
+      for (const [a,b] of criticalIntervals(t,r,isFolded)) {
+        const x = clamp((base+a/1000-w[0])/span*100,0,100), end = clamp((base+b/1000-w[0])/span*100,0,100);
+        if (end > x) highlight += `<span class="tl-critical" style="left:${pct(x)};width:${pct(end-x)}"></span>`;
+      }
+    }
     const tw = kids ? `<button type="button" class="tl-tw" data-fold="${j}" aria-expanded="${!isFolded}" aria-label="${isFolded ? 'Open' : 'Fold'}">`
       + '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>'
       : '<span class="tl-tw"></span>';
@@ -337,14 +378,18 @@
       + `<div class="tl-name" style="padding-left:${4 + depth * INDENT}px">${tw}${label}`
       + `${isFolded && t ? `<em>${t.size[r] - 1}</em>` : ''}${flags & 2 ? '<span class="tl-err">error</span>' : ''}</div>`
       + `<div class="tl-track"><span class="tl-bar${async ? ' async' : ''}" style="left:${pct(x0)};width:${pct(Math.max(0, x1 - x0))};--c:${color};--f:${X.mix(color, T.bg, 0.82)}"></span>`
-      + `${durLabel(x0, x1, X.fmtUs(M.D1[j] - M.D0[j]))}</div></div>`;
+      + `${highlight}${durLabel(x0, x1, X.fmtUs(M.D1[j] - M.D0[j]))}</div></div>`;
   }
 
   function tipFor(j) {
     const i = M.U[j], r = M.R[j], u = data.units[i], t = treeOf(i);
+    const criticalNote = critical && t ? (() => {
+      const cp = X.criticalPath(t.tree,t.flow);
+      return cp.reasons.length ? `Critical path estimate: ${cp.reasons.join('; ')}` : 'Critical path: sequential calls with recorded dependencies';
+    })() : '';
     if (r === 0 || !t) {
       const top = u.p ? data.partition.map((p, q) => [p.label, u.p[q]]).sort((a, b) => b[1] - a[1]).slice(0, 2) : [];
-      return [u.l, X.groupName(u.g), `${X.UNIT} ${X.fmtMs(u.ms)}`, ...top.map(([label, v]) => `${label} ${X.fmtPct(v)}`)];
+      return [u.l, X.groupName(u.g), `${X.UNIT} ${X.fmtMs(u.ms)}`, ...top.map(([label, v]) => `${label} ${X.fmtPct(v)}`), criticalNote].filter(Boolean);
     }
     const f = t.flat, flags = f[5 * r + 4], part = X.layout.partOfRow(i, r), dur = f[5 * r + 3] / 1000;
     // Self time: less what its synchronous children cover.
@@ -353,6 +398,7 @@
     const lines = [t.names[f[5 * r]], `${X.fmtMs(dur)} · self ${X.fmtMs(Math.max(0, dur - inner))}`, `from ${X.fmtMs(f[5 * r + 2] / 1000)} into ${u.l}`];
     lines.push(part >= 0 ? data.columns[part].label : '');
     if (t.flow.root[r] > 0) lines.push(t.flow.start[r] ? 'Starts a separate logical flow' : 'Within a separate logical flow');
+    if (criticalNote) lines.push(criticalNote);
     return lines.filter((l, k) => l || k < 3);
   }
 

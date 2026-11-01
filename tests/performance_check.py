@@ -58,6 +58,19 @@ async def main():
             await time('expand75Names',()=>T.expand(many));
             await time('delete75Names',()=>{T.collapse(many);T.remove([many]);});T.check();T.load(original);
           }
+          await time('flameChart',()=>TX.go('timeline','chart'));
+          for(let k=0;k<6;k++) await time('flamePan'+k,()=>{const [a,b]=TX.nav.win();TX.nav.set(a+(b-a)*.02,b+(b-a)*.02);});
+          await time('flameProfile',()=>TX.go('profile','flame'));
+          const raw=TX.rawSpans(TX.allInView()[0]),name=raw.names[raw.flat[5] ?? raw.flat[0]];
+          TX.spans.pick(name);
+          await time('callers',()=>TX.go('profile','callers'));
+          await time('callees',()=>TX.go('profile','callees'));
+          if(!TX.meta.sampled_cpu){
+            await time('waterfall',()=>TX.go('timeline','waterfall'));
+            await time('criticalPath',()=>document.querySelector('.tl-critical-toggle').click());
+            for(let k=0;k<5;k++) await time('waterfallScroll'+k,()=>{document.querySelector('#timeline').scrollTop+=420;});
+          }
+          TX.go('violins');
           return out;
         }''', args.stress)
         await page.evaluate('''()=>{

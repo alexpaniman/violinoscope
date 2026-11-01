@@ -13,7 +13,7 @@
     // they started. This identifies a group of dependencies, not the compiler's exact suspended interval.
     for (let q = 0; q < links.length; q += 3) {
       const from = links[q], to = links[q + 1];
-      if (links[q + 2] !== 1 || from < 0 || from >= n || !(f[from * 5 + 4] & 1)) continue;
+      if (links[q + 2] !== 1 || from < 0 || from >= n || !(f[from * 5 + 4] & 1) || (f[from * 5 + 4] & 4)) continue;
       if (to >= 0 && to < n && f[to * 5 + 1] === from && (f[to * 5 + 4] & 1)) dependency[from] = 1;
       else invalid[from] = 1;
     }

@@ -74,7 +74,7 @@ class Portable(unittest.TestCase):
                  'operationName':'Request','startTime':1000,'duration':100,'references':[{'refType':'FOLLOWS_FROM','spanID':'3'}]}]}
         span = list(violinoscope.from_jaeger_trace(trace))[0]
         self.assertEqual(span['dataset'], 'Service')
-        self.assertEqual(span['links'], [('3','follows_from')])
+        self.assertEqual(span['links'], [('3','reference')])
 
     def test_large_collector_batches_and_legacy_cycles(self):
         large = {**self.root, 'attributes':[{'key':'large','value':{'stringValue':'x'*100000}}]}
@@ -123,6 +123,30 @@ class Portable(unittest.TestCase):
         from collections import defaultdict
         children = defaultdict(list, {root['id']:[child]})
         self.assertEqual(violinoscope.analyze_unit(root, children, 'custom.flow')['tree'][1][4], 1)
+
+    def test_spawn_wait_and_nanoseconds(self):
+        from collections import defaultdict
+        job = {**self.root, 'spanId':'fedcba9876543210', 'parentSpanId':self.root['spanId'], 'name':'Job',
+               'startTimeUnixNano':'1000000001', 'endTimeUnixNano':'1050000002',
+               'attributes':[{'key':'parent.relation','value':{'stringValue':'spawn'}}]}
+        wait = {**self.root, 'spanId':'abcdef0123456789', 'parentSpanId':self.root['spanId'], 'name':'Wait',
+                'startTimeUnixNano':'1020000000', 'links':[{'traceId':self.root['traceId'], 'spanId':job['spanId'],
+                    'attributes':[{'key':'link.relation','value':{'stringValue':'depends_on'}}]}]}
+        root, job, wait = map(violinoscope.from_otlp_span, [self.root,job,wait])
+        analyzed = violinoscope.analyze_unit(root, defaultdict(list,{root['id']:[job,wait]}))
+        self.assertEqual(analyzed['tree'][1][2:], (0.001,50000.001,5))
+        self.assertEqual(analyzed['tree'][2][4],0)
+        self.assertEqual(analyzed['links'],[2,1,1])
+
+    def test_cross_trace_and_legacy_link_attributes(self):
+        from collections import defaultdict
+        doc = {**self.root,'links':[{'traceId':'f'*32,'spanId':self.root['spanId'],
+              'attributes':[{'key':'span.link.relation','value':{'stringValue':'depends_on'}}]}]}
+        span = violinoscope.from_otlp_span(doc)
+        result = violinoscope.analyze_unit(span,defaultdict(list))
+        self.assertEqual(result['tree'][0][4],8)
+        self.assertEqual(result['links'],[])
+        self.assertEqual(violinoscope.from_otlp_span(doc,'custom')['links'][0][1],'')
 
     def test_overlapping_units_use_their_own_enclosing_request_labels(self):
         spans = []

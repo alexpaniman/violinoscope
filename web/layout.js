@@ -347,6 +347,15 @@
     for (const [a, b] of pairs) append(out, a, b);
     return out;
   };
+  function uniteAll(lists) {
+    let level = lists.filter(iv => iv.length);
+    while (level.length > 1) {
+      const next = [];
+      for (let k=0; k<level.length; k+=2) next.push(k+1 < level.length ? unite(level[k],level[k+1]) : level[k]);
+      level = next;
+    }
+    return level[0] || EMPTY;
+  }
   // Each time slice keeps active recorded occurrences in a deterministic order. Only
   // selected occurrences compete; adding unselected instrumentation cannot change shares.
   function indexAtoms(U, recording, flow) {
@@ -414,7 +423,9 @@
     }
     U.rowRoute = rowRoute;
     U.slices = slices(mainEvents, true);
-    U.projectionSlices = slices(projectionEvents, false);
+    const sameFlows = mainEvents.length === projectionEvents.length && flow.main.every((main,r) =>
+      main && flow.lo[r] === rows[5*r+2] && flow.hi[r] === rows[5*r+2]+rows[5*r+3]);
+    U.projectionSlices = sameFlows ? U.slices : slices(projectionEvents, false);
     U.gaps = gaps;
     // Projection slices need gap endpoints too when independent work crosses a hole.
     const withGaps = (list) =>
@@ -427,8 +438,8 @@
           .map((t, k) => [cuts[k], t, overlap([cuts[k], t], gaps) > 0 ? [gapRoute, ...active] : active]);
       });
     U.slices = withGaps(U.slices);
-    U.projectionSlices = withGaps(U.projectionSlices);
-    for (const slice of [...U.slices, ...U.projectionSlices]) slice[2] = internPattern(slice[2]);
+    U.projectionSlices = sameFlows ? U.slices : withGaps(U.projectionSlices);
+    for (const slice of sameFlows ? U.slices : [...U.slices, ...U.projectionSlices]) slice[2] = internPattern(slice[2]);
     const compact = (list) => Float64Array.from(list.flat());
     U.slices = compact(U.slices);
     U.projectionSlices = compact(U.projectionSlices);
@@ -581,24 +592,23 @@
         const dirtyCount = plan.all.map((n) => countChanged.has(n.id));
         for (let i = 0; i < X.NU; i++) {
           const U = units[i],
-            fixed = plan.all.map((n, k) => (dirtyFixed[k] ? [] : null)),
-            owned = plan.all.map((n, k) => (dirtyOwn[k] ? [] : null)),
+            fixed = new Array(plan.all.length),
+            owned = new Array(plan.all.length),
             slices = analysis === 'main' ? U.slices : U.projectionSlices;
           for (let j = 0; j < slices.length; j += 3) {
             const p = slices[j + 2],
               k = ownedPatterns[p];
             if (k >= 0) {
-              if (dirtyOwn[k]) append(owned[k], slices[j], slices[j + 1]);
-              if (independentPatterns[p]) for (const at of fixedTargets[k]) append(fixed[at], slices[j], slices[j + 1]);
+              if (dirtyOwn[k]) append(owned[k] ||= [], slices[j], slices[j + 1]);
+              if (independentPatterns[p]) for (const at of fixedTargets[k]) append(fixed[at] ||= [], slices[j], slices[j + 1]);
             }
           }
           for (let k = plan.all.length - 1; k >= 0; k--) {
             const d = details[k];
-            if (dirtyFixed[k]) d.fixed[i] = fixed[k].length ? fixed[k] : EMPTY;
-            if (dirtyOwn[k]) d.own[i] = owned[k].length ? owned[k] : EMPTY;
+            if (dirtyFixed[k]) d.fixed[i] = fixed[k] || EMPTY;
+            if (dirtyOwn[k]) d.own[i] = owned[k] || EMPTY;
             if (dirtyCoverage[k]) {
-              let iv = d.own[i];
-              for (const child of children[k]) iv = unite(iv, details[child].iv[i]);
+              const iv = children[k].length ? uniteAll([d.own[i], ...children[k].map(child => details[child].iv[i])]) : d.own[i];
               d.iv[i] = iv.length ? iv : EMPTY;
               d.ms[i] = lengthOf(iv) / 1000;
             }

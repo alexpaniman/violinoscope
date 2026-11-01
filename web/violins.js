@@ -297,7 +297,10 @@
     const T = X.T, [k, n] = X.layout.progress();
     under.innerHTML = '';
     over.removeAttribute('viewBox');
-    over.innerHTML = txt(W / 2, Math.max(top + 120, H * 0.4), `Reading spans: ${k} of ${n} files`, { anchor: 'middle', base: 'central', fill: T.muted, size: 13 });
+    const y = Math.max(top + 100, H * 0.4), width = 120;
+    over.innerHTML = txt(W / 2, y, 'Preparing traces', { anchor: 'middle', base: 'central', fill: T.muted, size: 12 })
+      + `<rect x="${(W-width)/2}" y="${y+20}" width="${width}" height="2" rx="1" fill="${T.muted}" opacity=".18"/>`
+      + `<rect x="${(W-width)/2}" y="${y+20}" width="${width*k/Math.max(1,n)}" height="2" rx="1" fill="${T.muted}" opacity=".7"/>`;
     points.resize(W, H, view(W, H));
     points.set(new Float32Array(0), new Uint8Array(0), new Float32Array(0), { x: 0, y: 0, w: W, h: H }, false);
     for (const c of [heat, hover]) c.getContext('2d').clearRect(0, 0, c.width, c.height);

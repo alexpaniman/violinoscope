@@ -105,8 +105,11 @@
     for (const i of units) {
       if (!X.hasSpans(i)) continue;
       loaded++;
-      const rs = X.spansOf(i).rows;
-      for (const s of rs) if (s.parent >= 0) { const p = rs[s.parent].name; of(s.name).callers.add(p); of(p).callees.add(s.name); }
+      const {flat:f, names} = X.rawSpans(i);
+      for (let r = 0; r < f.length / 5; r++) {
+        const p = f[r * 5 + 1];
+        if (p >= 0) { const name = names[f[r * 5]], parent = names[f[p * 5]]; of(name).callers.add(parent); of(parent).callees.add(name); }
+      }
     }
     if (loaded < units.length) X.prefetchChunks();
     linkCache = { key, by, loaded, all: units.length };
@@ -117,7 +120,7 @@
   // track k. A node's own time is its time less that of the spans under it.
   let treeCache = null;
   function callTree(units) {
-    const key = `${X.viewKey()}|${X.chunksLoaded()}`;
+    const key = `${X.viewKey()}|${X.chunksLoaded()}|${X.layout.version}`;
     if (treeCache && treeCache.key === key) return treeCache;
     const roots = X.TRACKS.map((t, k) => 1 + k);
     const nodes = [0, ...roots].map((r) => ({ name: '', part: -1, depth: -1, async: r > 0, kids: new Map(), dur: 0, n: 0, inner: 0, path: r ? `~${r}` : '' }));
@@ -126,8 +129,8 @@
     for (const i of units) {
       if (!X.hasSpans(i)) continue;
       loaded++;
-      const rows = X.spansOf(i).rows, map = new Int32Array(rows.length);
-      rows.forEach((s, r) => {
+      const map = new Int32Array(X.rawSpans(i).flat.length / 5);
+      X.eachSpan(i, (s, r) => {
         const pk = s.parent >= 0 ? map[s.parent] : 0, p = into(pk, s);
         let k = nodes[p].kids.get(s.name);
         if (k === undefined) {
@@ -320,7 +323,7 @@
       + fold('more', 'Expand a level', 'M3.5 5 7 8.5 10.5 5') + fold('all', 'Expand all', 'M3.5 3 7 6.5 10.5 3M3.5 7.5 7 11l3.5-3.5') + '</span>';
     const head = (tree ? th('name', 'Span').replace('</th>', `${folds}</th>`) : th('name', 'Span'))
       + `${th('part', 'Counted in', '', 'The violin its own time counts toward')}${th('self', 'Self', 'num')}${th('total', 'Total', 'num')}`
-      + th('n', 'Count', 'num', tree ? 'Spans on this path' : 'Spans of this name')
+      + th('n', X.meta.sampled_cpu ? 'Segments' : 'Count', 'num', X.meta.sampled_cpu ? 'Reconstructed stack segments, not invocation counts' : tree ? 'Spans on this path' : 'Spans of this name')
       + (tree ? '' : `${th('callers', 'Callers', 'num', 'How many span names call it')}${th('callees', 'Callees', 'num', 'How many span names it calls')}`)
       + (one ? `${th('oneSelf', `${esc(u1.l)} self`, 'num mine')}${th('oneTotal', `${esc(u1.l)} total`, 'num mine')}` : '');
     const table = `<table class="spans-table${compact ? ' compact' : ''}${tree ? ' tree' : ''}"><thead><tr>${head}</tr></thead><tbody>`
@@ -346,10 +349,13 @@
 
   // Within each flow, count outermost occurrences of the name. Boundaries preserve causal relationships through
   // origin links, and start independent callee graphs; their overlapping durations never divide a parent's width.
+  let focusCache = null;
   function focusTree(name, units = X.allInView()) {
+    const key = `${name}|${X.layout.version}|${X.chunksLoaded()}|${units.join(',')}`;
+    if (focusCache?.key === key) return focusCache.value;
     const node = (nm, part) => ({ name: nm, part, dur: 0, n: 0, flowN: 0, kids: new Map() });
     const child = (p, nm, part) => { let c = p.kids.get(nm); if (!c) { c = node(nm, part); p.kids.set(nm, c); } return c; };
-    const add = (n, s, dur = s.dur) => { n.dur += dur; n.n++; if (s.lane >= 0) n.flowN++; n.async = n.flowN > 0; n.mixed = n.async && n.flowN < n.n; };
+    const add = (n, dur, async) => { n.dur += dur; n.n++; if (async) n.flowN++; n.async = n.flowN > 0; n.mixed = n.async && n.flowN < n.n; };
     const callers = node(name, -1), callees = node(name, -1);
     const flows = new Map(), origins = new Set();
     let loaded = 0, all = 0;
@@ -357,36 +363,42 @@
       all++;
       if (!X.hasSpans(i)) continue;
       loaded++;
-      const rs = X.spansOf(i).rows;
-      for (let r = 0; r < rs.length; r++) {
-        const s = rs[r];
-        if (s.name !== name) continue;
+      const raw = X.rawSpans(i), nameId = raw.names.indexOf(name);
+      if (nameId < 0) continue;
+      const {flat:f,flow,names} = raw, count = f.length/5;
+      const parent = r=>f[r*5+1], nm = r=>names[f[r*5]], part = r=>X.layout.partOfRow(i,r);
+      for (let r = 0; r < count; r++) {
+        if (f[r*5] !== nameId) continue;
         let inner = false;
-        for (let p = s.parent; p >= 0 && rs[p].flowRoot === s.flowRoot && !inner; p = rs[p].parent) inner = rs[p].name === name;
+        for (let p = parent(r); p >= 0 && flow.root[p] === flow.root[r] && !inner; p = parent(p)) inner = f[p*5] === nameId;
         if (inner) continue;
-        callers.part = callees.part = s.part;
-        add(callers, s);
+        const dur = f[r*5+3]/1000, async = flow.root[r] > 0;
+        callers.part = callees.part = part(r);
+        add(callers, dur, async);
         let c = callers;
-        for (let p = s.parent; p >= 0 && rs[p].flowRoot === s.flowRoot; p = rs[p].parent) { c = child(c, rs[p].name, rs[p].part); add(c, s); }
-        const origin = rs[s.flowRoot].parent;
-        if (origin >= 0) origins.add(rs[origin].name);
-        add(callees, s);
-        const at = new Map([[r, callees]]), paths = new Map([[r, name]]);
-        for (let q = r + 1; q < rs.length && rs[q].depth > s.depth; q++) {
-          const row = rs[q], path = `${paths.get(row.parent)}\u0001${row.name}`;
-          paths.set(q, path);
+        for (let p = parent(r); p >= 0 && flow.root[p] === flow.root[r]; p = parent(p)) { c = child(c,nm(p),part(p)); add(c,dur,async); }
+        const origin = parent(flow.root[r]);
+        if (origin >= 0) origins.add(nm(origin));
+        add(callees,dur,async);
+        const at = new Map([[r, callees]]);
+        for (let q = r + 1; q < count && parent(q) >= r; q++) {
           let d;
-          if (row.flowStart) {
-            if (!flows.has(path)) flows.set(path, {key:path, origin:rs[row.parent].name, tree:node(row.name, row.part)});
+          if (flow.start[q]) {
+            const pathNames = [];
+            for(let p=q; p>=r; p=parent(p)) pathNames.push(nm(p));
+            const path = pathNames.reverse().join('\u0001');
+            if (!flows.has(path)) flows.set(path, {key:path, origin:nm(parent(q)), tree:node(nm(q),part(q))});
             d = flows.get(path).tree;
-          } else d = child(at.get(row.parent), row.name, row.part);
-          add(d, row);
+          } else d = child(at.get(parent(q)), nm(q), part(q));
+          add(d,f[q*5+3]/1000,flow.root[q]>0);
           at.set(q, d);
         }
       }
     }
     if (loaded < all) X.prefetchChunks();
-    return { callers, callees, flows:[...flows.values()], origins:[...origins], loaded, all };
+    const value = { callers, callees, flows:[...flows.values()], origins:[...origins], loaded, all };
+    focusCache = {key, value};
+    return value;
   }
 
   X.spans = { init, render, pick, focusTree, invalidate() { lastKey = null; } };

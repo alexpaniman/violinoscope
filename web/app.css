@@ -4,7 +4,7 @@
   --bg: #ffffff; --surface: #ffffff; --raised: #f3f5f8; --ink: #171a20; --muted: #555c68; --faint: #98a0ac;
   --grid: #edf0f4; --band: #f7f8fa; --line: #cfd5de; --edge: #e2e6ec; --sel: #171a20;
   --left: #2a78d6; --right: #eb6834; --m0: #1baf7a; --m1: #6250d6; --m2: #c98500; --m3: #e34948;
-  --tip-bg: #171a20; --tip-fg: #f4f6f9;
+  --tip-bg: #171a20; --tip-fg: #f4f6f9; --critical: #a54c1c;
   --shadow: 0 1px 2px rgba(23, 30, 44, .06), 0 10px 28px rgba(23, 30, 44, .10);
   --scheme: light;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -15,7 +15,7 @@
     --bg: #121418; --surface: #1a1d22; --raised: #23272e; --ink: #eceff3; --muted: #a3aab5; --faint: #6c737f;
     --grid: #22262c; --band: #16191d; --line: #3b414a; --edge: #2c3138; --sel: #eceff3;
     --left: #3987e5; --right: #e0652f; --m0: #1ea676; --m1: #8f84e8; --m2: #b9800a; --m3: #e66767;
-    --tip-bg: #2b3039; --tip-fg: #f1f3f6;
+    --tip-bg: #2b3039; --tip-fg: #f1f3f6; --critical: #e79762;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 32px rgba(0, 0, 0, .45);
     --scheme: dark; color-scheme: dark;
   }
@@ -24,7 +24,7 @@
   --bg: #121418; --surface: #1a1d22; --raised: #23272e; --ink: #eceff3; --muted: #a3aab5; --faint: #6c737f;
   --grid: #22262c; --band: #16191d; --line: #3b414a; --edge: #2c3138; --sel: #eceff3;
   --left: #3987e5; --right: #e0652f; --m0: #1ea676; --m1: #8f84e8; --m2: #b9800a; --m3: #e66767;
-  --tip-bg: #2b3039; --tip-fg: #f1f3f6;
+  --tip-bg: #2b3039; --tip-fg: #f1f3f6; --critical: #e79762;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 12px 32px rgba(0, 0, 0, .45);
   --scheme: dark; color-scheme: dark;
 }
@@ -549,3 +549,6 @@ button.tl-tw:hover { color: var(--ink); background: var(--raised); }
 .group-mark { margin-right: 5px; color: var(--muted); }
 .branch-clear { opacity: 0; }
 .branch-clear:hover, .branch-clear:focus-visible { opacity: 1; }
+.tl-critical-toggle{font:inherit;font-size:10px;color:var(--muted);border:0;background:none;cursor:pointer;margin-left:auto;white-space:nowrap;padding:4px}
+.tl-critical-toggle[aria-pressed="true"]{color:var(--critical)}
+.tl-critical{position:absolute;top:19px;height:2px;background:var(--critical);pointer-events:none}

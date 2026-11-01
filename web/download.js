@@ -32,7 +32,7 @@
       `<script>window.EXPLORER_SUMMARY=${inScript(X.summaryText)};</script>\n`,
       `<script>window.EXPLORER_LAYOUT=${inScript(JSON.stringify(doc))};</script>\n`];
     for (let k = 0; k < X.chunkCount; k++) {
-      parts.push(`<script>(window.EXPLORER_CHUNKS=window.EXPLORER_CHUNKS||{})[${k}]=${inScript(JSON.stringify(X.chunk(k)))};</script>\n`);
+      parts.push(`<script type="application/json" data-chunk="${k}">${inScript(JSON.stringify(X.chunk(k)))}</script>\n`);
     }
     for (const s of document.querySelectorAll('script[data-v]')) parts.push(`<script data-v="${esc(s.dataset.v)}">${inScript(s.text)}</script>\n`);
     parts.push('</body></html>\n');

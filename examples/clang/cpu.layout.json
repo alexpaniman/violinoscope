@@ -1,0 +1,16 @@
+{
+  "format": "violinoscope-layout",
+  "version": 4,
+  "name": "Sampled compiler CPU",
+  "unit": "Sampled CPU",
+  "tree": {
+    "span": "Sampled CPU",
+    "open": true,
+    "rest": true,
+    "children": [
+      {"span": "clang::ParseAST", "name": "Parse & analyze"},
+      {"span": "(anonymous namespace)::EmitAssemblyHelper::RunOptimizationPipeline", "name": "LLVM optimization"},
+      {"span": "(anonymous namespace)::EmitAssemblyHelper::RunCodegenPipeline", "name": "Code generation"}
+    ]
+  }
+}

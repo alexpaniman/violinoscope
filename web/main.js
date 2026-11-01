@@ -73,6 +73,7 @@
   // where the time goes, merged: its table, its flame graph, and, while a span is picked, its callers and callees.
   // All profile graphs share the flame view; only the table uses the spans view.
   X.go = (tab, mode) => {
+    if (meta.sampled_cpu && tab === 'timeline') { tab = 'profile'; mode = 'flame'; }
     if (tab === 'profile' && ['callers', 'callees'].includes(mode)) {
       S.profileRoot = S.name || S.profileRoot;
       if (S.profileRoot === null) mode = 'table';
@@ -802,6 +803,10 @@
 
   function start() {
     nameUnit();
+    if (meta.sampled_cpu) {
+      const tab = document.querySelector('[data-tab="timeline"]');
+      tab.disabled = true; tab.title = 'CPU samples do not record wall-clock spans or waits';
+    }
     X.tokens();
     X.violins.init();
     X.edit.init();

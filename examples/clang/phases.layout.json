@@ -1,0 +1,26 @@
+{
+  "format": "violinoscope-layout",
+  "version": 4,
+  "name": "Compiler phases",
+  "unit": "ExecuteCompiler",
+  "tree": {
+    "span": "ExecuteCompiler",
+    "open": true,
+    "children": [
+      {"span": "Frontend", "name": "Front end", "open": true, "children": [
+        {"span": "ParseDeclarationOrFunctionDefinition", "name": "Parsing"},
+        {"group": "Templates", "open": true, "children": [
+          {"span": "InstantiateClass", "name": "Classes"},
+          {"span": "InstantiateFunction", "name": "Functions"}
+        ]}
+      ]},
+      {"span": "Backend", "name": "Back end", "open": true, "children": [
+        {"span": "Optimizer", "name": "Optimization", "open": true, "children": [
+          {"span": "InlinerPass", "name": "Inlining"},
+          {"span": "InstCombinePass", "name": "Inst. combining"}
+        ]},
+        {"span": "CodeGenPasses", "name": "Code generation"}
+      ]}
+    ]
+  }
+}

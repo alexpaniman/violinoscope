@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Turn OpenTelemetry or Jaeger spans into a self-contained interactive HTML report.
+"""Turn traces or sampled CPU profiles into a self-contained interactive HTML report.
 
   python3 violinoscope.py before.jsonl after.jsonl --unit "Handle request" -o report.html
   python3 violinoscope.py baseline=old.json candidate=new.json --layout layout.json
 
-Inputs may be files, directories, globs, or NAME=PATH. Without --unit, trace roots
+Inputs: OTLP/Jaeger JSON, Chrome/Clang traces, and perf script .perf.txt exports.
+Use files, directories, globs, or NAME=PATH. Without --unit, trace roots
 are the units of work. Dataset names come from resources or input filenames.
 """
 import argparse
@@ -22,6 +23,7 @@ import tempfile
 from pathlib import Path
 
 import layouts
+from trace_formats import chrome_spans, perf_spans
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
@@ -59,18 +61,25 @@ def otlp_value(v):
     return None
 
 
-def from_otlp_span(s, relation_attr="span.link.relation"):
+def from_otlp_span(s, relation_attr="link.relation"):
     status = s.get('status') or {}
+    trace = b64_or_hex(s.get('traceId', ''))
+    links = []
+    for link in s.get('links', []):
+        attrs = {a['key']: otlp_value(a.get('value', {})) for a in link.get('attributes', [])}
+        relation = attrs.get(relation_attr, attrs.get('span.link.relation', '') if relation_attr == 'link.relation' else '')
+        target = b64_or_hex(link.get('spanId', ''))
+        target_trace = b64_or_hex(link.get('traceId', ''))
+        if target_trace and target_trace != trace:
+            target = target_trace + ':' + target
+        links.append((target, relation))
     return {
-        'trace': b64_or_hex(s.get('traceId', '')), 'id': b64_or_hex(s.get('spanId', '')),
+        'trace': trace, 'id': b64_or_hex(s.get('spanId', '')),
         'parent': b64_or_hex(s.get('parentSpanId', '')), 'name': s.get('name', ''),
         'start': int(s.get('startTimeUnixNano', 0)), 'end': int(s.get('endTimeUnixNano', 0)),
         'attrs': {a['key']: otlp_value(a.get('value', {})) for a in s.get('attributes', [])},
         'error': status.get('code') in OTLP_STATUS_ERROR, 'message': status.get('message', ''),
-        # Links to other spans, with what each means: depends_on, follows_from, or nothing said.
-        'links': [(b64_or_hex(l.get('spanId', '')), next((otlp_value(a.get('value', {})) for a in l.get('attributes', [])
-                                                          if a.get('key') == relation_attr), ''))
-                  for l in s.get('links', [])],
+        'links': links,
     }
 
 
@@ -85,15 +94,19 @@ def from_jaeger_trace(trace):
             'name': s.get('operationName', ''), 'start': start, 'end': start + int(s.get('duration', 0)) * 1000,
             'attrs': tags, 'error': error, 'message': tags.get('otel.status_description', ''),
             'dataset': tags.get('dataset.name') or trace.get('processes', {}).get(s.get('processID'), {}).get('serviceName'),
-            'links': [(r['spanID'].lower(), 'follows_from') for r in s.get('references', []) if r.get('refType') == 'FOLLOWS_FROM'],
+            # OpenTracing FOLLOWS_FROM does not require the predecessor to finish.
+            'links': [(r['spanID'].lower(), 'reference') for r in s.get('references', []) if r.get('refType') == 'FOLLOWS_FROM'],
         }
 
 
-def spans_from_document(doc, relation_attr="span.link.relation"):
+def spans_from_document(doc, relation_attr="link.relation", source=''):
+    if (isinstance(doc, dict) and 'traceEvents' in doc) or (isinstance(doc, list) and doc and isinstance(doc[0], dict) and 'ph' in doc[0]):
+        yield from chrome_spans(doc, source)
+        return
     if isinstance(doc, dict) and 'batches' in doc:  # Tempo's trace-by-ID JSON
         doc = {'resourceSpans': doc['batches']}
     if isinstance(doc, dict) and isinstance(doc.get('trace'), dict):
-        yield from spans_from_document(doc['trace'], relation_attr)
+        yield from spans_from_document(doc['trace'], relation_attr, source)
         return
     if isinstance(doc, dict) and 'resourceSpans' in doc:
         for rs in doc['resourceSpans']:
@@ -110,12 +123,15 @@ def spans_from_document(doc, relation_attr="span.link.relation"):
         yield from_otlp_span(doc, relation_attr)
     elif isinstance(doc, list):
         for item in doc:
-            yield from spans_from_document(item, relation_attr)
+            yield from spans_from_document(item, relation_attr, source)
 
 
-def read_file(path, relation_attr="span.link.relation"):
+def read_file(path, relation_attr="link.relation"):
     opener = gzip.open if path.endswith('.gz') else open
     with opener(path, 'rt', encoding='utf-8') as f:
+        if path.removesuffix('.gz').endswith(('.perf', '.perf.txt')):
+            yield from perf_spans(f, os.path.realpath(path))
+            return
         head = f.readline()
         while head and not head.strip():
             head = f.readline()
@@ -130,9 +146,9 @@ def read_file(path, relation_attr="span.link.relation"):
                     doc = json.loads(line)
                 except json.JSONDecodeError as error:
                     raise ValueError(f"{path}:{number}: invalid JSON: {error.msg}") from error
-                yield from spans_from_document(doc, relation_attr)
+                yield from spans_from_document(doc, relation_attr, os.path.realpath(path))
         else:
-            yield from spans_from_document(json.load(f), relation_attr)
+            yield from spans_from_document(json.load(f), relation_attr, os.path.realpath(path))
 
 
 def _first_line_parses(head):
@@ -185,7 +201,7 @@ def failure_reason(message):
 # ---------------------------------------------------------------------------------------------------------------
 # One unit of work: its root span and everything under it, in tree order.
 
-def analyze_unit(root, children, flow_attr="span.flow"):
+def analyze_unit(root, children, flow_attr="span.flow", parent_attr="parent.relation"):
     lo, hi = root['start'], root['end']
     inside, stack = [], [(root, -1)]
     seen = set()
@@ -198,13 +214,17 @@ def analyze_unit(root, children, flow_attr="span.flow"):
         row = len(inside) - 1
         for k in sorted(children[s['id']], key=lambda x: x['start'], reverse=True):
             stack.append((k, row))
-    # Rows: name, parent row, start and length in microseconds from the unit's start, and flags: 1 asynchronous
-    # (a new logical flow; unmarked descendants inherit it), 2 failed.
-    tree = [(s['name'], parent_row, (s['start'] - lo) // 1000, (s['end'] - s['start']) // 1000,
-             (1 if s['attrs'].get(flow_attr) == 'async' else 0) | (2 if s['error'] else 0))
-            for s, parent_row in inside]
-    # Links between its spans, as rows: from, to, and 1 for depends_on, 2 for follows_from, 0 else.
+    # Flags: 1 separate flow, 2 error, 4 explicit spawn, 8 missing causal prerequisite.
+    # Preserve nanoseconds without expanding whole-microsecond recordings with '.0'.
+    micros = lambda ns: ns // 1000 if ns % 1000 == 0 else ns / 1000
     row_of = {s['id']: row for row, (s, _) in enumerate(inside)}
+    tree = []
+    for s, parent_row in inside:
+        spawn = s['attrs'].get(parent_attr) == 'spawn'
+        missing = any(rel in ('depends_on', 'follows_from') and to not in row_of for to, rel in s.get('links', []))
+        flags = (5 if spawn else int(s['attrs'].get(flow_attr) == 'async')) | (2 if s['error'] else 0) | (8 if missing else 0)
+        tree.append((s['name'], parent_row, micros(s['start'] - lo), micros(s['end'] - s['start']), flags))
+    # Links between its spans, as rows: from, to, and 1 for depends_on, 2 for follows_from, 0 else.
     links = [x for row, (s, _) in enumerate(inside) for to, rel in s.get('links', []) if to in row_of
              for x in (row, row_of[to], {'depends_on': 1, 'follows_from': 2}.get(rel, 0))]
     return {'total_ms': (hi - lo) / 1e6, 'start_ns': lo, 'tree': tree, 'links': links, 'spans': [s for s, _ in inside]}
@@ -260,7 +280,7 @@ def build(args):
             roots = ([s for s in spans if s['name'] == args.unit] if args.unit
                      else [s for s in spans if not s['parent'] or s['parent'] not in spans_by_id])
             for root in roots:
-                rec = analyze_unit(root, children, args.flow_attr)
+                rec = analyze_unit(root, children, args.flow_attr, args.parent_relation_attr)
                 context, ancestor = [root], spans_by_id.get(root['parent'])
                 visited = {root['id']}
                 while ancestor and ancestor['id'] not in visited:
@@ -275,6 +295,8 @@ def build(args):
                 if args.skip_label and re.search(args.skip_label, label_value):
                     continue
                 group, label = None, label_value or None
+                if not label and root['attrs'].get('trace.format'):
+                    label = first_attr(context, 'job.name') or fallback
                 label_source = label_value if args.label_attr else text
                 if label_regex and label_source:
                     m = label_regex.search(label_source)
@@ -296,6 +318,7 @@ def build(args):
                 units += 1
                 unit_names[root['name']] += 1
                 base = {'dataset': dataset, 'group': group or dataset, 'label': label or (fp[:8] or root['id'][:8]),
+                        'sampled': root['attrs'].get('profile.kind') == 'sampled_cpu',
                         'trace': trace_id, 'fp': fp}
                 if root['error']:
                     failures.append(dict(base, reason=failure_reason(failure_detail(rec['spans'], root))))
@@ -330,8 +353,8 @@ def write_bundle(args, unit, records, failures, runs):
     for i, r in enumerate(records):
         units.append({
             'ds': r['dataset'], 'g': r['group'], 'l': r['label'], 'fp': r['fp'], 't': r['trace'],
-            'ms': round(r['total_ms'], 3), 'cpu': None if r['cpu_ms'] is None else round(r['cpu_ms'], 3),
-            'k': i // CHUNK, 'at': round((r['start_ns'] - epoch) / 1e6, 3),
+            'ms': round(r['total_ms'], 6), 'cpu': None if r['cpu_ms'] is None else round(r['cpu_ms'], 6),
+            'k': i // CHUNK, 'at': round((r['start_ns'] - epoch) / 1e6, 6),
         })
 
     # Asynchronous spans, other than a unit's root, go to a track per name, as Perfetto puts them, and within it to
@@ -376,6 +399,7 @@ def write_bundle(args, unit, records, failures, runs):
         'datasets': sorted(Counter(r['dataset'] for r in records).items()),
         'left': args.left.split(',') if args.left else [], 'right': args.right.split(',') if args.right else [],
         'with_text': bool(args.with_text),
+        'sampled_cpu': all(r.get('sampled', False) for r in records),
         'names': dict(n.split('=', 1) for n in args.name),
         'async_tracks': tracks,
         'runs': run_rows,
@@ -403,7 +427,7 @@ def write_bundle(args, unit, records, failures, runs):
                 if name not in chunk_index:
                     chunk_index[name] = len(chunk_names)
                     chunk_names.append(name)
-                # Flags: bits 0-1 async and error, 10 and up the asynchronous lane.
+                # Low bits retain flow/error/causal flags; bits 10+ store the separate-flow lane.
                 rows += [chunk_index[name], parent, start, dur, flags | (lane_of.get((i, row), 0) << 10)]
             trees.append({'rows': rows, 'links': r.get('links', []), 'text': r.get('text', '')})
         with open(os.path.join(out, 'data', f'trees-{k // CHUNK:04d}.js'), 'w') as f:
@@ -436,7 +460,8 @@ def write_page(out, split_data=False, output=None):
     if not split_data:
         summary = json.loads((data / 'summary.js').read_text().split('=', 1)[1].rstrip().rstrip(';'))
         count = max((u['k'] for u in summary['units']), default=-1) + 1
-        chunks = '\n'.join(script((data / f'trees-{k:04d}.js').read_text()) for k in range(count))
+        chunks = '\n'.join(script((data / f'trees-{k:04d}.js').read_text().split(']=', 1)[1].rstrip().rstrip(';'),
+                                 f' type="application/json" data-chunk="{k}"') for k in range(count))
         page = page.replace('<script src="core.js"></script>', chunks + '\n<script src="core.js"></script>')
     page = re.sub(r'<script src="([^"]+)"></script>', inline, page)
     target = Path(output) if output else Path(out) / 'index.html'
@@ -461,8 +486,9 @@ def main():
     ap.add_argument('-o', '--output', default='violinoscope.html', help='HTML file (default: violinoscope.html), or a directory')
     ap.add_argument('--layout', help='Saved layout JSON to use as the report’s default')
     ap.add_argument('--split-data', action='store_true', help='Keep data in separate files (requires directory output)')
-    ap.add_argument('--flow-attr', default='span.flow', help='Attribute marking a logical flow boundary with value async')
-    ap.add_argument('--link-relation-attr', default='span.link.relation', help='Link attribute naming depends_on or follows_from')
+    ap.add_argument('--parent-relation-attr', default='parent.relation', help='Child attribute marking independent work with value spawn')
+    ap.add_argument('--flow-attr', default='span.flow', help='Legacy attribute marking a separate flow with value async')
+    ap.add_argument('--link-relation-attr', default='link.relation', help='Link attribute naming depends_on or follows_from')
     ap.add_argument('--unit', help="the span that is one unit of work (default: each trace's root)")
     ap.add_argument('--title', help='the page title (default: the unit span\'s name)')
     ap.add_argument('--left', help='groups for the left half of each violin, comma-separated (default: the largest group)')

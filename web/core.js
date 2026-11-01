@@ -359,6 +359,11 @@
   X.loadChunk = (k) => {
     if (chunks.has(k)) return Promise.resolve(chunks.get(k));
     if (!chunkLoads.has(k)) {
+      const embedded = document.querySelector(`script[data-chunk="${k}"]`);
+      if (embedded) {
+        (window.EXPLORER_CHUNKS ||= {})[k] = JSON.parse(embedded.textContent);
+        embedded.remove();
+      }
       const inPage = (window.EXPLORER_CHUNKS || {})[k];
       chunkLoads.set(k, (inPage ? Promise.resolve() : loadScript(`data/trees-${String(k).padStart(4, '0')}.js`)).then(() => {
         const c = (window.EXPLORER_CHUNKS || {})[k];
@@ -389,12 +394,14 @@
   // Asynchronous spans go to a track per name, as in Perfetto, in the order the data gives.
   X.TRACKS = meta.async_tracks || [];
   const trackIndex = new Map(X.TRACKS.map((t, k) => [t.name, k]));
+  X.trackIndex = trackIndex;
 
   // A compilation's spans: name, parent, start and length in ms from its own start, depth, owning part, and for an
   // asynchronous span other than the root, its track and its lane in it across all compilations; and its links
   // between spans as rows: from, to, and 1 for depends_on, 2 for follows_from.
   const spanCache = new Map();
-  X.forgetSpans = () => spanCache.clear();
+  let cachedRows = 0;
+  X.forgetSpans = () => { spanCache.clear(); cachedRows = 0; };
   // Kept apart from the parsed spans, which are dropped and parsed again: each compilation's highest lane on each
   // track (-1 for none), once its spans are read.
   const trackLanes = new Array(X.NU).fill(null);
@@ -405,15 +412,53 @@
     return chunk ? X.traceFlows(chunk.trees[unit - u.k * meta.chunk]).extent : [0, u.ms];
   };
   X.trackLanesOf = (unit) => {
-    if (!trackLanes[unit] && X.hasSpans(unit)) X.spansOf(unit);
+    if (!trackLanes[unit] && X.hasSpans(unit)) prepareTracks(unit);
     return trackLanes[unit];
   };
   X.trackDepthsOf = (unit) => {
-    if (!trackDepths[unit] && X.hasSpans(unit)) X.spansOf(unit);
+    if (!trackDepths[unit] && X.hasSpans(unit)) prepareTracks(unit);
     return trackDepths[unit];
   };
+  // Aggregations read compact rows without allocating an object for every occurrence.
+  X.rawSpans = (unit) => {
+    const u = data.units[unit], chunk = chunks.get(u.k);
+    if (!chunk) return null;
+    const tree = chunk.trees[unit - u.k * meta.chunk];
+    return {tree, flat:tree.rows, names:chunk.names, flow:X.traceFlows(tree)};
+  };
+  function prepareTracks(unit) {
+    const {flat:f,names,flow} = X.rawSpans(unit), top = new Int16Array(X.TRACKS.length).fill(-1);
+    const depths = Array.from({length:X.TRACKS.length}, () => []);
+    for (let r=0; r<f.length/5; r++) {
+      const fr = flow.root[r];
+      if (!fr) continue;
+      const track = trackIndex.get(names[f[fr*5]]), lane = f[fr*5+4] >>> 10;
+      top[track] = Math.max(top[track],lane);
+      depths[track][lane] = Math.max(depths[track][lane] || 0,flow.depth[r]+1);
+    }
+    trackLanes[unit] = top; trackDepths[unit] = depths;
+  }
+  X.eachSpan = (unit, visit) => {
+    const raw = X.rawSpans(unit);
+    if (!raw) return;
+    const {flat:f, names, flow} = raw, s = {};
+    for (let r = 0; r < f.length / 5; r++) {
+      const fr = flow.root[r];
+      s.name = names[f[r * 5]]; s.parent = f[r * 5 + 1];
+      s.start = f[r * 5 + 2] / 1000; s.dur = f[r * 5 + 3] / 1000;
+      s.part = X.layout.partOfRow(unit, r); s.flowStart = !!flow.start[r];
+      s.flowRoot = fr; s.flowDepth = flow.depth[r];
+      s.track = fr > 0 ? trackIndex.get(names[f[fr * 5]]) : -1;
+      s.lane = fr > 0 ? f[fr * 5 + 4] >>> 10 : -1;
+      visit(s, r);
+    }
+  };
   X.spansOf = (unit) => {
-    if (spanCache.has(unit)) return spanCache.get(unit);
+    if (spanCache.has(unit)) {
+      const hit = spanCache.get(unit);
+      spanCache.delete(unit); spanCache.set(unit, hit);
+      return hit;
+    }
     const u = data.units[unit], chunk = chunks.get(u.k);
     if (!chunk) return null;
     const tree = chunk.trees[unit - u.k * meta.chunk], flat = tree.rows, n = flat.length / 5, flow = X.traceFlows(tree);
@@ -434,8 +479,14 @@
     const out = { rows, maxDepth, links: tree.links || [], total: rows[0] ? rows[0].dur : u.ms };
     trackLanes[unit] = top;
     trackDepths[unit] = depths;
-    if (spanCache.size > 400) spanCache.clear();
+    // Evict oldest units, retaining nearby pans instead of clearing the entire cache.
+    while (cachedRows + n > 100000 && spanCache.size) {
+      const oldest = spanCache.keys().next().value;
+      cachedRows -= spanCache.get(oldest).rows.length;
+      spanCache.delete(oldest);
+    }
     spanCache.set(unit, out);
+    cachedRows += n;
     return out;
   };
 
@@ -451,6 +502,7 @@
   // Its input's name, when it started and its label: "TPC-H · 26 Oct 17:19 · build fcd8251".
   X.runTitle = (k) => {
     const r = X.RUNS[k], t = new Date((meta.epoch_ms || 0) + r.at);
+    if (meta.sampled_cpu) return [r.id && X.groupName(r.id), 'Sampled CPU time', r.label].filter(Boolean).join(' · ');
     return [r.id && X.groupName(r.id), `${t.getDate()} ${MONTHS[t.getMonth()]} ${two(t.getHours())}:${two(t.getMinutes())}`, r.label]
       .filter(Boolean).join(' · ');
   };

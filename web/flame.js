@@ -80,21 +80,39 @@
   // A compilation a pixel wide shows, at each depth, the part that takes most of its time there: from its spans once
   // they are in, from the summary's parts until then.
   const dominant = new Map();
+  const chartCache = new Map();
+  function chartSpans(i) {
+    if (chartCache.has(i)) return chartCache.get(i);
+    const raw = X.rawSpans(i);
+    if (!raw) return null;
+    const {flat:f,flow,names} = raw, rows = [], parts = [], asyncRows = [];
+    let maxDepth = 0;
+    for (let r=0; r<f.length/5; r++) {
+      if (!flow.root[r]) maxDepth = Math.max(maxDepth,flow.depth[r]);
+      if (!flow.root[r] && flow.depth[r] >= ROWS) continue;
+      rows.push(r); parts.push(X.layout.partOfRow(i,r));
+      if (flow.root[r]) asyncRows.push(r);
+    }
+    const value = {...raw, rows:Int32Array.from(rows), parts:Int32Array.from(parts), asyncRows:Int32Array.from(asyncRows), maxDepth, links:raw.tree.links || []};
+    chartCache.set(i,value); return value;
+  }
   function dominantOf(i) {
     let d = dominant.get(i);
     if (d && (d.spans || !X.hasSpans(i))) return d;
-    const sp = X.hasSpans(i) ? X.spansOf(i) : null;
-    if (sp) {
-      const rows = Math.min(ROWS, sp.maxDepth + 1), sums = Array.from({ length: rows }, () => new Map());
-      for (const s of sp.rows) if (s.lane < 0 && s.depth < rows) sums[s.depth].set(s.part, (sums[s.depth].get(s.part) || 0) + s.dur);
-      d = sums.map((m, depth) => (depth === 0 ? -2 : [...m].sort((a, b) => b[1] - a[1])[0][0]));
+    if (X.hasSpans(i)) {
+      const sums = Array.from({ length: ROWS }, () => new Map());
       // Its asynchronous lanes, by track, each with the part of the longest span on it.
       const lanes = new Map();
-      for (const s of sp.rows) {
-        if (s.lane < 0) continue;
+      X.eachSpan(i,s => {
+        if (s.lane < 0) {
+          if (s.flowDepth < ROWS) sums[s.flowDepth].set(s.part,(sums[s.flowDepth].get(s.part)||0)+s.dur);
+          return;
+        }
         const k = `${s.track}:${s.lane}:${s.flowDepth}`;
         if (!lanes.has(k) || lanes.get(k)[1] < s.dur) lanes.set(k, [s.part, s.dur]);
-      }
+      });
+      while (sums.length && !sums[sums.length-1].size) sums.pop();
+      d = sums.map((m, depth) => depth === 0 ? -2 : [...m].sort((a,b)=>b[1]-a[1])[0]?.[0] ?? -1);
       d.lanes = [...lanes].map(([k, [part]]) => [...k.split(':').map(Number), part]);
       d.spans = true;
     } else {
@@ -176,9 +194,9 @@
     const into = (pk, s) => (s.flowStart ? 1 + s.track : pk);
     for (const i of units) {
       if (!X.hasSpans(i)) continue;
-      const sp = X.spansOf(i), map = new Int32Array(sp.rows.length);
+      const map = new Int32Array(X.rawSpans(i).flat.length / 5);
       loaded++;
-      sp.rows.forEach((s, r) => {
+      X.eachSpan(i, (s, r) => {
         const pk = s.parent >= 0 ? map[s.parent] : 0, p = into(pk, s);
         let k = nodes[p].kids.get(s.name);
         if (k === undefined) {
@@ -299,15 +317,17 @@
   // enough to draw its spans counts only the lanes of its spans in the window; a narrower one, all of its lanes.
   function asyncLanes() {
     const n = Array.from({length:X.TRACKS.length}, () => []), px = (W - LEFT - RIGHT) / (win.d1 - win.d0);
+    if (!X.TRACKS.length) return n;
     for (const line of M.lines) {
       const [lo, end] = visible(line);
       for (let j = lo; j < end; j++) {
         const i = line.units[j];
         if ((line.d1[j] - line.d0[j]) * px >= 3 && X.hasSpans(i)) {
-          for (const s of X.spansOf(i).rows) {
-            if (s.lane < 0) continue;
-            const a = line.d0[j] + s.start;
-            if (a <= win.d1 && a + s.dur >= win.d0) n[s.track][s.lane] = Math.max(n[s.track][s.lane] || 0, s.flowDepth + 1);
+          const {flat:f,flow,names,asyncRows} = chartSpans(i);
+          for (const r of asyncRows) {
+            const fr=flow.root[r],track=X.trackIndex.get(names[f[fr*5]]),lane=f[fr*5+4]>>>10;
+            const a = line.d0[j] + f[r*5+2]/1000;
+            if (a <= win.d1 && a + f[r*5+3]/1000 >= win.d0) n[track][lane] = Math.max(n[track][lane] || 0, flow.depth[r] + 1);
           }
         } else {
           const t = X.trackDepthsOf(i);
@@ -468,6 +488,7 @@
     ctx.globalAlpha = 0.6;
     ctx.lineWidth = 1.2;
     for (let k = 0; k < links.length; k += 3) {
+      if (!links[k + 2]) continue;
       const a = pos.get(links[k]), b = pos.get(links[k + 1]);
       if (!a || !b) continue;
       const x1 = b.x1, y1 = b.y, x2 = links[k + 2] === 2 ? a.x0 : a.x1, y2 = a.y;
@@ -527,7 +548,7 @@
         if (!X.hasSpans(i)) X.loadChunk(data.units[i].k).catch(() => {});
         continue;
       }
-      const sp = X.spansOf(i);
+      const sp = chartSpans(i);
       // With a compilation selected the others recede, as in the Timeline.
       const fade = S.sel !== null && !sel ? 0.4 : 1;
       if (sel) {
@@ -539,8 +560,12 @@
       if (sp) {
         // Its links, once it is wide enough for them to read.
         if (sel && w > 60) flows = { pos: new Map(), links: sp.links };
-        for (let r = 0; r < sp.rows.length; r++) {
-          const s = sp.rows[r];
+        const s = {}, {flat:f,flow,names} = sp;
+        for (let k = 0; k < sp.rows.length; k++) {
+          const r=sp.rows[k],fr=flow.root[r];
+          s.start=f[r*5+2]/1000; s.dur=f[r*5+3]/1000; s.name=names[f[r*5]];
+          s.part=sp.parts[k]; s.flowDepth=flow.depth[r]; s.depth=flow.depth[r]+Number(fr>0);
+          s.lane=fr>0?f[fr*5+4]>>>10:-1; s.track=fr>0?X.trackIndex.get(names[f[fr*5]]):-1;
           const async = s.lane >= 0, tr = async && lanes ? lanes.tracks[s.track] : null;
           if (async ? !tr || tr.offsets[s.lane] === undefined : s.depth >= ROWS) continue;
           const sx = a + s.start * scale, ex = sx + s.dur * scale;
@@ -842,6 +867,6 @@
     },
     invalidate() { M = null; },
     // Spans count toward other columns now: their colours, merged again.
-    layoutChanged() { dominant.clear(); M = null; if (S.view === 'flame') request(); },
+    layoutChanged() { dominant.clear(); chartCache.clear(); M = null; if (S.view === 'flame') request(); },
   };
 })();

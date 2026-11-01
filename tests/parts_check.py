@@ -62,6 +62,8 @@ async def main():
         # Display changes do not alter the automatic selection or measurements.
         await page.evaluate('''() => {const c=TX.data.columns.find(c=>!c.second&&TX.layout.open(c.id));if(c)TX.layout.collapse(c.id);}''')
         assert labels == await page.locator('.band-label').all_text_contents()
+        # Fresh reports start at the root; configure a phase for factor checks.
+        await page.evaluate('''()=>{const L=TX.layout;if(!TX.data.columns.some(c=>!c.second&&!c.async))L.add([L.candidates(L.rootKey())[0].id],L.rootKey());}''')
         # Projected fine-grained shares must sum to the same latency as the existing what-if model.
         for factor in (0, .5, 1.7):
             error = await page.evaluate('''factor => {

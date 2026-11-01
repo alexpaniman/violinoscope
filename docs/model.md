@@ -1,6 +1,6 @@
 # Time and layouts
 
-Each occurrence of the chosen `--unit` span is one measurement, even when units overlap. Its label comes from that span, its enclosing request, then its descendants. The root is elapsed time, not CPU consumption.
+Each occurrence of the chosen `--unit` span is one measurement, even when units overlap. Its label comes from that span, its enclosing request, then its descendants. The root measures elapsed time. Perf imports instead measure sampled CPU time per thread, with no wall-clock timeline.
 
 ## The tree
 
@@ -39,13 +39,23 @@ Reordering, aliases, collapse and hiding do not change allocation. Hidden contri
 
 **Not covered by spans** is a fixed virtual source: the unit interval minus all recorded proper descendant intervals. It behaves like a name selector and does not change when the layout changes.
 
-## Async and what-if
+## Causal spans and what-if
 
-Parent/child links alone do not tell whether a parent waits. The optional custom attribute `span.flow=async` starts a logical flow; descendants inherit it. `--flow-attr` changes the imported attribute. No recorded name is special-cased.
+Violinoscope treats ordinary parent/child spans as sequential calls. OpenTelemetry parentage alone does not guarantee that: applications with concurrency can supply these optional **custom attributes**, on spans and span links:
 
-A flow explicitly linked with `span.link.relation=depends_on` to its direct child flows represents a dependency group. Its coverage can count inside an enclosing main phase, clipped to that occurrence. It does not establish exact blocked time. Individual child flows are independent projections, including tails beyond the unit. Nested selections cannot borrow another occurrence's containing interval.
+| Where | Attribute | Meaning |
+| --- | --- | --- |
+| Independently progressing child | `parent.relation=spawn` | The parent launches this work. Record dispatch through result availability. Descendants inherit its separate flow. |
+| Link from an ordinary waiting span to each required result | `link.relation=depends_on` | All linked results must finish before this wait ends. Record the actual wait through resumption. |
+| Link from a later span to a prerequisite | `link.relation=follows_from` | The prerequisite must finish before this span starts. Useful across flows; ordinary sequential calls need no links. |
 
-What-if factors scale attributed main-flow intervals. Independent measurements remain unchanged, including inside mixed groups. Factors from independent analyses multiply where their eligible intervals intersect. Hidden factors still apply. This estimates latency under an assumption; it does not simulate scheduling.
+The wait remains in its caller's flame chart and main-tree allocation. Spawned work appears on separate tracks and in Projections; it can still be critical. No recorded name is special-cased. Attribute names are configurable with `--parent-relation-attr` and `--link-relation-attr`.
+
+The waterfall's **Critical path** toggle follows one longest recorded dependency chain across flows, marking exclusive intervals on open rows. It includes work launched before a wait and delay between readiness and resumption. Results are cached per trace. Tied paths can have more than one valid answer. Missing prerequisites, legacy waits, overlapping ordinary siblings and inconsistent clocks produce an estimate, identified in the tooltip; cycles produce no highlight. Highlighting uses measured timings, including when a what-if is active.
+
+Older `span.flow=async` and `span.link.relation` recordings still import. An old async group linked to its child flows can count within the main phase, but does not identify the actual suspended interval. Jaeger's legacy `FOLLOWS_FROM` is retained as a contextual reference, not treated as a strict completion dependency.
+
+What-if factors scale attributed main-flow intervals. Independent measurements remain unchanged, including inside mixed groups. Factors from independent analyses multiply where their eligible intervals intersect. Hidden factors still apply. This is an attribution-based estimate: it does not reschedule the causal graph or predict a change of critical path.
 
 Flame charts, waterfall, callers/callees and the table retain logical flow boundaries. Selecting a query scrolls the waterfall; zoom and selection keep its row list stable. Filtering datasets and folding branches still changes the list deliberately.
 
