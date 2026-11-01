@@ -33,16 +33,20 @@ Measure a real report with:
 python3 tests/performance_check.py report.html --stress --output performance.json
 ```
 
-Measured in Chromium at 1600×1050; actions include two animation frames:
+Measured in headless Chromium at 1600×1050, with software rendering; actions include two animation frames:
 
 | Recording | Load | Move / reorder | Add 75 names | Open chart | Expand full table tree |
 | --- | --- | --- | --- | --- | --- |
-| YDB: 822,426 spans, 6,586 units | 4.5 s | 150 / 33 ms | 1.06 s | 104 ms | 33 ms |
-| LLVM time traces: 255,163 spans, 64 files | 2.5 s | 33 / 33 ms | 170 ms | 107 ms | 33 ms |
-| LLVM perf: 207,281 segments, 63 files, 48,768 paths | 2.2 s | 116 / 33 ms | 134 ms | 107 ms | 183 ms |
+| Request traces: 822,426 spans, 6,586 units | 4.5 s | 150 / 33 ms | 1.06 s | 104 ms | 33 ms |
+| Clang build: 7,621,663 spans, 4,064 units | 21.9 s | 266 / 33 ms | 1.62 s | 676 ms | 33 ms |
+| Clang CPU: 8,462,574 segments, 3,669 units, 609,569 paths | 32.0 s | 700 / 347 ms | 1.11 s | 249 ms | 1.92 s |
 
-Drag handlers stayed below 4 ms. Retained JS heap was about 143, 15 and 165 MB respectively. A first picker calculation in an already populated perf layout takes 0.9–1.0 s for roughly 4,900 names; subsequent searches use its cached results. Panning ranged from 20–80 ms including animation frames. These are tested workloads, not capacity guarantees: path diversity, stack depth, unit count and visible columns matter as much as span count.
+With all groups enabled, the 55,989-unit time-trace report loads in about 29 s. Move/reorder take 379/83 ms, adding 75 names takes 4.0 s, expanding them takes 2.8 s, and the automatic breakdown opens in 1.2 s. The final CPU report has 10,208,253 segments across 30,275 units: load 42.5 s, breakdown 4.9 s, chart 68 ms, flamegraph 2.7 s, table 2.3 s and waterfall 485 ms.
 
-The perf fixture exposed a 12 s startup from eager name-graph closure and a 13 s expanded-table render. Recursive name components now share lazy reachability; picker previews revisit only affected routes and interval patterns. The table and waterfall render viewport rows, and chronological charts index complete stacks by depth/time instead of truncating at eight levels. Text measurements are bounded and cached. None of these changes alters allocation rules.
+Large recordings still exceed the test's 2 s action budget. First configured/group CPU pickers take 6–10 s; dissolving a group into independent projections takes about 6 s. Picker calculation yields between previews and lists render only visible rows; cold index preparation can still pause for about 2 s. Cached searches are immediate. These limits are recorded rather than hidden by raising the test budget.
+
+Path diversity, stack depth, unit count and visible columns matter as much as span count. These measurements describe tested workloads, not a capacity guarantee. Retained heap on the large CPU fixture is about 1.6 GB. Drag handlers stay below 4 ms. After bounding minimap work to pixels, waterfall scrolling takes about 33 ms instead of occasionally stalling for 20 s.
+
+Containment uses direct edges and lazy recursive-name reachability; picker previews revisit affected routes and interval patterns. Call paths use compact parent/name keys. Breakdown rows and interpolation coefficients are sparse; curve sums preserve the same monotone interpolation and partition. Tables, pickers and waterfalls render viewport rows. Offline HTML embeds compressed data; the browser decompresses one chunk at a time. These changes do not alter allocation rules.
 
 The browser checks cover actual tab state (including perf Samples), deep chart scrolling, all profile views, table search/expansion/scrolling, critical paths, drag editing and offline export. Model fuzzing checks snapshot undo, cold recomputation and picker previews against actual edits. Critical-path fixtures and 10,000 randomized fork/join graphs check coverage, joins, resumption delay, unjoined work, missing links and cycles; 100,001 sequential spans take about 26 ms.

@@ -9,7 +9,19 @@
     "children": [
       {
         "span": "clang::ParseAST",
-        "name": "Front end"
+        "name": "Front end",
+        "open": true,
+        "rest": true,
+        "children": [
+          {
+            "span": "clang::Parser::ParseDeclaration",
+            "name": "Declarations"
+          },
+          {
+            "span": "clang::Parser::ParseFunctionDefinition",
+            "name": "Function parsing"
+          }
+        ]
       },
       {
         "group": "Templates",
@@ -27,11 +39,26 @@
       },
       {
         "span": "(anonymous namespace)::EmitAssemblyHelper::RunOptimizationPipeline",
-        "name": "Optimization"
+        "name": "Optimization",
+        "open": true,
+        "rest": true,
+        "children": [
+          {
+            "span": "llvm::InlinerPass::run",
+            "name": "Inlining"
+          }
+        ]
       },
       {
         "span": "(anonymous namespace)::EmitAssemblyHelper::RunCodegenPipeline",
-        "name": "Code generation"
+        "name": "Code generation",
+        "open": true,
+        "children": [
+          {
+            "span": "llvm::SelectionDAGISel::runOnMachineFunction",
+            "name": "Instruction selection"
+          }
+        ]
       },
       {
         "group": "Repeated passes",
@@ -53,5 +80,21 @@
       }
     ]
   },
-  "projections": []
+  "projections": [
+    {
+      "span": "clang::ParseAST",
+      "name": "Full front end",
+      "open": true,
+      "children": [
+        {
+          "span": "clang::Sema::InstantiateClass",
+          "name": "Classes"
+        },
+        {
+          "span": "clang::Sema::InstantiateFunctionDefinition",
+          "name": "Functions"
+        }
+      ]
+    }
+  ]
 }

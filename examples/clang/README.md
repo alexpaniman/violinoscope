@@ -1,35 +1,31 @@
-# Compiling LLVM
+# Clang build and tests
 
-The README image compares compiling LLVM library files with compiling its unit tests. Each dot is one source file. Templates and repeated optimization passes are extracted into top-level groups; their time is subtracted from the broader phases. The CPU layout makes the same comparison from sampled stacks.
+Each time-trace dot is a compiler invocation; each CPU dot is one sampled compiler thread. The example records the full Clang build and its test dependencies, compilation of the unit-test binaries, and compiler invocations made by the Clang regression suite. Groups remain separate so you can compare their different workloads.
 
-Collected with Clang 20.1.8 against LLVM `llvmorg-20.1.8` (`87f0227cb601`), Release flags: 32 evenly spaced files from `llvm/lib/Support` and 32 from `llvm/unittests/ADT`. This is a representative compilation subset, not a full LLVM build or a run of the test executables. It produced 255,163 time-trace spans. Perf produced 207,281 stack segments across 63 files; one very short file had no samples.
-
-Configure with an installed Clang, CMake and Ninja, then generate the headers needed by the selected files:
+Requires Clang, CMake, Ninja, Git, Python and the usual C/C++ development headers and libraries. Linux perf is optional. Use a fresh build directory to capture every compilation; an incremental build records only commands that actually run.
 
 ```sh
 git clone --depth 1 --branch llvmorg-20.1.8 https://github.com/llvm/llvm-project.git /tmp/llvm-project
-cmake -G Ninja -S /tmp/llvm-project/llvm -B /tmp/llvm-build \
-  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-  -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_INCLUDE_BENCHMARKS=OFF
-cmake --build /tmp/llvm-build --target intrinsics_gen
-python3 examples/clang/collect_build.py /tmp/llvm-build/compile_commands.json /tmp/llvm-traces \
-  --group 'LLVM=llvm/lib/Support/*.cpp' --group 'Tests=llvm/unittests/ADT/*.cpp' --perf
+python3 examples/clang/collect.py /tmp/llvm-project /tmp/clang-build /tmp/clang-traces --frequency 49
 ```
 
-`--perf` requires Linux perf access; omit it for time traces alone. Collection is sequential. If installed, `--launcher 'balance-exec --kind compile --'` shares the machine's build resources. `--limit 0` collects every matching file; the default is 32 per group. Other source trees work through their compilation database, provided generated headers already exist.
+Omit `--frequency` for time traces alone. All default LLVM backends are built. `--stage build` or `--stage tests` runs just that stage; rerunning the build resumes through Ninja. `--cmake-arg=-DNAME=VALUE` adds a CMake setting. For resource control with clang-balancer, add `--launcher 'balance-exec --kind compile --' --link-launcher 'balance-exec --kind link --'`.
 
 ```sh
-python3 violinoscope.py 'LLVM=/tmp/llvm-traces/LLVM/*.json' 'Tests=/tmp/llvm-traces/Tests/*.json' \
-  --unit ExecuteCompiler --left LLVM --right Tests --layout examples/clang/phases.layout.json \
-  --title 'Clang compiling LLVM' -o clang.html
-python3 violinoscope.py 'LLVM=/tmp/llvm-traces/LLVM/*.perf.txt.gz' 'Tests=/tmp/llvm-traces/Tests/*.perf.txt.gz' \
-  --unit 'Sampled CPU' --left LLVM --right Tests --layout examples/clang/cpu.layout.json \
-  --title 'Clang CPU samples' -o clang-cpu.html
+python3 violinoscope.py \
+  'Build=/tmp/clang-traces/Build/*/*.json' \
+  'Unit tests=/tmp/clang-traces/Unit tests/*/*.json' \
+  'Regression tests=/tmp/clang-traces/Regression tests/*/*.json' \
+  --unit ExecuteCompiler --left Build --right 'Unit tests' \
+  --layout examples/clang/phases.layout.json --title 'Clang build and tests' -o clang.html
 ```
 
-Time traces retain events lasting at least 100 µs; perf samples CPU at 199 Hz with DWARF stacks. Both are adjustable. Sampled widths exclude waits and scheduling gaps; the Samples tab shows stack order on a CPU-time axis. Unknown frames remain visible. Very short functions may receive no samples.
+For the CPU report, replace `*.json` with `*.perf.txt.gz`, the unit with `Sampled CPU`, the layout with `examples/clang/cpu.layout.json`, and the output with `clang-cpu.html`.
 
-The output retains exact commands, compiler versions, source hashes, logs and per-file metadata. `--resume` reuses completed files with matching commands/source hashes; use a new output directory if headers or the toolchain changed. Failed compilations stop collection. Empty perf recordings are kept under `metadata` and omitted from the CPU report.
+The phase layout extracts templates, expands parsing and inlining, shows Rest rows, hides the intermediate Backend, and compares independent front-end and back-end projections. The CPU layout also extracts repeated optimizer passes. Main-tree shares subtract; projections overlap freely. The initial comparison is Build versus Unit tests; use the legend to enable Regression tests.
 
-The older `collect.py` helper remains available for fmt 11.2.0: it compares 14 translation units at `-O0` and `-O2`, twice each. Its input is a fmt checkout and an output directory; use the same phase layout and `ExecuteCompiler` unit.
+Time traces retain events lasting at least 1 ms; `--granularity` changes that cutoff. CPU samples measure time on CPU, not elapsed time or waits. Very short invocations can have no samples. Diagnostic-only commands and existing time-trace tests may produce no additional time trace. Failed and expected-to-fail compilations remain in the recording metadata. Two LLVM 20 mangling stress tests skip time tracing because expanding their type names can exhaust memory; perf still records them. Tests that copy the compiler, check its executable path or restrict file descriptors can fail under the wrapper. Recheck those with `CLANG` unset.
+
+`provenance.json` records the source revision, compiler and build configuration. `metadata/` records each command, outcome and available profiles; `lit-results.json` records regression-suite results, including unsupported and failed tests. Test coverage depends on the host's tools and enabled targets. A recording is not a claim that all tests passed.
+
+The README image was exported with the picture button from LLVM 20.1.8: 3,795 build compilations, 269 unit-test builds and 51,925 regression time traces, recorded at 1 ms / 49 Hz. The CPU report contains 30,275 sampled threads and 10.2 million stack segments. The build completed successfully. Of 46,315 discovered tests, 46,064 passed and 31 were expected failures; 50 failed under instrumentation. Correcting the launcher resolved 23 on retry. All 50 passed with the native compiler. Recordings include retries; two interrupted stress profiles were quarantined instead of included.

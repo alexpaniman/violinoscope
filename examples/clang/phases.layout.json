@@ -9,7 +9,19 @@
     "children": [
       {
         "span": "Frontend",
-        "name": "Front end"
+        "name": "Front end",
+        "open": true,
+        "rest": true,
+        "children": [
+          {
+            "span": "ParseClass",
+            "name": "Class parsing"
+          },
+          {
+            "span": "ParseFunctionDefinition",
+            "name": "Function parsing"
+          }
+        ]
       },
       {
         "group": "Templates",
@@ -26,32 +38,60 @@
         ]
       },
       {
-        "span": "Optimizer",
-        "name": "Optimization"
-      },
-      {
-        "span": "CodeGenPasses",
-        "name": "Code generation"
-      },
-      {
-        "group": "Repeated passes",
+        "span": "Backend",
+        "hidden": true,
         "open": true,
         "children": [
           {
-            "span": "InstCombinePass",
-            "name": "Inst. combining"
+            "span": "Optimizer",
+            "name": "Optimization",
+            "open": true,
+            "rest": true,
+            "children": [
+              {
+                "span": "InlinerPass",
+                "name": "Inlining"
+              }
+            ]
           },
           {
-            "span": "GVNPass",
-            "name": "Value numbering"
-          },
-          {
-            "span": "SimplifyCFGPass",
-            "name": "CFG cleanup"
+            "span": "CodeGenPasses",
+            "name": "Code generation"
           }
         ]
       }
     ]
   },
-  "projections": []
+  "projections": [
+    {
+      "span": "Frontend",
+      "name": "Full front end",
+      "open": true,
+      "children": [
+        {
+          "span": "InstantiateClass",
+          "name": "Classes"
+        },
+        {
+          "span": "InstantiateFunction",
+          "name": "Functions"
+        }
+      ]
+    },
+    {
+      "span": "Backend",
+      "name": "Full back end",
+      "open": true,
+      "children": [
+        {
+          "span": "Optimizer",
+          "name": "Optimization"
+        },
+        {
+          "span": "CodeGenPasses",
+          "name": "Code generation"
+        }
+      ]
+    }
+  ]
 }
