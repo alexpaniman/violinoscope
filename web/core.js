@@ -45,16 +45,20 @@
     const raw = span / count, p = 10 ** Math.floor(Math.log10(raw));
     return [1, 2, 2.5, 5, 10].map((m) => m * p).find((s) => s >= raw) || 10 * p;
   };
-  // Durations for axes: the unit follows the step.
+  // Axis labels retain the step's precision even far into a long recording.
   X.fmtSpan = (ms, step) => {
     if (Math.abs(ms) < 1e-9) return '0';
+    const decimals = scale => {
+      let n = 0;
+      while (n < 9 && Math.abs(step / scale * 10 ** n - Math.round(step / scale * 10 ** n)) > 1e-6) n++;
+      return n;
+    };
     if (Math.abs(ms) >= 60000) {
-      const m = Math.floor(ms / 60000), s = (ms - m * 60000) / 1000;
-      return `${m}:${(step >= 1000 ? Math.round(s).toString() : s.toFixed(step >= 100 ? 1 : 3)).padStart(step >= 1000 ? 2 : (step >= 100 ? 4 : 6), '0')}`;
+      const n = decimals(1000), seconds = Number((ms / 1000).toFixed(n)), m = Math.floor(seconds / 60);
+      return `${m}:${(seconds - m * 60).toFixed(n).padStart(n ? n + 3 : 2, '0')}`;
     }
-    if (step >= 1000) return `${X.round3(ms / 1000)} s`;
-    if (step >= 1) return `${X.round3(ms)} ms`;
-    return `${X.round3(ms * 1000)} µs`;
+    const scale = Math.abs(ms) >= 1000 || step >= 1000 ? 1000 : Math.abs(ms) >= 1 || step >= 1 ? 1 : .001;
+    return `${(ms / scale).toFixed(decimals(scale))} ${scale === 1000 ? 's' : scale === 1 ? 'ms' : 'µs'}`;
   };
 
   // ---------------------------------------------------------------------------------------------------------
@@ -84,6 +88,7 @@
     // The tab and each tab's mode; view is what they put on screen: violins, flame (the flame chart by time or the
     // flame graph, heavy), timeline (the waterfall) or spans (the table, as a list or a tree).
     tab: 'violins', tl: 'chart', prof: 'table', view: 'violins', mode: 'share', linear: false, flame: 'time',
+    timeline: meta.sampled_cpu || meta.timeline === 'unit' ? 'unit' : 'wall',
     side: {}, range: null, factors: new Map(),
     sel: null, card: null, hover: null, hoverCol: null, search: '', matches: null,
     sort: { key: 'self', dir: -1 }, tlSort: { key: 'ms', dir: -1 }, name: null, namePath: null, profileRoot: null, spansMode: 'table', tableTree: false, spansQuery: '', treeOpen: new Map(), treeLevel: 2,
@@ -522,6 +527,7 @@
   X.runTitle = (k) => {
     const r = X.RUNS[k], t = new Date((meta.epoch_ms || 0) + r.at);
     if (meta.sampled_cpu) return [r.id && X.groupName(r.id), 'Sampled CPU time', r.label].filter(Boolean).join(' · ');
+    if (S.timeline === 'unit') return [r.id && X.groupName(r.id), 'Concatenated unit time', r.label].filter(Boolean).join(' · ');
     return [r.id && X.groupName(r.id), `${t.getDate()} ${MONTHS[t.getMonth()]} ${two(t.getHours())}:${two(t.getMinutes())}`, r.label]
       .filter(Boolean).join(' · ');
   };
@@ -558,9 +564,9 @@
     return { run, r0, d0, r1: r0, d1: d0, gaps, toD, toR, fold };
   }
   X.timeFold = (units) => {
-    // Sample periods form a CPU-time sequence, not a wall clock. Pack independent units without idle gaps.
-    if (meta.sampled_cpu) {
-      const runs = [], start = new Float64Array(data.units.length);
+    // Pack complete units, including any work before or after the root. Recorded times stay unchanged.
+    if (S.timeline === 'unit') {
+      const runs = [], start = new Float64Array(data.units.length), boundaries = [];
       let end = 0, cur;
       for (const i of units) {
         const run = X.runOf(i);
@@ -568,11 +574,13 @@
           cur = {run, r0:end, d0:end, r1:end, d1:end, gaps:[], toD:t=>t, toR:d=>d};
           runs.push(cur);
         }
-        start[i] = end;
-        end += data.units[i].ms;
+        const [lo, hi] = X.spanExtent(i);
+        boundaries.push(end);
+        start[i] = end - lo;
+        end = start[i] + Math.max(hi, data.units[i].ms);
         cur.r1 = cur.d1 = end;
       }
-      return {runs, start, gaps:[], breaks:runs.slice(1).map(r=>r.d0)};
+      return {runs, start, boundaries, gaps:[], breaks:runs.slice(1).map(r=>r.d0)};
     }
     const runs = [], gaps = [];
     let cur = null, end = 0, d = 0;
@@ -622,7 +630,7 @@
   // Wall-clock ticks for display times d0..d1 across px pixels: on round times of each run's clock, skipping folded
   // stretches, never crowded, and clear of the runs' labels.
   X.clockTicks = (fold, d0, d1, px, labels) => {
-    if (meta.sampled_cpu) return X.elapsedTicks(fold, d0, d1, px, labels);
+    if (S.timeline === 'unit') return X.elapsedTicks(fold, d0, d1, px, labels);
     const epoch = meta.epoch_ms || 0, out = [], xOf = (d) => (d - d0) / (d1 - d0) * px;
     const step = X.tickStep(Math.max(1e-6, d1 - d0), Math.max(2, px / 130));
     let last = -Infinity;
@@ -647,6 +655,16 @@
   X.elapsedTicks = (nav, d0, d1, px, labels) => {
     const out = [], xOf = (d) => (d - d0) / (d1 - d0) * px;
     const step = X.tickStep(Math.max(1e-6, d1 - d0), Math.max(2, px / 110));
+    if (S.timeline === 'unit') {
+      let last = -Infinity;
+      for (let d = Math.max(0, Math.ceil(d0 / step)) * step; d <= d1; d += step) {
+        const label = d === 0 ? '0' : X.fmtSpan(d, step), x = xOf(d), w = X.textWidth(label, 11, 400);
+        if (x - last < w + 18 || labels?.some(l => x + w + 12 > l.x && x - 8 < l.x + l.w)) continue;
+        last = x;
+        out.push({d, label});
+      }
+      return out;
+    }
     let last = -Infinity;
     for (const run of nav.runs) {
       if (run.d1 < d0 || run.d0 > d1) continue;

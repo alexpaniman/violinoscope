@@ -1,8 +1,6 @@
-// Navigation in time, shared by the Timeline's two modes, the flame chart and the waterfall: the compilations in view
-// laid out where they ran, run after run, each run on its own clock with long idle stretches folded; the stretch of
-// it on screen (S.tw, in display time); and the overview strip that shows and moves it. Zooming or panning either
-// mode moves it for both. It never changes which compilations are in view: that is the filters' job. In the
-// Profile's flame graph the strip stays, showing the merged chart in miniature and moving that chart's own zoom.
+// Shared Timeline navigation: recorded clocks with folded idle gaps, or complete units concatenated in start order.
+// S.tw and the overview use display time; neither arrangement changes recordings or filters. The Profile's
+// flamegraph uses the same overview to navigate its own merged time axis.
 (function () {
   'use strict';
   const X = window.TX, S = X.S, data = X.data;
@@ -25,7 +23,7 @@
   // The compilations in view, run by run in the order they ran, and where each starts in display time (start[i]).
   // A new set starts on all of it, or on the selected compilation.
   const model = X.nav.model = () => {
-    const viewKey = X.viewKey(), key = `${viewKey}|${X.chunksLoaded()}`;
+    const viewKey = `${X.viewKey()}|${S.timeline}`, key = `${viewKey}|${X.chunksLoaded()}`;
     if (M && M.key === key) return M;
     const units = X.allInView().sort((a, b) => X.runOf(a) - X.runOf(b) || data.units[a].at - data.units[b].at);
     const fold = X.timeFold(units), pos = new Map(), start = new Float64Array(data.units.length).fill(NaN);
@@ -40,11 +38,17 @@
     });
     if (!units.length) { dMin = 0; dMax = 1; }
     const previous = M;
-    M = { key, viewKey, units, pos, start, runs: fold.runs, gaps: fold.gaps, breaks: fold.breaks, dMin, dMax };
+    M = { key, viewKey, units, pos, start, runs: fold.runs, gaps: fold.gaps, breaks: fold.breaks, boundaries:fold.boundaries, dMin, dMax };
     if (previous && previous.viewKey === viewKey) {
       // Newly loaded tails can change both the bounds and folded gaps. Keep a zoom on the same real times;
       // a view showing everything follows the expanded bounds instead.
       const remap = (w) => w.map((d) => {
+        if (S.timeline === 'unit' && previous.units.length) {
+          let lo = 0, hi = previous.units.length;
+          while (lo < hi) { const mid = (lo + hi) >>> 1; if (previous.boundaries[mid] <= d) lo = mid + 1; else hi = mid; }
+          const i = previous.units[Math.max(0, lo - 1)];
+          return d - previous.start[i] + M.start[i];
+        }
         const oldRun = previous.runs.findLast((r) => r.d0 <= d) || previous.runs[0];
         const newRun = oldRun && M.runs.find((r) => r.run === oldRun.run);
         return newRun ? newRun.toD(oldRun.toR(d)) : d;
@@ -70,6 +74,17 @@
   }
 
   X.nav.win = () => { model(); if (!S.tw) S.tw = all(); return S.tw; };
+  X.nav.unitBreaks = (a, b, pixels) => {
+    const m = model(), bounds = m.boundaries, out = [];
+    if (!bounds) return out;
+    let lo = 0, hi = bounds.length;
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (bounds[mid] < a) lo = mid + 1; else hi = mid; }
+    const min = (b-a) / pixels * 12;
+    for (let j = Math.max(1, lo); j < bounds.length && bounds[j] <= b; j++) {
+      if ((bounds[j+1] ?? m.dMax) - bounds[j] >= min && bounds[j] - (out.at(-1) ?? -Infinity) >= min) out.push(bounds[j]);
+    }
+    return out;
+  };
 
   // Show d0..d1, gliding there when asked to: the width in log space so a zoom feels even. `unit` tells the views
   // whose stretch it is, so the Timeline can bring its rows up.
@@ -104,6 +119,14 @@
 
   X.nav.showUnit = (i) => { model(); if (M.pos.has(i)) { const [a, b] = extent(i); X.nav.set(a, b, { animate: true, unit: i, push: true }); } };
   X.nav.fitAll = () => { const [a, b] = all(); X.nav.set(a, b, { animate: true, push: true }); };
+  X.nav.arrange = (mode) => {
+    if (!['unit', 'wall'].includes(mode) || X.meta.sampled_cpu || mode === S.timeline) return;
+    cancelAnimationFrame(anim);
+    S.timeline = mode;
+    model();
+    X.render();
+    changed(S.sel === null ? {} : {unit:S.sel});
+  };
   // Back to where the time views were before the last jump; false when there is nowhere to go back to.
   const timeView = () => S.view === 'timeline' || (S.view === 'flame' && S.flame === 'time');
   X.nav.back = () => {

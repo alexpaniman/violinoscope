@@ -130,6 +130,12 @@ async def main():
             assert actual['join'] == 50 and actual['copy'] == 70 and actual['phase'] == 60, actual
             assert actual['sameFlow'] and actual['childDepth'] == 1 and not actual['childStartsFlow'], actual
             assert actual['bad'] and 'Await table metadata' in actual['main'] and 'Resolve' not in actual['main'], actual
+            # Concatenation packs tails too, and changes no unit time or flow semantics.
+            await page.evaluate("TX.nav.arrange('unit')")
+            assert await page.evaluate('TX.nav.model().dMax') == 12 * 130
+            assert await page.evaluate('''()=>{const m=TX.nav.model();return m.units.every((i,k)=>!k||m.start[i]>=m.start[m.units[k-1]]+TX.spanExtent(m.units[k-1])[1]);}''')
+            assert await page.evaluate('TX.totalMs(0)') == 100
+            await page.evaluate("TX.nav.arrange('wall')")
             for shown in (True, False, True):
                 projection = await page.evaluate('''shown => {
                   const {phase,join}=flowTest,T=TX.layout;if(shown)T.add([join]);else T.hide(join);

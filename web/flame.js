@@ -1,5 +1,5 @@
 // Spans stacked on one canvas, in two modes as speedscope has them. The Timeline's flame chart (by time): every
-// compilation in view on one line where it really ran, run after run, its asynchronous spans on a track per name
+// compilation in view where it ran or concatenated by unit, its asynchronous spans on a track per name
 // below, in lanes that split only where they overlap; the stretch of time shown is the one the waterfall shares
 // (X.nav), zoomed and panned like Perfetto. The Profile's flame graph (left heavy): spans with the same path merged,
 // heaviest first, over the selected compilation or else everything in view: the compiler's line as one chart, then
@@ -58,17 +58,26 @@
   function build() {
     const nav = X.nav.model(), units = nav.units;
     // The line: compilations one after another. Two that really overlap would get a second line.
-    const lines = [], pos = new Map();
+    const lines = [], pos = new Map(), trackDepths = Array.from({length:X.TRACKS.length}, () => []);
     for (const i of units) {
       const d = nav.start[i], e = d + data.units[i].ms;
-      let line = lines.find((l) => l.end <= d);
-      if (!line) { line = { units: [], d0: [], d1: [], reach: [], end: -Infinity }; lines.push(line); line.number = lines.length; }
+      let line = S.timeline === 'unit' ? lines[0] : lines.find((l) => l.end <= d);
+      if (!line) { line = { units: [], d0: [], d1: [], reach: [], end: -Infinity, depth:ROWS }; lines.push(line); line.number = lines.length; }
       pos.set(i, { line, j: line.units.length });
       line.units.push(i); line.d0.push(d); line.d1.push(e);
       line.reach.push(Math.max(line.reach.at(-1) ?? -Infinity, d + X.spanExtent(i)[1]));
       line.end = e;
+      const raw = X.rawSpans(i);
+      if (raw) line.depth = Math.max(line.depth, raw.flow.mainDepth + 1);
+      if (X.TRACKS.length) X.trackDepthsOf(i)?.forEach((lanes, k) => lanes.forEach((depth, lane) => {
+        trackDepths[k][lane] = Math.max(trackDepths[k][lane] || 0, depth);
+      }));
     }
-    M = { key: `${nav.key}|${profileKey()}`, nav, units, lines, pos, heavy: null };
+    for (const line of lines) {
+      line.enter = new Float64Array(line.units.length);
+      for (let j = line.units.length - 1; j >= 0; j--) line.enter[j] = Math.min(line.enter[j+1] ?? Infinity, line.d0[j] + X.spanExtent(line.units[j])[0]);
+    }
+    M = { key: `${nav.key}|${profileKey()}`, nav, units, lines, pos, trackDepths, heavy: null };
     return M;
   }
 
@@ -76,7 +85,8 @@
     const nav = X.nav.model();
     if (!M || M.key !== `${nav.key}|${profileKey()}`) {
       cancelAnimationFrame(anim);
-      build(); scrollY = 0; heavyBack = [];
+      if (!M || M.nav.viewKey !== nav.viewKey) scrollY = 0;
+      build(); heavyBack = [];
     }
     return M;
   }
@@ -346,7 +356,7 @@
     let lo = 0, hi = line.units.length;
     while (lo < hi) { const m = (lo + hi) >> 1; if (line.reach[m] < win.d0) lo = m + 1; else hi = m; }
     let end = lo;
-    while (end < line.units.length && line.d0[end] <= win.d1) end++;
+    while (end < line.units.length && line.enter[end] <= win.d1) end++;
     return [lo, end];
   }
 
@@ -355,47 +365,16 @@
     return Math.max(data.units[i].ms, hi - lo) * scale >= 3;
   };
 
-  // Lanes of each asynchronous track in the window: as many as its busiest moment there needs. A compilation wide
-  // enough to draw its spans counts only the lanes of its spans in the window; a narrower one, all of its lanes.
-  function asyncLanes() {
-    const n = Array.from({length:X.TRACKS.length}, () => []), px = (W - LEFT - RIGHT) / (win.d1 - win.d0);
-    if (!X.TRACKS.length) return n;
-    for (const line of M.lines) {
-      const [lo, end] = visible(line);
-      for (let j = lo; j < end; j++) {
-        const i = line.units[j];
-        if (detailed(i, px) && X.hasSpans(i)) {
-          const {flat:f,flow,names,asyncRows} = chartSpans(i);
-          for (const r of asyncRows) {
-            const fr=flow.root[r],track=X.trackIndex.get(names[f[fr*5]]),lane=f[fr*5+4]>>>10;
-            const a = line.d0[j] + f[r*5+2]/1000;
-            if (a <= win.d1 && a + f[r*5+3]/1000 >= win.d0) n[track][lane] = Math.max(n[track][lane] || 0, flow.depth[r] + 1);
-          }
-        } else {
-          const t = X.trackDepthsOf(i);
-          if (t) t.forEach((lanes, k) => lanes.forEach((depth, lane) => { n[k][lane] = Math.max(n[k][lane] || 0, depth); }));
-        }
-      }
-    }
-    return n;
-  }
-
   function layout() {
     const top = X.contentTop() + AXIS;
     let y = top + 6 - scrollY;
-    const px = (W-LEFT-RIGHT)/(win.d1-win.d0);
-    const lines = M.lines.flatMap((line) => {
-      let depth = ROWS;
-      const [lo,end] = visible(line);
-      if (lo === end) return [];
+    // Zoom changes only the horizontal scale. Lane positions and depths belong to the filtered recording.
+    const lines = M.lines.map((line) => {
+      const depth = line.depth;
       const heading = M.lines.length > 1 ? TRACK_HEAD : 0;
-      for (let j=lo;j<end;j++) if (detailed(line.units[j], px)) {
-        const sp=chartSpans(line.units[j]);
-        if (sp) depth=Math.max(depth,sp.maxDepth+1);
-      }
-      const l = {line, y0:y+heading, depth, heading}; y += heading+depth*ROWH+4; return [l];
+      const l = {line, y0:y+heading, depth, heading}; y += heading+depth*ROWH+4; return l;
     });
-    const depths = asyncLanes(), n = depths.map((lanes) => Array.from({length:lanes.length}, (_, k) => lanes[k] || 1).reduce((a, b) => a + b, 0));
+    const depths = M.trackDepths, n = depths.map((lanes) => Array.from({length:lanes.length}, (_, k) => lanes[k] || 1).reduce((a, b) => a + b, 0));
     const total = n.reduce((a, b) => a + b, 0);
     let lanes = null;
     if (total) {
@@ -451,7 +430,9 @@
             const tr = L.lanes?.tracks[track];
             if (tr) y = tr.y0 + (tr.offsets[lane] + sp.flow.depth[row]) * L.lanes.h;
           }
-          scrollY = clamp(scrollY + y - (L.top + 6 + l.heading), 0, Math.max(0, L.bottom - H));
+          if (!pendingFocus.reveal || y < L.top || y + ROWH > H) {
+            scrollY = clamp(scrollY + y - (L.top + 6 + l.heading), 0, Math.max(0, L.bottom - H));
+          }
         }
         pendingFocus = null;
         L = layout();
@@ -529,6 +510,8 @@
 
   function paintTime(L, X_, scale, T) {
     const xL = LEFT, xR = W - RIGHT;
+    ctx.fillStyle = T.grid;
+    for (const d of X.nav.unitBreaks(win.d0, win.d1, xR-xL)) ctx.fillRect(Math.round(X_(d)), L.top, 1, H-L.top);
     // Where one run ends and the next begins, a line from the axis down.
     ctx.fillStyle = T.line;
     for (const d of M.nav.breaks) {
@@ -552,7 +535,7 @@
         ctx.fillText(`Concurrent lane ${l.line.number}`, xL, l.y0 - 4);
         ctx.font = `500 11px ${X.SANS}`;
       }
-      paintLine(l, L.lanes, X_, scale, T, xL, xR);
+      if (L.lanes || (l.y0 <= H && l.y0 + l.depth * ROWH >= L.top)) paintLine(l, L.lanes, X_, scale, T, xL, xR);
     }
     paintFlows(T);
   }
@@ -876,16 +859,16 @@
     if (!b) return;
     if (b.heavy) { setWindow(b.heavy.x0 - (b.heavy.x1 - b.heavy.x0) * 0.03, b.heavy.x1 + (b.heavy.x1 - b.heavy.x0) * 0.03, true); return; }
     X.select(b.i, {keepWindow:true});
-    zoomToSpan(b.i, Math.max(0, b.r));
+    zoomToSpan(b.i, Math.max(0, b.r), true);
   }
-  function zoomToSpan(unit, row) {
+  function zoomToSpan(unit, row, reveal = false) {
     model();
     if (S.flame !== 'time' || !M.pos.has(unit)) return;
     const raw = X.rawSpans(unit);
     if (!raw || row < 0 || row >= raw.flat.length / 5) return;
     const a = M.nav.start[unit] + raw.flat[row * 5 + 2] / 1000, duration = raw.flat[row * 5 + 3] / 1000;
     spanHi = {unit, row};
-    X.nav.set(a - duration * .05, a + duration * 1.05, {animate:true, push:true, focus:{unit, row}});
+    X.nav.set(a - duration * .05, a + duration * 1.05, {animate:true, push:true, focus:{unit, row, reveal}});
   }
   function wheel(e, px) {
     const scale = e.deltaMode === 1 ? ROWH : e.deltaMode === 2 ? Math.max(1, H - X.contentTop() - AXIS) : 1;

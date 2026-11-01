@@ -400,6 +400,7 @@ def write_bundle(args, unit, records, failures, runs):
         'left': args.left.split(',') if args.left else [], 'right': args.right.split(',') if args.right else [],
         'with_text': bool(args.with_text),
         'sampled_cpu': all(r.get('sampled', False) for r in records),
+        'timeline': args.timeline,
         'names': dict(n.split('=', 1) for n in args.name),
         'async_tracks': tracks,
         'runs': run_rows,
@@ -494,6 +495,7 @@ def main():
     ap.add_argument('inputs', nargs='*', help='[NAME=]file, directory or glob')
     ap.add_argument('-o', '--output', default='violinoscope.html', help='HTML file (default: violinoscope.html), or a directory')
     ap.add_argument('--layout', help='Saved layout JSON to use as the report’s default')
+    ap.add_argument('--timeline', choices=['unit', 'wall'], default='wall', help='Initial timeline arrangement: concatenate units or retain wall clock timing (default: wall)')
     ap.add_argument('--split-data', action='store_true', help='Keep data in separate files (requires directory output)')
     ap.add_argument('--parent-relation-attr', default='parent.relation', help='Child attribute marking independent work with value spawn')
     ap.add_argument('--flow-attr', default='span.flow', help='Legacy attribute marking a separate flow with value async')

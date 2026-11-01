@@ -44,6 +44,10 @@
           <button type="button" data-tl="chart" aria-pressed="true" data-u title="Each {unit} span on one line, what it calls stacked below, asynchronous spans on a track per name">Flame chart</button>
           <button type="button" data-tl="waterfall" aria-pressed="false" title="A row per span, as in Jaeger">Waterfall</button>
         </div>
+        <div class="seg" id="timeline-order" role="group" aria-label="Time arrangement" data-for="timeline" hidden>
+          <button type="button" data-timeline="unit" title="Concatenate complete units in start order; preserve timing within each unit">By unit</button>
+          <button type="button" data-timeline="wall" title="Recorded timing, with concurrent units on separate lanes">Wall clock</button>
+        </div>
         <div class="seg" id="prof-modes" role="group" aria-label="Spans" data-for="profile" hidden>
           <button type="button" data-prof="table" aria-pressed="true" title="Every span name, or every call path, with its self and total time; pick one for its callers and callees">Table</button>
           <button type="button" data-prof="flame" aria-pressed="false" title="Spans with the same path merged, heaviest first">Flame graph</button>

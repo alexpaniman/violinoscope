@@ -316,6 +316,7 @@
       if (x > 0 && x < 100) { marks += `<s style="left:${pct(x)}"></s>`; lines += `<s style="left:${pct(x)}"></s>`; }
     }
     ticks.innerHTML = marks;
+    for (const d of X.nav.unitBreaks(w[0], w[1], tw)) lines += `<s style="left:${pct((d-w[0])/span*100)}"></s>`;
     gridEl.innerHTML = lines;
     // Only the rows on screen, and a few around them.
     const g = scrollGeometry();

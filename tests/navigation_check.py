@@ -84,20 +84,43 @@ async def main():
             # A control reflow between native clicks must not change the zoom target.
             await page.evaluate("document.querySelector('#controls').style.paddingBottom='20px';TX.render()")
             await page.wait_for_timeout(30)
+            expected_y = await page.evaluate("chartText.find(r=>r.text==='Concurrent lane 3').y+11")
             await page.mouse.down(click_count=2)
             await page.mouse.up(click_count=2)
             await page.wait_for_timeout(350)
             assert await page.evaluate('TX.S.sel')==target
             measured = await page.evaluate('''i=>{const [a,b]=TX.nav.win();return {width:b-a,center:(a+b)/2-TX.nav.model().start[i],labels:chartText.filter(r=>r.text.includes(TX.data.units[i].l))};}''',target)
             assert abs(measured['width']-110)<.001 and abs(measured['center']-50)<.001,measured
-            assert measured['labels'] and measured['labels'][0]['y']<250,measured
+            assert measured['labels'] and abs(measured['labels'][0]['y']-expected_y)<1,measured
             # Line-mode wheel events move vertically; they never zoom implicitly.
-            before = await page.evaluate("({window:TX.nav.win().slice(),label:chartText.find(r=>r.text==='Concurrent lane 4')})")
+            before = await page.evaluate("({window:TX.nav.win().slice(),label:chartText.find(r=>r.text==='Concurrent lane 3')})")
             await page.locator('#flame-canvas').dispatch_event('wheel',{'deltaY':3,'deltaMode':1,'bubbles':True,'cancelable':True})
             await page.wait_for_timeout(100)
             assert before['window']==await page.evaluate('TX.nav.win()')
-            after = await page.evaluate("chartText.find(r=>r.text==='Concurrent lane 4')")
+            after = await page.evaluate("chartText.find(r=>r.text==='Concurrent lane 3')")
             assert after is not None and abs(after['y']-before['label']['y']+45)<1,(before,after)
+            # Horizontal zoom never changes lane height or the vertical scroll position, even across detail thresholds.
+            y = after['y']
+            await page.evaluate('TX.nav.fitAll()')
+            for _ in range(8):
+                await page.wait_for_timeout(40)
+                assert abs(await page.evaluate("chartText.find(r=>r.text==='Concurrent lane 3').y")-y)<1
+            original = await page.evaluate('JSON.stringify(TX.data.units)')
+            await page.evaluate('TX.select(null,{keepWindow:true})')
+            await page.click('[data-timeline="unit"]')
+            await page.wait_for_timeout(100)
+            assert await page.evaluate("chartText.every(r=>!r.text.startsWith('Concurrent lane'))")
+            assert await page.evaluate("chartText.some(r=>r.text.includes('Concatenated unit time'))")
+            assert await page.evaluate('''()=>{const m=TX.nav.model();return m.units.every((i,k)=>!k||m.start[i]>=m.start[m.units[k-1]]+TX.data.units[m.units[k-1]].ms);}''')
+            assert original==await page.evaluate('JSON.stringify(TX.data.units)')
+            ticks = await page.evaluate('TX.elapsedTicks(TX.nav.model(),16945490,16945500,1500).map(t=>t.label)')
+            assert len(ticks)>5 and len(set(ticks))==len(ticks), ticks
+            await page.evaluate('(i)=>TX.flame.zoomToSpan(i,0)',target)
+            await page.wait_for_timeout(350)
+            assert await page.evaluate('chartText.some(r=>r.text.includes("unit-02"))')
+            await page.click('[data-timeline="wall"]')
+            await page.wait_for_timeout(100)
+            assert await page.evaluate("chartText.some(r=>r.text.startsWith('Concurrent lane'))")
             # A short chart also leaves plain wheel input as scrolling, without switching to zoom.
             await page.evaluate('TX.S.range=[999000,1001000];TX.render()')
             before = await page.evaluate('TX.nav.win().slice()')

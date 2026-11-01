@@ -101,6 +101,7 @@
     press('#modes button', (d) => d.mode === S.mode);
     press('#scales button', (d) => (d.linear === 'true') === S.linear);
     press('#tl-modes button', (d) => d.tl === S.tl);
+    press('#timeline-order button', (d) => d.timeline === S.timeline);
     press('#prof-modes button', (d) => d.prof === S.prof);
     for (const mode of ['callers', 'callees']) document.querySelector(`#prof-modes [data-prof="${mode}"]`).hidden = S.name === null && S.profileRoot === null;
     press('#table-modes button', (d) => (d.tree === 'true') === S.tableTree);
@@ -108,6 +109,7 @@
     curved.textContent = S.mode === 'share' ? 'Square root' : 'Log';
     curved.title = S.mode === 'share' ? 'Square root: spreads out the small shares, and still shows 0% (L)' : 'Logarithmic (L)';
     document.querySelectorAll('[data-for]').forEach((el) => { el.hidden = el.dataset.for !== S.tab || (!!el.dataset.forProf && el.dataset.forProf !== S.prof); });
+    if (X.meta.sampled_cpu) $('timeline-order').hidden = true;
   }
 
   // The span picked, wherever it was picked: shown in every tab, as a selected compilation is.
@@ -635,6 +637,7 @@
     document.querySelectorAll('#modes button').forEach((b) => b.addEventListener('click', () => { S.mode = b.dataset.mode; X.render(); }));
     document.querySelectorAll('#scales button').forEach((b) => b.addEventListener('click', () => { S.linear = b.dataset.linear === 'true'; X.render(); }));
     document.querySelectorAll('#tl-modes button').forEach((b) => b.addEventListener('click', () => X.go('timeline', b.dataset.tl)));
+    document.querySelectorAll('#timeline-order button').forEach(b => b.addEventListener('click', () => X.nav.arrange(b.dataset.timeline)));
     document.querySelectorAll('#prof-modes button').forEach((b) => b.addEventListener('click', () => X.go('profile', b.dataset.prof)));
     document.querySelectorAll('#table-modes button').forEach((b) => b.addEventListener('click', () => { S.tableTree = b.dataset.tree === 'true'; X.spans.invalidate(); X.render(); }));
     $('name-text').addEventListener('click', () => X.go('profile', 'callers'));

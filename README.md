@@ -16,7 +16,7 @@ Accepts **OpenTelemetry** OTLP/Collector JSON, Jaeger JSON, Chrome/Clang time tr
 
 ```sh
 # Clang time traces, one compilation per dot
-python3 violinoscope.py 'build/*.json' --unit ExecuteCompiler -o clang.html
+python3 violinoscope.py 'build/*.json' --unit ExecuteCompiler --timeline unit -o clang.html
 
 # Sampled CPU stacks (functions become span names)
 perf record -e cpu-clock:u -F 99 --call-graph dwarf -o cpu.data -- ./program
@@ -25,6 +25,8 @@ python3 violinoscope.py cpu.perf.txt -o cpu.html
 ```
 
 Start at the root and use **+** to explore. Drag siblings together to group them; move a span upward to extract its share. Projections give independent views. × deletes; hide keeps a node in the calculation. Ctrl+Z undoes edits; Ctrl+Shift+Z redoes them.
+
+The Timeline switches between **By unit** (complete units concatenated in start order) and **Wall clock** (recorded concurrency). Timing within each unit stays unchanged. Sampled CPU profiles always use CPU time.
 
 The layout icon manages named layouts and copies/pastes layout JSON. Shift-click its import/export buttons to use files, or supply `--layout overview.layout.json` when generating a report. The picture button copies the phases view; Shift-click downloads a PNG. Downloading the page preserves its current layout.
 

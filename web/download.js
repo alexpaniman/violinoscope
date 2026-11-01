@@ -21,12 +21,14 @@
   const inScript = (s) => s.replace(/<\/(script)/gi, '<\\/$1');
   async function build() {
     const doc = { saved: new Date().toISOString(), ...(X.layouts ? X.layouts.current() : {unit:X.UNIT,layout:X.layout.state()}) };
+    const summary = JSON.parse(X.summaryText);
+    summary.meta.timeline = X.S.timeline;
     const head = ['<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
       '<style>[hidden]{display:none!important}body{margin:0}</style>', `<title>${esc(document.title)}</title>`];
     for (const link of document.querySelectorAll('link[href^="https://fonts."]')) head.push(link.outerHTML);
     for (const style of document.querySelectorAll('style[data-v]')) head.push(`<style data-v>${style.textContent}</style>`);
     const parts = [head.join('\n'), '\n</head><body>\n', markup, '\n',
-      `<script>window.EXPLORER_SUMMARY=${inScript(X.summaryText)};</script>\n`,
+      `<script>window.EXPLORER_SUMMARY=${inScript(JSON.stringify(summary))};</script>\n`,
       `<script>window.EXPLORER_LAYOUT=${inScript(JSON.stringify(doc))};</script>\n`];
     for (let k = 0; k < X.chunkCount; k++) {
       const stream = new Blob([JSON.stringify(X.chunk(k))]).stream().pipeThrough(new CompressionStream('gzip'));

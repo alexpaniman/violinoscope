@@ -331,8 +331,12 @@
       + th('n', X.meta.sampled_cpu ? 'Segments' : 'Count', 'num', X.meta.sampled_cpu ? 'Reconstructed stack segments, not invocation counts' : tree ? 'Spans on this path' : 'Spans of this name')
       + (tree ? '' : `${th('callers', 'Callers', 'num', 'How many span names call it')}${th('callees', 'Callees', 'num', 'How many span names it calls')}`)
       + (one ? `${th('oneSelf', `${esc(u1.l)} self`, 'num mine')}${th('oneTotal', `${esc(u1.l)} total`, 'num mine')}` : '');
-    const cols = `<col>${compact?'':'<col style="width:180px">'}<col span="2" style="width:136px"><col span="${tree?1:3}" style="width:70px">${one?'<col span="2" style="width:136px">':''}`;
-    const table = `<table class="spans-table${compact ? ' compact' : ''}${tree ? ' tree' : ''}"><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody></tbody></table>`;
+    const timeWidth = Math.max(164, Math.ceil(X.textWidth(X.fmtUs(Math.max(maxSelf, maxTotal, maxOneSelf, maxOneTotal)), 12.5, 400)) + 108);
+    const countWidth = key => Math.max(84, X.fmtInt(rows.reduce((n,r) => Math.max(n,r[key] || 0),0)).length * 8 + 28);
+    const counts = (tree ? ['n'] : ['n','callers','callees']).map(countWidth);
+    const widths = [...(compact ? [] : [180]), timeWidth, timeWidth, ...counts, ...(one ? [timeWidth,timeWidth] : [])];
+    const cols = `<col>${widths.map(w => `<col style="width:${w}px">`).join('')}`;
+    const table = `<table class="spans-table${compact ? ' compact' : ''}${tree ? ' tree' : ''}" style="min-width:${220+widths.reduce((a,b)=>a+b,0)}px"><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody></tbody></table>`;
     const rowHtml = (r) => `<tr data-name="${esc(r.name)}"${tree ? ` data-path="${esc(r.path)}"` : ''}${S.name !== r.name ? (r.context ? ' class="context"' : '')
         : !tree || !S.namePath || S.namePath === r.path ? ' class="here"' : ' class="on"'}>`
         + `<td class="name">${tree ? `<div class="cell">${guide(r, T, !!q)}` : ''}${swatch(r)}<span class="nm"${r.part >= 0 ? ` title="${esc(data.columns[r.part].label)}"` : ''}>${esc(r.name)}</span>${glyphs(r)}${tree ? '</div>' : ''}</td>`

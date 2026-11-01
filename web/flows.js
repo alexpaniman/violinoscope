@@ -9,6 +9,7 @@
     const dependency = new Uint8Array(n), invalid = new Uint8Array(n), main = new Uint8Array(n);
     const lo = new Float64Array(n), hi = new Float64Array(n);
     const extent = [0, 0];
+    let mainDepth = 0;
     // Recognize dependency groups structurally: their explicit depends_on edges point to the child flows
     // they started. This identifies a group of dependencies, not the compiler's exact suspended interval.
     for (let q = 0; q < links.length; q += 3) {
@@ -23,12 +24,13 @@
       start[r] = Number(p >= 0 && !!(f[r * 5 + 4] & 1));
       root[r] = p < 0 || start[r] ? r : root[p];
       depth[r] = p < 0 || start[r] ? 0 : depth[p] + 1;
+      if (!root[r]) mainDepth = Math.max(mainDepth, depth[r]);
       dependency[r] = Number(!!start[r] && !!dependency[r] && !invalid[r]);
       main[r] = Number(p < 0 || (main[p] && (!start[r] || dependency[r])));
       lo[r] = main[r] && p >= 0 ? Math.max(a, lo[p]) : a;
       hi[r] = main[r] && p >= 0 ? Math.min(b, hi[p]) : b;
     }
-    const result = {root, depth, start, dependency, main, lo, hi, extent};
+    const result = {root, depth, start, dependency, main, lo, hi, extent, mainDepth};
     cache.set(tree, result); return result;
   };
 })();

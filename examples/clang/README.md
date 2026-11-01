@@ -16,7 +16,7 @@ python3 violinoscope.py \
   'Build=/tmp/clang-traces/Build/*/*.json' \
   'Unit tests=/tmp/clang-traces/Unit tests/*/*.json' \
   'Regression tests=/tmp/clang-traces/Regression tests/*/*.json' \
-  --unit ExecuteCompiler --left Build --right 'Unit tests' \
+  --unit ExecuteCompiler --timeline unit --left Build --right 'Unit tests' \
   --layout examples/clang/phases.layout.json --title 'Clang build and tests' -o clang.html
 ```
 
