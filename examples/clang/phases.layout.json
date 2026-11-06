@@ -49,14 +49,44 @@
             "rest": true,
             "children": [
               {
-                "span": "InlinerPass",
-                "name": "Inlining"
+                "span": "ModuleToPostOrderCGSCCPassAdaptor",
+                "name": "Call graph passes",
+                "open": true,
+                "children": [
+                  {
+                    "span": "InlinerPass",
+                    "name": "Inlining"
+                  },
+                  {
+                    "span": "PassManager<Function>",
+                    "name": "Function passes"
+                  }
+                ]
+              },
+              {
+                "span": "ModuleToFunctionPassAdaptor",
+                "name": "Module function passes"
               }
             ]
           },
           {
             "span": "CodeGenPasses",
-            "name": "Code generation"
+            "name": "Code generation",
+            "open": true,
+            "rest": true,
+            "children": [
+              {
+                "span": "OptFunction",
+                "name": "Function codegen",
+                "open": true,
+                "children": [
+                  {
+                    "span": "RunPass",
+                    "name": "Machine passes"
+                  }
+                ]
+              }
+            ]
           }
         ]
       }
@@ -69,29 +99,22 @@
       "open": true,
       "children": [
         {
-          "span": "InstantiateClass",
-          "name": "Classes"
+          "span": "ParseDeclarationOrFunctionDefinition",
+          "name": "Parsing"
         },
         {
-          "span": "InstantiateFunction",
-          "name": "Functions"
+          "span": "PerformPendingInstantiations",
+          "name": "Pending templates"
+        },
+        {
+          "span": "CodeGen Function",
+          "name": "IR generation"
         }
       ]
     },
     {
       "span": "Backend",
-      "name": "Full back end",
-      "open": true,
-      "children": [
-        {
-          "span": "Optimizer",
-          "name": "Optimization"
-        },
-        {
-          "span": "CodeGenPasses",
-          "name": "Code generation"
-        }
-      ]
+      "name": "Full back end"
     }
   ]
 }
